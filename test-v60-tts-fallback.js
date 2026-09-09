@@ -24,8 +24,8 @@ function mkEl() {
   }
 }
 
-// 可配置的 Audio mock：failPlay=true 时 play() 一律 reject；否则 5ms 后触发 playing 事件
-function makeSandbox({ failPlay, voices }) {
+// 可配置的 Audio mock：failPlay=true 时 play() 一律 reject；slowLoad=true 时只触发 loadstart 不触发 playing（模拟弱网慢加载）；否则 5ms 后触发 playing 事件
+function makeSandbox({ failPlay, voices, slowLoad }) {
   const elements = {}
   const getEl = id => elements[id] || (elements[id] = mkEl())
   let playCalls = 0, lastAudio = null, speakCalls = 0, cancelCalls = 0
@@ -43,6 +43,7 @@ function makeSandbox({ failPlay, voices }) {
     this.removeAttribute = () => {}
     this.play = () => {
       if (failPlay) return Promise.reject(new Error('mock net fail'))
+      if (slowLoad) { setTimeout(() => { (this._h.loadstart || []).forEach(f => f()) }, 10); return Promise.resolve() }
       setTimeout(() => { (this._h.playing || []).forEach(f => f()) }, 5)
       return Promise.resolve()
     }
@@ -155,6 +156,20 @@ async function main() {
     const p = sb._probe()
     assert('安卓 speakEnglish → 在线发音（play ×1，不走本地）', p.playCalls === 1 && p.speakCalls === 0, JSON.stringify(p))
   }
+
+  // ---------- 行为 E（v61）：弱网慢加载（有 loadstart 无 playing）→ 看门狗续等不误杀，最终仍降级 ----------
+  {
+    const sb = makeSandbox({ failPlay: false, voices: [{ lang: 'en-US', name: 'Samantha' }], slowLoad: true })
+    vm.runInContext('playListenOnline("slow net")', sb)
+    await sleep(500)
+    const p = sb._probe()
+    assert('慢加载源续等一轮看门狗后才切换（play ×3）', p.playCalls === 3, 'playCalls=' + p.playCalls)
+    assert('慢加载最终本地兜底（speak ×1）', p.speakCalls === 1, 'speakCalls=' + p.speakCalls)
+  }
+
+  // ---------- 源码级（v61）：音频解锁 + 进度续等 ----------
+  assert('含首次手势音频解锁 _armAudioUnlock', src.includes('_armAudioUnlock') && src.includes('touchstart'))
+  assert('看门狗有进度续等（progress 重置）', /if \(progress\) \{ progress = false/.test(src))
 
   console.log(n + ' assertions, ' + (testFailed ? 'FAILED' : 'ALL PASS'))
   process.exit(testFailed ? 1 : 0)

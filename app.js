@@ -93,7 +93,8 @@ function _speakLocal(text) {
     return true
   } catch (e) { return false }
 }
-// 在线发音（v60 重构）：多源自动降级——播放报错或 TTS_WATCH_MS 内没出声就切下一源；
+// 在线发音（v61 增强版）：多源自动降级——播放报错立即切下一源；看门狗每 TTS_WATCH_MS 检查一次，
+// 有加载进度（loadstart/progress/canplay 等）就续等一轮（弱网慢加载不误杀），完全无进度才切换；
 // 全部在线源失败时回退本地合成，仍不行才提示学员检查网络。每次尝试用全新 Audio 对象，
 // 避免复用出错/无声的旧元素（部分安卓 WebView 的已知问题）。
 function playListenOnline(text) {
@@ -119,21 +120,53 @@ function playListenOnline(text) {
       let a
       try { a = new Audio() } catch (e) { k++; tryNext(); return }
       a.src = src
+      try { a.volume = 1 } catch (e) { /* ignore */ }
       cur = a; _onlineAudio = a
-      let played = false
+      let played = false, progress = false
       const fail = () => { if (!played && !dead && k === myK) { k++; tryNext() } }
       if (a.addEventListener) {
-        try { a.addEventListener('error', fail); a.addEventListener('playing', () => { played = true; _ttsSrcIdx = order[myK] }) } catch (e) { /* ignore */ }
+        try {
+          a.addEventListener('error', fail)
+          a.addEventListener('playing', () => { played = true; _ttsSrcIdx = order[myK] })
+          // 弱网下只要还有加载进度就不算死（v61：修复 3s 看门狗误杀慢加载音频）
+          ;['loadstart', 'progress', 'canplay', 'loadedmetadata', 'loadeddata', 'canplaythrough'].forEach(ty => a.addEventListener(ty, () => { progress = true }))
+        } catch (e) { /* ignore */ }
       }
       try {
         const p = a.play()
         if (p && p.catch) p.catch(fail)
       } catch (e) { fail(); return }
-      setTimeout(() => { if (!played && !dead && k === myK) { k++; tryNext() } }, TTS_WATCH_MS)
+      const watch = () => {
+        if (played || dead || k !== myK) return
+        if (progress) { progress = false; setTimeout(watch, TTS_WATCH_MS); return }
+        k++; tryNext()
+      }
+      setTimeout(watch, TTS_WATCH_MS)
     }
     tryNext()
   } catch (e) { try { _speakLocal(String(text)) } catch (e2) { /* ignore */ } }
 }
+// v61：安卓 / 微信 X5 内核需要在首次用户手势里「解锁」音频通道，否则后续播放可能静音。
+// 首次 touchstart/click 时播放一段极短的静音 MP3 完成解锁（一次性）。
+function _armAudioUnlock() {
+  try {
+    if (!document.addEventListener) return
+    const SILENT_MP3 = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQxAADB8AhSkxLQ8XjbAL0iQtUKSQ0t/kxLRf2CgED/BAADH+2u6v7+/v6+vre5sUZB4uLei4iIh35QQEED/8UALP9EM1aJMggADBpHeDBCL/8S1/svf/v37+wMEAcUtOjJQsgEIkGLHGuT/+wYPZh72/73nwWEHDoJDiYej4ODg4ODg4OCAkVFRVVFRUZGRkZGRPT09PT09PT08PDw8PDw8PDwQEA8PDw8PDw8ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4P//w8ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg7/wAAA'
+    const arm = () => {
+      try {
+        if (window.__wbAudioUnlocked) return
+        window.__wbAudioUnlocked = true
+        const a = new Audio(SILENT_MP3)
+        a.volume = 0
+        const p = a.play()
+        if (p && p.catch) p.catch(() => {})
+      } catch (e) { /* ignore */ }
+    }
+    document.addEventListener('touchstart', arm, { once: true, passive: true })
+    document.addEventListener('click', arm, { once: true })
+  } catch (e) { /* ignore */ }
+}
+try { _armAudioUnlock() } catch (e) { /* ignore */ }
 // 朗读英文（listen 题）：本地英文语音可用则本地朗读，否则自动回退在线发音
 // v38：本地 speak() 后若 1.8s 内未触发 onstart（静音/无声的典型表现），自动改用在线发音兜底
 function speakEnglish(text) {
