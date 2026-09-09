@@ -57,10 +57,19 @@ function listenVoiceMode() {
   }
   return vs.some(v => /^en([-_]|$)/i.test(v.lang || '')) ? 'local' : 'online'
 }
-// 在线 TTS 源列表（v60：有道英国音/美国音 + 百度翻译三路，自动降级）
+// v63：FNV-1a 32 位哈希（与 gen-tts.js 生成脚本严格一致），用于同源静态音频文件名
+function _ttsKey(s) {
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0 }
+  return h.toString(16) + '-' + s.length
+}
+// 在线 TTS 源列表（v63：首位为同源静态音频包 tts/<key>.mp3——由 gen-tts.js 预生成，
+// 不依赖任何第三方域名，学员网络再怎么拦也能响；其后为有道英国音/美国音 + 百度翻译在线兜底，
+// 覆盖题库外文本（如上传作业的新题）与音频包未命中的情况）
 function _ttsSources(text) {
   const q = encodeURIComponent(text)
   return [
+    'tts/' + _ttsKey(text) + '.mp3',
     'https://dict.youdao.com/dictvoice?audio=' + q + '&type=1',
     'https://dict.youdao.com/dictvoice?audio=' + q + '&type=2',
     'https://fanyi.baidu.com/gettts?lan=en&text=' + q + '&spd=3&source=web'

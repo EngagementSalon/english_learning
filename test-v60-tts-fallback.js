@@ -108,6 +108,9 @@ function makeSandbox({ failPlay, voices, slowLoad }) {
 async function main() {
   // ---------- 源码级断言 ----------
   const src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8')
+  assert('同源音频包为第一优先源', src.includes("'tts/' + _ttsKey(text) + '.mp3'") && src.indexOf("tts/' + _ttsKey") < src.indexOf('dict.youdao.com'))
+  assert('含 _ttsKey 哈希函数（FNV-1a + Math.imul）', src.includes('function _ttsKey') && src.includes('Math.imul'))
+  assert('tts 音频包目录存在且非空', require('fs').existsSync(path.join(__dirname, 'tts')) && require('fs').readdirSync(path.join(__dirname, 'tts')).filter(f => f.endsWith('.mp3')).length >= 60)
   assert('在线源含有道英国音 type=1', src.includes("dictvoice?audio=' + q + '&type=1"))
   assert('在线源含有道美国音 type=2', src.includes("dictvoice?audio=' + q + '&type=2"))
   assert('在线源含百度翻译 gettts 兜底', src.includes('fanyi.baidu.com/gettts'))
@@ -127,7 +130,7 @@ async function main() {
     vm.runInContext('playListenOnline("front desk")', sb)
     await sleep(150)
     const p = sb._probe()
-    assert('三路在线源均尝试（play ×3）', p.playCalls === 3, 'playCalls=' + p.playCalls)
+    assert('四路源均尝试（同源包+三在线，play ×4）', p.playCalls === 4, 'playCalls=' + p.playCalls)
     assert('在线全败后本地合成兜底（speak ×1）', p.speakCalls === 1, 'speakCalls=' + p.speakCalls)
   }
 
@@ -181,7 +184,7 @@ async function main() {
     vm.runInContext('playListenOnline("slow net")', sb)
     await sleep(500)
     const p = sb._probe()
-    assert('慢加载源续等一轮看门狗后才切换（play ×3）', p.playCalls === 3, 'playCalls=' + p.playCalls)
+    assert('慢加载源续等一轮看门狗后才切换（play ×4）', p.playCalls === 4, 'playCalls=' + p.playCalls)
     assert('慢加载最终本地兜底（speak ×1）', p.speakCalls === 1, 'speakCalls=' + p.speakCalls)
   }
 

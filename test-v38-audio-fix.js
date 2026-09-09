@@ -94,7 +94,7 @@ function makeAudioSandbox({ ua, voices, utterOnstart }) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8'), a4b.sb)
     vm.runInContext('speakEnglish("reservation")', a4b.sb)
     await new Promise(r => setTimeout(r, 50))
-    assert('安卓 speakEnglish（无英文语音）→ 在线 TTS', a4b.onlinePlays.length === 1 && a4b.onlinePlays[0].includes('dict.youdao.com'), JSON.stringify(a4b.onlinePlays))
+    assert('安卓 speakEnglish（无英文语音）→ 走发音回退链', a4b.onlinePlays.length === 1 && /^tts\//.test(a4b.onlinePlays[0]), JSON.stringify(a4b.onlinePlays))
     // A5: 桌面 speak 正常触发 onstart → 不回退在线
     const a5 = makeAudioSandbox({ ua: 'Mozilla/5.0 (Windows NT 10.0) Chrome/120.0', voices: [{ lang: 'en-US' }], utterOnstart: true })
     vm.runInContext(fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8'), a5.sb)
@@ -109,7 +109,7 @@ function makeAudioSandbox({ ua, voices, utterOnstart }) {
     vm.runInContext('speakEnglish("reservation")', a6.sb)
     assert('静音后未立即回退（等待期）', a6.onlinePlays.length === 0, JSON.stringify(a6.onlinePlays))
     await new Promise(r => setTimeout(r, 2000))
-    assert('1.8s 无 onstart → 自动回退在线发音', a6.onlinePlays.length === 1 && a6.onlinePlays[0].includes('dict.youdao.com'), JSON.stringify(a6.onlinePlays))
+    assert('1.8s 无 onstart → 自动回退发音链', a6.onlinePlays.length === 1 && /^tts\//.test(a6.onlinePlays[0]), JSON.stringify(a6.onlinePlays))
   }
 
   console.log('\n🧪 C. _fixVoicematchScores 分数修正')

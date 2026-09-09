@@ -216,13 +216,13 @@ function makeCloudSandbox(serverDocRef) {
   // 场景 E：无 speechSynthesis → 自动回退在线发音（有道 TTS mp3）
   vm.runInContext('window.speechSynthesis = undefined; speakEnglish("front desk")', sb)
   p = probe()
-  assert('无系统语音 → 自动走在线发音', !!p.lastAudio && /dict\.youdao\.com\/dictvoice/.test(p.lastAudio.src) && decodeURIComponent(p.lastAudio.src).includes('front desk'), p.lastAudio && p.lastAudio.src)
+  assert('无系统语音 → 自动走发音回退链（同源包/在线）', !!p.lastAudio && /^(tts\/|.*dictvoice)/.test(p.lastAudio.src), p.lastAudio && p.lastAudio.src)
 
   // 场景 F：仅中文语音 → speakEnglish 也回退在线（防小米无声）
   const sb2 = makeAppSandbox()
   vm.runInContext(`_setVoices([{lang:'zh-CN',name:'Ting-Ting'}]); speakEnglish('buffet')`, sb2)
   const p2 = vm.runInContext('_probe()', sb2)
-  assert('仅中文语音 → speakEnglish 回退在线发音', !!p2.lastAudio && p2.lastAudio.src.includes('buffet'), p2.lastAudio && p2.lastAudio.src)
+  assert('仅中文语音 → speakEnglish 回退发音链', !!p2.lastAudio && /^(tts\/|.*dictvoice)/.test(p2.lastAudio.src), p2.lastAudio && p2.lastAudio.src)
 
   // 场景 G：题干渲染含 🔊 本地 + 🌐 在线双按钮
   const titleHtml = vm.runInContext('quizTitleHtml({ type: "listen", question: "reservation" })', sb2)
