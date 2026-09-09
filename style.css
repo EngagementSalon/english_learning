@@ -1059,3 +1059,7 @@ tr.row-draft td { background:#fefce8; }
 .cp-tip.ok { color:#065f46; font-weight:600; }
 .course-off-members .course-off-member { display:inline-flex; align-items:center; gap:6px; border:1px solid #e5e7eb; border-radius:999px; padding:6px 12px; font-size:13px; cursor:pointer; background:#fff; }
 .course-off-members .course-off-member:has(input:checked) { border-color:var(--primary); background:var(--brand-soft); }
+
+/* v60：在线 TTS 全源失败提示 */
+.tts-toast { position: fixed; left: 50%; bottom: 18%; transform: translateX(-50%); background: rgba(17,24,39,.88); color: #fff; padding: 9px 16px; border-radius: 10px; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 9999; max-width: 80vw; text-align: center; }
+.tts-toast.show { opacity: 1; }

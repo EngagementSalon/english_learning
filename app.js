@@ -27,6 +27,8 @@ function shuffleOptions(q) {
 // 故提供「在线发音」（有道词典 TTS mp3，国内网络可用）兜底：系统不可用时自动回退，也可手动点击。
 let _listenVoices = null
 let _onlineAudio = null
+let _ttsSrcIdx = -1          // v60：上次成功播放的在线源下标（优先复用已验证可用的源）
+var TTS_WATCH_MS = 3000     // v60：每个在线源等待出声的看门狗时长（超时视为无声，切换下一源；var 便于测试注入）
 // 安卓 Chrome/WebView 的 speechSynthesis 普遍存在「列出英文语音但 speak() 静音无声」的已知缺陷
 // （需要系统 TTS 服务配合，各家 ROM 行为不一），v38 起安卓一律直接走在线发音，绕开本地合成
 function _isAndroid() {
@@ -55,26 +57,82 @@ function listenVoiceMode() {
   }
   return vs.some(v => /^en([-_]|$)/i.test(v.lang || '')) ? 'local' : 'online'
 }
-// 在线发音（有道词典 TTS 兜底；text 截断防止请求超长）
+// 在线 TTS 源列表（v60：有道英国音/美国音 + 百度翻译三路，自动降级）
+function _ttsSources(text) {
+  const q = encodeURIComponent(text)
+  return [
+    'https://dict.youdao.com/dictvoice?audio=' + q + '&type=1',
+    'https://dict.youdao.com/dictvoice?audio=' + q + '&type=2',
+    'https://fanyi.baidu.com/gettts?lan=en&text=' + q + '&spd=3&source=web'
+  ]
+}
+// 播放失败提示（v60：全部在线源失败且本地合成也不可用时告知学员）
+function _ttsToast(msg) {
+  try {
+    let el = document.getElementById('ttsToast')
+    if (!el) { el = document.createElement('div'); el.id = 'ttsToast'; document.body.appendChild(el) }
+    el.textContent = msg
+    el.className = 'tts-toast show'
+    clearTimeout(el.__t)
+    el.__t = setTimeout(() => { el.className = 'tts-toast' }, 2500)
+  } catch (e) { /* ignore */ }
+}
+// 本地合成（v60：最终兜底，安卓也强制尝试一次——比完全无声好；返回 true=已提交朗读）
+function _speakLocal(text) {
+  try {
+    if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return false
+    _refreshListenVoices()
+    const en = (_listenVoices || []).filter(v => /^en([-_]|$)/i.test(v.lang || ''))
+    if (!en.length) return false
+    const u = new SpeechSynthesisUtterance(text)
+    u.lang = 'en-US'
+    u.rate = 0.9
+    u.voice = en[0]
+    window.speechSynthesis.cancel()
+    window.speechSynthesis.speak(u)
+    return true
+  } catch (e) { return false }
+}
+// 在线发音（v60 重构）：多源自动降级——播放报错或 TTS_WATCH_MS 内没出声就切下一源；
+// 全部在线源失败时回退本地合成，仍不行才提示学员检查网络。每次尝试用全新 Audio 对象，
+// 避免复用出错/无声的旧元素（部分安卓 WebView 的已知问题）。
 function playListenOnline(text) {
   if (!text) return
   try {
-    const t = String(text).trim().slice(0, 260)
-    if (!t) return
-    const src = 'https://dict.youdao.com/dictvoice?audio=' + encodeURIComponent(t) + '&type=1'
-    const a = _onlineAudio && !_onlineAudio.ended ? _onlineAudio : (_onlineAudio = new Audio())
-    a.src = src
-    const p = a.play()
-    if (p && p.catch) p.catch(() => {
-      // 首次播放失败（个别安卓 WebView 需全新 Audio 对象）：重建后重试一次
+    const txt = String(text).trim().slice(0, 260)
+    if (!txt) return
+    const srcs = _ttsSources(txt)
+    const order = []
+    if (_ttsSrcIdx >= 0 && _ttsSrcIdx < srcs.length) order.push(_ttsSrcIdx)
+    for (let i = 0; i < srcs.length; i++) if (order.indexOf(i) < 0) order.push(i)
+    let k = 0, cur = null, dead = false
+    const tryNext = () => {
+      if (dead) return
+      if (cur) { try { cur.pause(); cur.removeAttribute && cur.removeAttribute('src') } catch (e) {} cur = null }
+      if (k >= order.length) {
+        dead = true
+        if (!_speakLocal(txt)) _ttsToast(t('ttsFail'))
+        return
+      }
+      const myK = k
+      const src = srcs[order[k]]
+      let a
+      try { a = new Audio() } catch (e) { k++; tryNext(); return }
+      a.src = src
+      cur = a; _onlineAudio = a
+      let played = false
+      const fail = () => { if (!played && !dead && k === myK) { k++; tryNext() } }
+      if (a.addEventListener) {
+        try { a.addEventListener('error', fail); a.addEventListener('playing', () => { played = true; _ttsSrcIdx = order[myK] }) } catch (e) { /* ignore */ }
+      }
       try {
-        const a2 = new Audio(src)
-        _onlineAudio = a2
-        const p2 = a2.play()
-        if (p2 && p2.catch) p2.catch(() => {})
-      } catch (e) { /* ignore */ }
-    })
-  } catch (e) { /* ignore */ }
+        const p = a.play()
+        if (p && p.catch) p.catch(fail)
+      } catch (e) { fail(); return }
+      setTimeout(() => { if (!played && !dead && k === myK) { k++; tryNext() } }, TTS_WATCH_MS)
+    }
+    tryNext()
+  } catch (e) { try { _speakLocal(String(text)) } catch (e2) { /* ignore */ } }
 }
 // 朗读英文（listen 题）：本地英文语音可用则本地朗读，否则自动回退在线发音
 // v38：本地 speak() 后若 1.8s 内未触发 onstart（静音/无声的典型表现），自动改用在线发音兜底

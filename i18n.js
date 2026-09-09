@@ -356,7 +356,7 @@ const I18N = {
     correctFeedback: '✅ 回答正确！', wrongFeedback: '❌ 回答错误',
     noExplanation: '暂无解析', correctAnswer: '正确答案',
     // 听音选义
-    listenPlay: '点击朗读', listenOnline: '在线发音', listenHint: '听录音，选择正确的中文释义（🔊 无声时点 🌐 在线发音）', listenQuestionPh: '英文单词/短语（将朗读给学生听，不显示原文）',
+    listenPlay: '点击朗读', listenOnline: '在线发音', listenHint: '听录音，选择正确的中文释义（🔊 无声时点 🌐 在线发音）', listenQuestionPh: '英文单词/短语（将朗读给学生听，不显示原文）', ttsFail: '发音加载失败，请检查网络后重试',
     // 看字选音（题干文字→选对应读音）
     vmPlay: '🔊 播放', vmOnline: '🌐', vmHint: '题干为英文文字。点各选项 🔊 听发音，选出与题干朗读一致的那一项（🔊 无声可点 🌐）', vmQuestionPh: '英文题干文字（将显示给学生看，选项为语音）', vmEditorHint: '选项填写英文（将自动合成语音、作答时不显示文字）；其中一项的读音应为题干，请把该项设为正确答案。',
     // 考试防作弊
@@ -939,7 +939,7 @@ const I18N = {
     correctFeedback: '✅ Correct!', wrongFeedback: '❌ Wrong',
     noExplanation: 'No explanation', correctAnswer: 'Correct answer',
     // Listen & choose
-    listenPlay: 'Play audio', listenOnline: 'Online audio', listenHint: 'Listen and choose the correct Chinese meaning (if 🔊 is silent, tap 🌐 for online audio)', listenQuestionPh: 'English word/phrase (will be read aloud; not shown to students)',
+    listenPlay: 'Play audio', listenOnline: 'Online audio', listenHint: 'Listen and choose the correct Chinese meaning (if 🔊 is silent, tap 🌐 for online audio)', listenQuestionPh: 'English word/phrase (will be read aloud; not shown to students)', ttsFail: 'Audio failed to load. Check your network and retry.',
     // Voice match (text stem → pick the matching pronunciation)
     vmPlay: '🔊 Play', vmOnline: '🌐', vmHint: 'Read the English text, then tap each 🔊 option to hear it and pick the one pronounced like the stem (tap 🌐 if silent)', vmQuestionPh: 'English stem text (shown to students; options are audio only)', vmEditorHint: 'Fill English options (spoken aloud; text hidden while answering). One option should pronounce the stem — set it as the correct answer.',
     // Exam anti-cheat
