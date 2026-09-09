@@ -27,7 +27,30 @@ all.forEach(q => {
   }
 })
 const texts = [...uniq]
-console.log('唯一发音文本:', texts.length)
+console.log('种子题库唯一发音文本:', texts.length)
+
+// 2b. 附加来源：node gen-tts.js 题目导入模板.csv [...]（v55 上传模板格式；UTF-8/GBK 自动识别）
+//     听音类（listen/听音选义、voicematch/看字选音、pronounce/跟读）的题干+选项也纳入音频包
+function decodeSmart(buf) {
+  const s = buf.toString('utf-8')
+  return s.includes('\uFFFD') ? new TextDecoder('gbk').decode(buf) : s
+}
+for (const arg of process.argv.slice(2)) {
+  if (!fs.existsSync(arg)) { console.error('跳过不存在的文件:', arg); continue }
+  const rows = decodeSmart(fs.readFileSync(arg)).split(/\r?\n/).map(l => l.split(',').map(c => c.trim()))
+  let add = 0
+  rows.forEach((cols, i) => {
+    if (i === 0 && /题型|type/i.test(cols[0] || '')) return
+    const ty = (cols[0] || '').toLowerCase()
+    const isAudio = /^(listen|voicematch|pronounce|听音|看字|跟读)/.test(ty) || /听音|看字选音|跟读/.test(cols[0] || '')
+    if (!isAudio) return
+    const q = cols[1]; if (q) { texts.push(q); add++ }
+    for (let j = 2; j <= 7; j++) { const o = cols[j]; if (o && o !== '-' && o !== '正确答案') { texts.push(o); add++ } }
+  })
+  console.log('附加', arg, '→ 新增文本', add)
+}
+const finalTexts = [...new Set(texts.map(t => t.trim()).filter(Boolean))]
+console.log('合计唯一发音文本:', finalTexts.length)
 
 // 2. 逐个下载（有道英国音；并发 4，失败重试 1 次）
 const OUT = path.join(__dirname, 'tts')
