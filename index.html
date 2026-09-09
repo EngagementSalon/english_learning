@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>英语刷题平台</title>
+  <link rel="stylesheet" href="style.css?v=59">
+</head>
+<body>
+  <!-- 登录/注册界面 -->
+  <div id="authScreen" class="auth-screen" style="display:none">
+    <button id="langToggle" class="lang-toggle-btn" onclick="toggleLang()" title="Switch to English">EN</button>
+    <div class="auth-card">
+      <div class="auth-logo">📚</div>
+      <h1 class="auth-title" id="authTitle">英语刷题平台</h1>
+      <p class="auth-subtitle" id="authSubtitle">多题型练习 · 模拟考试 · 培训测试</p>
+
+      <!-- 登录表单 -->
+      <div id="loginForm">
+        <div class="form-group">
+          <label id="lblLoginUsername">用户名</label>
+          <input type="text" id="loginUsername" placeholder="请输入用户名" autocomplete="username" />
+        </div>
+        <div class="form-group">
+          <label id="lblLoginPassword">密码</label>
+          <input type="password" id="loginPassword" placeholder="请输入密码" autocomplete="current-password" />
+        </div>
+        <p id="loginError" class="auth-error" style="display:none"></p>
+        <button class="btn btn-primary btn-block" id="btnLogin" onclick="doLogin()">登 录</button>
+        <p class="auth-switch"><span id="loginNoAccount">还没有账号？</span><a id="loginRegisterLink" onclick="showRegisterForm()">学员注册</a></p>
+      </div>
+
+      <!-- 注册表单（仅学员） -->
+      <div id="registerForm" style="display:none">
+        <div class="form-group">
+          <label id="lblRegUsername">用户名 *</label>
+          <input type="text" id="regUsername" placeholder="设置登录用户名" autocomplete="username" />
+        </div>
+        <div class="form-group">
+          <label id="lblRegPassword">密码 *</label>
+          <input type="password" id="regPassword" placeholder="设置密码（至少 4 位）" autocomplete="new-password" />
+        </div>
+        <div class="form-group">
+          <label id="lblRegName">姓名 *</label>
+          <input type="text" id="regName" placeholder="你的真实姓名" />
+        </div>
+        <div class="form-group">
+          <label id="lblRegDeptMajor">大部门 *</label>
+          <select id="regDeptMajor"></select>
+        </div>
+        <div class="form-group">
+          <label id="lblRegDeptSub">分部门 *</label>
+          <select id="regDeptSub" style="display:none"></select>
+          <input type="text" id="regDeptOther" placeholder="请填写具体部门名称" style="display:none" />
+        </div>
+        <p id="registerError" class="auth-error" style="display:none"></p>
+        <button class="btn btn-primary btn-block" id="btnRegister" onclick="doRegister()">注 册</button>
+        <p class="auth-switch"><span id="regHasAccount">已有账号？</span><a id="regBackLink" onclick="showLoginForm()">返回登录</a></p>
+      </div>
+
+      <p class="auth-hint" id="authHint">管理员账号由系统预置或由管理员创建</p>
+    </div>
+  </div>
+
+  <div id="app">
+    <!-- 顶部导航 -->
+    <nav class="topbar">
+      <div class="topbar-brand" onclick="navigate('home')">
+        <span class="logo">📚</span>
+        <span class="brand-text" id="brandText">英语刷题平台</span>
+      </div>
+      <button class="nav-toggle" id="navToggle" onclick="toggleMobileNav()" aria-label="菜单">☰</button>
+      <div class="topbar-nav">
+        <a class="nav-item" data-page="home" id="navHome" onclick="navigate('home')">首页</a>
+        <a class="nav-item" data-page="placement" id="navPlacement" onclick="navigate('placement')">🎯 水平测试</a>
+        <a class="nav-item" data-page="practice" id="navPractice" onclick="navigate('practice')">练习</a>
+        <a class="nav-item" data-page="exam" id="navExam" onclick="navigate('exam')">考试</a>
+        <a class="nav-item" data-page="progress" id="navProgress" onclick="navigate('progress')">进度</a>
+        <a class="nav-item" data-page="course" id="navCourse" onclick="navigate('course')">📖 线下课</a>
+        <a class="nav-item nav-item-admin admin-only" data-page="admin" id="navAdmin" onclick="navigate('admin')">题库管理</a>
+        <a class="nav-item nav-item-admin admin-only" data-page="users" id="navUsers" onclick="navigate('users')">👥 账号管理</a>
+        <a class="nav-item nav-item-admin admin-only" data-page="dashboard" id="navDashboard" onclick="navigate('dashboard')">📊 数据看板</a>
+      </div>
+      <div class="topbar-user" onclick="openProfileSetup()">
+        <span id="userRoleBadge" class="role-badge">学员</span>
+        <span id="userLevelBadge" class="level-badge" style="display:none"></span>
+        <span id="userInfoDisplay">未设置</span>
+        <span class="user-avatar">👤</span>
+      </div>
+      <span id="cloudStatus" class="cloud-status" style="display:none"></span>
+      <button id="langToggleTop" class="lang-toggle-btn lang-toggle-top" onclick="toggleLang()" title="Switch to English">EN</button>
+      <a class="logout-btn" id="navLogout" onclick="doLogout()" title="退出登录">退出</a>
+    </nav>
+
+    <!-- 页面容器 -->
+    <div id="page-home" class="page"></div>
+    <div id="page-placement" class="page" style="display:none"></div>
+    <div id="page-practice" class="page" style="display:none"></div>
+    <div id="page-exam" class="page" style="display:none"></div>
+    <div id="page-progress" class="page" style="display:none"></div>
+    <div id="page-course" class="page" style="display:none"></div>
+    <div id="page-admin" class="page" style="display:none"></div>
+    <div id="page-users" class="page" style="display:none"></div>
+    <div id="page-dashboard" class="page" style="display:none"></div>
+  </div>
+
+  <!-- 弹窗：个人信息设置 -->
+  <div id="profileModal" class="modal-overlay" style="display:none">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="profileModalTitle">设置个人信息</h3>
+        <span class="modal-close" onclick="closeProfileSetup()">✕</span>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label id="lblProfileUsername">登录用户名</label>
+          <input type="text" id="profileUsername" placeholder="登录所用账号" />
+          <p class="form-hint" style="margin-top:4px" id="profileUsernameHint">修改后将同步云端、班级与成绩记录；下次登录请使用新用户名。</p>
+        </div>
+        <div class="form-group">
+          <label id="lblProfileName">姓名 *</label>
+          <input type="text" id="profileName" placeholder="请输入你的姓名" />
+        </div>
+        <div class="form-group">
+          <label id="lblProfileDeptMajor">大部门</label>
+          <select id="profileDeptMajor"></select>
+        </div>
+        <div class="form-group">
+          <label id="lblProfileDeptSub">分部门</label>
+          <select id="profileDeptSub" style="display:none"></select>
+          <input type="text" id="profileDeptOther" placeholder="请填写具体部门名称" style="display:none" />
+        </div>
+        <p class="form-hint" id="profileHint">个人信息仅保存在本地，用于进度追踪。</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="btnSaveProfile" onclick="saveProfile()">保存</button>
+        <button class="btn btn-ghost" id="btnCancelProfile" onclick="closeProfileSetup()">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="training-questions.js?v=59"></script>
+  <script src="bank-data.js?v=59"></script>
+  <script src="cloud-store.js?v=59"></script>
+  <script src="store.js?v=59"></script>
+  <script src="i18n.js?v=59"></script>
+  <script src="qgen.js?v=59"></script>
+  <script src="course-store.js?v=59"></script>
+  <script src="anti-cheat.js?v=59"></script>
+  <script src="course-app.js?v=59"></script>
+  <script src="app.js?v=59"></script>
+</body>
+</html>
