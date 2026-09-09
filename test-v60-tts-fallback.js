@@ -112,8 +112,10 @@ async function main() {
   assert('在线源含有道美国音 type=2', src.includes("dictvoice?audio=' + q + '&type=2"))
   assert('在线源含百度翻译 gettts 兜底', src.includes('fanyi.baidu.com/gettts'))
   assert('有无声看门狗（超时切换下一源）', src.includes('TTS_WATCH_MS') && src.includes('tryNext'))
-  assert('全部在线源失败回退本地合成 _speakLocal', src.includes('if (!_speakLocal(txt)) _ttsToast'))
+  assert('全部在线源失败回退本地合成 _speakLocal', src.includes('if (!_speakLocal(txt, true)) _ttsToast'))
+  assert('题干含 🔉 系统语音按钮', src.includes('speakLocalForce(this.dataset.w)'))
   const i18nSrc = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8')
+  assert('i18n 含 listenLocal/ttsNone 词条', i18nSrc.includes("listenLocal: '系统语音（🔊 无声时备用）'") && i18nSrc.includes("ttsNone: '本设备没有可用的语音引擎'"))
   assert('i18n 含 ttsFail 中文词条', i18nSrc.includes("ttsFail: '发音加载失败，请检查网络后重试'"))
   assert('i18n 含 ttsFail 英文词条', i18nSrc.includes("ttsFail: 'Audio failed to load. Check your network and retry.'"))
   const cssSrc = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf-8')
@@ -129,13 +131,22 @@ async function main() {
     assert('在线全败后本地合成兜底（speak ×1）', p.speakCalls === 1, 'speakCalls=' + p.speakCalls)
   }
 
-  // ---------- 行为 B：在线全败且无英文语音 → 显示失败提示 toast ----------
+  // ---------- 行为 B（v62）：在线全败 → force 本地合成兜底（无英文语音也用默认语音试）；
+  // 彻底没有 speechSynthesis 才弹失败提示 ----------
   {
     const sb = makeSandbox({ failPlay: true, voices: [] })
     vm.runInContext('playListenOnline("front desk")', sb)
     await sleep(150)
+    const p = sb._probe()
+    assert('在线全败 → force 本地兜底（speak ×1，不弹提示）', p.speakCalls === 1, 'speakCalls=' + p.speakCalls + ' className=' + sb._getEl('ttsToast').className)
+  }
+  {
+    const sb = makeSandbox({ failPlay: true, voices: [] })
+    vm.runInContext('window.speechSynthesis = undefined; speechSynthesis && (speechSynthesis = undefined)', sb)
+    vm.runInContext('playListenOnline("front desk")', sb)
+    await sleep(150)
     const el = sb._getEl('ttsToast')
-    assert('全败且本地不可用 → 弹出失败提示', /show/.test(el.className) && /发音|network/i.test(el.textContent), 'className=' + el.className + ' text=' + el.textContent)
+    assert('无任何语音引擎 → 弹出失败提示', /show/.test(el.className) && /发音|network/i.test(el.textContent), 'className=' + el.className + ' text=' + el.textContent)
   }
 
   // ---------- 行为 C：首源正常出声 → 不再切换、不触发本地兜底 ----------
@@ -148,13 +159,20 @@ async function main() {
     assert('首源成功不触发本地合成（speak ×0）', p.speakCalls === 0, 'speakCalls=' + p.speakCalls)
   }
 
-  // ---------- 行为 D：安卓端 speakEnglish 直接走在线链路 ----------
+  // ---------- 行为 D（v62）：安卓 speakEnglish 本地优先，无英文语音才在线 ----------
   {
     const sb = makeSandbox({ failPlay: false, voices: [{ lang: 'en-US', name: 'Samantha' }] })
     vm.runInContext('speakEnglish("lobby")', sb)
     await sleep(150)
     const p = sb._probe()
-    assert('安卓 speakEnglish → 在线发音（play ×1，不走本地）', p.playCalls === 1 && p.speakCalls === 0, JSON.stringify(p))
+    assert('安卓 speakEnglish（有英文语音）→ 本地优先', p.playCalls === 0 && p.speakCalls === 1, JSON.stringify(p))
+  }
+  {
+    const sb = makeSandbox({ failPlay: false, voices: [] })
+    vm.runInContext('speakEnglish("lobby")', sb)
+    await sleep(150)
+    const p = sb._probe()
+    assert('安卓 speakEnglish（无英文语音）→ 在线发音', p.playCalls === 1 && p.speakCalls === 0, JSON.stringify(p))
   }
 
   // ---------- 行为 E（v61）：弱网慢加载（有 loadstart 无 playing）→ 看门狗续等不误杀，最终仍降级 ----------

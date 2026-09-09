@@ -172,7 +172,7 @@ function vmSeeds() {
   const sbA = makeSandbox({ doc: {} })
   const liveHtml = vm.runInContext(`vmOptionsHtml(${JSON.stringify(VMQ)}, -1, 'live', 'selectOption')`, sbA)
   assert('live：无 vm-opt-text（不显示选项文字）', !liveHtml.includes('vm-opt-text'), liveHtml.slice(0, 300))
-  assert('live：每个选项有 🔊 与 🌐 播放按钮', (liveHtml.match(/vm-play/g) || []).length === 3 && (liveHtml.match(/vm-online/g) || []).length === 3, '')
+  assert('live：每个选项有 🔊 与 🔉/🌐 播放按钮', (liveHtml.match(/vm-play/g) || []).length === 3 && (liveHtml.match(/vm-online/g) || []).length === 6 && liveHtml.includes('speakLocalForce'), '')
   assert('live：有作答提示 vm-hint', liveHtml.includes('vm-hint') && liveHtml.includes('题干为英文文字'), '')
   assert('live：选项行可点（selectOption）', liveHtml.includes('onclick="selectOption(0)"') && liveHtml.includes('onclick="selectOption(2)"'), '')
   const liveSel = vm.runInContext(`vmOptionsHtml(${JSON.stringify(VMQ)}, 2, 'live', 'selectOption')`, sbA)

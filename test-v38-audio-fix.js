@@ -24,6 +24,7 @@ function makeAudioSandbox({ ua, voices, utterOnstart }) {
   }
   const getEl = id => elements[id] || (elements[id] = mkEl())
   const utterCtor = function (t) { this.text = t }
+  let localSpeaks = 0
   const sb = {
     console, TextEncoder, navigator: { userAgent: ua },
     localStorage: { store: {}, getItem(k) { return this.store[k] || null }, setItem(k, v) { this.store[k] = String(v) }, removeItem(k) { delete this.store[k] } },
@@ -35,7 +36,7 @@ function makeAudioSandbox({ ua, voices, utterOnstart }) {
         getVoices: () => voices || [],
         addEventListener() {},
         cancel() {},
-        speak(u) { if (utterOnstart) setTimeout(() => u.onstart && u.onstart(), 30) },
+        speak(u) { localSpeaks++; if (utterOnstart) setTimeout(() => u.onstart && u.onstart(), 30) },
       },
     },
     SpeechSynthesisUtterance: utterCtor,
@@ -56,7 +57,7 @@ function makeAudioSandbox({ ua, voices, utterOnstart }) {
   }
   sb.globalThis = sb
   vm.createContext(sb)
-  return { sb, onlinePlays }
+  return { sb, onlinePlays, getLocalSpeaks: () => localSpeaks }
 }
 
 ;(async () => {
@@ -80,13 +81,20 @@ function makeAudioSandbox({ ua, voices, utterOnstart }) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8'), s3.sb)
     const m3 = vm.runInContext('listenVoiceMode()', s3.sb)
     assert('桌面无英文语音 → online', m3 === 'online', 'got ' + m3)
-    // A4: 安卓 speakEnglish 直接走在线发音（不走本地合成）
+    // A4: v62 起安卓不再跳过本地合成——有英文语音先走本地（onlinePlays=0），无英文语音才在线
     const a4 = makeAudioSandbox({ ua: 'Mozilla/5.0 (Linux; Android 14) Chrome/120.0 Mobile', voices: [{ lang: 'en-US' }] })
     vm.runInContext(fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8'), a4.sb)
     vm.runInContext(fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8'), a4.sb)
     vm.runInContext('speakEnglish("reservation")', a4.sb)
     await new Promise(r => setTimeout(r, 50))
-    assert('安卓 speakEnglish → 有道在线 TTS', a4.onlinePlays.length === 1 && a4.onlinePlays[0].includes('dict.youdao.com'), JSON.stringify(a4.onlinePlays))
+    assert('安卓 speakEnglish（有英文语音）→ 本地合成优先', a4.onlinePlays.length === 0 && a4.getLocalSpeaks() >= 1, JSON.stringify({ online: a4.onlinePlays, local: a4.getLocalSpeaks() }))
+    // A4b: 安卓无英文语音 → 仍直接走在线
+    const a4b = makeAudioSandbox({ ua: 'Mozilla/5.0 (Linux; Android 14) Chrome/120.0 Mobile', voices: [] })
+    vm.runInContext(fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8'), a4b.sb)
+    vm.runInContext(fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8'), a4b.sb)
+    vm.runInContext('speakEnglish("reservation")', a4b.sb)
+    await new Promise(r => setTimeout(r, 50))
+    assert('安卓 speakEnglish（无英文语音）→ 在线 TTS', a4b.onlinePlays.length === 1 && a4b.onlinePlays[0].includes('dict.youdao.com'), JSON.stringify(a4b.onlinePlays))
     // A5: 桌面 speak 正常触发 onstart → 不回退在线
     const a5 = makeAudioSandbox({ ua: 'Mozilla/5.0 (Windows NT 10.0) Chrome/120.0', voices: [{ lang: 'en-US' }], utterOnstart: true })
     vm.runInContext(fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8'), a5.sb)

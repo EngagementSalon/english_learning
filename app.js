@@ -77,17 +77,18 @@ function _ttsToast(msg) {
     el.__t = setTimeout(() => { el.className = 'tts-toast' }, 2500)
   } catch (e) { /* ignore */ }
 }
-// 本地合成（v60：最终兜底，安卓也强制尝试一次——比完全无声好；返回 true=已提交朗读）
-function _speakLocal(text) {
+// 本地合成（v60：最终兜底；v62 支持 force——未列出英文语音时也用默认语音+en-US 试一次，
+// 部分安卓 TTS 引擎 getVoices 返回空但实际能读英文；返回 true=已提交朗读）
+function _speakLocal(text, force) {
   try {
     if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return false
     _refreshListenVoices()
     const en = (_listenVoices || []).filter(v => /^en([-_]|$)/i.test(v.lang || ''))
-    if (!en.length) return false
+    if (!en.length && !force) return false
     const u = new SpeechSynthesisUtterance(text)
     u.lang = 'en-US'
     u.rate = 0.9
-    u.voice = en[0]
+    if (en.length) u.voice = en[0]
     window.speechSynthesis.cancel()
     window.speechSynthesis.speak(u)
     return true
@@ -112,7 +113,7 @@ function playListenOnline(text) {
       if (cur) { try { cur.pause(); cur.removeAttribute && cur.removeAttribute('src') } catch (e) {} cur = null }
       if (k >= order.length) {
         dead = true
-        if (!_speakLocal(txt)) _ttsToast(t('ttsFail'))
+        if (!_speakLocal(txt, true)) _ttsToast(t('ttsFail'))
         return
       }
       const myK = k
@@ -169,12 +170,14 @@ function _armAudioUnlock() {
 try { _armAudioUnlock() } catch (e) { /* ignore */ }
 // 朗读英文（listen 题）：本地英文语音可用则本地朗读，否则自动回退在线发音
 // v38：本地 speak() 后若 1.8s 内未触发 onstart（静音/无声的典型表现），自动改用在线发音兜底
+// v62：安卓不再跳过本地合成——在线 TTS 在部分校园网络被整体拦截（v61 提示弹窗证实），
+//      有英文语音的安卓机型先试本地，1.8s 无声再走在线；系统语音已成为弱网下的主力通道
 function speakEnglish(text) {
   if (!text) return
   try {
     if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) { playListenOnline(text); return }
     _refreshListenVoices()
-    const en = _isAndroid() ? [] : (_listenVoices || []).filter(v => /^en([-_]|$)/i.test(v.lang || ''))
+    const en = (_listenVoices || []).filter(v => /^en([-_]|$)/i.test(v.lang || ''))
     if (en.length) {
       // 有英文语音：选中一个朗读（避免默认中文语音读英文或静音）
       const u = new SpeechSynthesisUtterance(text)
@@ -191,11 +194,17 @@ function speakEnglish(text) {
     playListenOnline(text)   // 无英文语音 → 在线兜底
   } catch (e) { playListenOnline(text) }
 }
+// v62：强制系统语音（listen 题的 🔉 按钮，在线被网络拦截时的自救通道）
+function speakLocalForce(text) {
+  if (!text) return
+  if (!_speakLocal(String(text).trim(), true)) _ttsToast(t('ttsNone'))
+}
 // 题干区 HTML：listen 题只显示喇叭按钮（不暴露英文原文），其余题型照常显示题干
 function quizTitleHtml(q) {
   if (q.type === 'listen') {
     return `<div class="q-title listen-title">
       <button class="listen-btn" type="button" data-w="${escAttr(q.question)}" onclick="speakEnglish(this.dataset.w)" title="${escAttr(t('listenPlay'))}">🔊</button>
+      <button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="speakLocalForce(this.dataset.w)" title="${escAttr(t('listenLocal'))}">🔉</button>
       <button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="playListenOnline(this.dataset.w)" title="${escAttr(t('listenOnline'))}">🌐</button>
       <span class="listen-hint">${t('listenHint')}</span>
     </div>`
@@ -216,7 +225,7 @@ function vmOptRowHtml(q, ans, i, mode, pickFn) {
   else if (mode === 'live' && ans === i) cls += ' selected'
   const badge = mode === 'review' && isCorrect ? '✓' : (LETTERS[i] || String.fromCharCode(65 + i))
   const play = `<button class="vm-play" type="button" data-w="${escAttr(opt)}" onclick="event.stopPropagation();speakEnglish(this.dataset.w)" title="${escAttr(t('listenPlay'))}">🔊</button>`
-  const online = `<button class="vm-online" type="button" data-w="${escAttr(opt)}" onclick="event.stopPropagation();playListenOnline(this.dataset.w)" title="${escAttr(t('listenOnline'))}">🌐</button>`
+  const online = `<button class="vm-online" type="button" data-w="${escAttr(opt)}" onclick="event.stopPropagation();speakLocalForce(this.dataset.w)" title="${escAttr(t('listenLocal'))}">🔉</button><button class="vm-online" type="button" data-w="${escAttr(opt)}" onclick="event.stopPropagation();playListenOnline(this.dataset.w)" title="${escAttr(t('listenOnline'))}">🌐</button>`
   const onClick = mode === 'review' || !pickFn ? '' : `${pickFn}(${i})`
   const inner = mode === 'review'
     ? `${play}${online}<span class="vm-opt-text">${escHtml(opt)}</span>`
@@ -1440,7 +1449,7 @@ function renderExamResult() {
         correctAns = q.options[0]
       }
       return `<div class="review-item ${r.isCorrect ? 'correct' : 'wrong'}">
-        <div class="review-q">${i+1}. ${q.type === 'listen' || q.type === 'voicematch' ? `<button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="speakEnglish(this.dataset.w)" title="${escAttr(t('listenPlay'))}">🔊</button><button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="playListenOnline(this.dataset.w)" title="${escAttr(t('listenOnline'))}">🌐</button> ${q.question}` : q.question}</div>
+        <div class="review-q">${i+1}. ${q.type === 'listen' || q.type === 'voicematch' ? `<button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="speakEnglish(this.dataset.w)" title="${escAttr(t('listenPlay'))}">🔊</button><button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="speakLocalForce(this.dataset.w)" title="${escAttr(t('listenLocal'))}">🔉</button><button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="playListenOnline(this.dataset.w)" title="${escAttr(t('listenOnline'))}">🌐</button> ${q.question}` : q.question}</div>
         <div class="review-ans">${t('yourAnswer')}<span class="${r.isCorrect ? 'review-correct' : 'review-wrong'}">${yourAns}</span></div>
         ${!r.isCorrect ? `<div class="review-ans">${t('correctAnswer')}：<span class="review-correct">${correctAns}</span></div>` : ''}
         ${q.explanation ? `<div class="review-ans" style="color:#6b7280">${q.explanation}</div>` : ''}
