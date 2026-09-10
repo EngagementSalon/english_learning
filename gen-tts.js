@@ -58,14 +58,18 @@ async function pullCloudCourseTexts(set) {
     if (!m) throw new Error('COURSES_URL not found')
     const data = await (await fetch(m[1], { cache: 'no-store' })).json()
     let n = 0
+    const scan = q => {
+      if (!q) return
+      if (['listen', 'voicematch', 'pronounce'].includes(q.type)) {
+        const t = String(q.question || '').trim()
+        if (t) { set.add(t); n++ }
+        if (q.type === 'voicematch') (q.options || []).forEach(o => { const s = String(o || '').trim(); if (s) { set.add(s); n++ } })
+      }
+    }
     ;(data.classes || []).forEach(c => (c.assignments || []).forEach(a => {
-      ;(a.questions || []).forEach(q => {
-        if (['listen', 'voicematch', 'pronounce'].includes(q.type)) {
-          const t = String(q.question || '').trim()
-          if (t) { set.add(t); n++ }
-          if (q.type === 'voicematch') (q.options || []).forEach(o => { const s = String(o || '').trim(); if (s) { set.add(s); n++ } })
-        }
-      })
+      // 作业题存 questions；视频作业的测验题存 quiz 数组（v64 补）
+      ;(a.questions || []).forEach(scan)
+      ;(Array.isArray(a.quiz) ? a.quiz : []).forEach(scan)
     }))
     console.log('云端课库听音文本:', n, '条（合并后见下方合计）')
   } catch (e) { console.error('云端课库拉取失败（跳过，仅打种子库）:', e.message) }
