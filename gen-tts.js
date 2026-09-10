@@ -49,13 +49,30 @@ for (const arg of process.argv.slice(2)) {
   })
   console.log('附加', arg, '→ 新增文本', add)
 }
-const finalTexts = [...new Set(texts.map(t => t.trim()).filter(Boolean))]
-console.log('合计唯一发音文本:', finalTexts.length)
+// 2c. 云端课库（v64 增补）：线下课作业/上传文件布置的听音题不在种子 BANK 里，
+//     学员端拿到的题目来自 COURSES_URL 云文档——这里同步拉取打包，消除覆盖缺口
+async function pullCloudCourseTexts(set) {
+  try {
+    const src = fs.readFileSync(path.join(__dirname, 'course-store.js'), 'utf-8')
+    const m = src.match(/COURSES_URL = '([^']+)'/)
+    if (!m) throw new Error('COURSES_URL not found')
+    const data = await (await fetch(m[1], { cache: 'no-store' })).json()
+    let n = 0
+    ;(data.classes || []).forEach(c => (c.assignments || []).forEach(a => {
+      ;(a.questions || []).forEach(q => {
+        if (['listen', 'voicematch', 'pronounce'].includes(q.type)) {
+          const t = String(q.question || '').trim()
+          if (t) { set.add(t); n++ }
+          if (q.type === 'voicematch') (q.options || []).forEach(o => { const s = String(o || '').trim(); if (s) { set.add(s); n++ } })
+        }
+      })
+    }))
+    console.log('云端课库听音文本:', n, '条（合并后见下方合计）')
+  } catch (e) { console.error('云端课库拉取失败（跳过，仅打种子库）:', e.message) }
+}
 
-// 2. 逐个下载（有道英国音；并发 4，失败重试 1 次）
-const OUT = path.join(__dirname, 'tts')
-if (!fs.existsSync(OUT)) fs.mkdirSync(OUT)
-async function dl(text) {
+// 逐个下载（有道英国音优先，百度降级；失败重试 1 轮，并发 4 由主流程调度）
+async function dl(text, OUT) {
   const key = ttsKey(text)
   const file = path.join(OUT, key + '.mp3')
   if (fs.existsSync(file) && fs.statSync(file).size > 1024) return 'skip'
@@ -79,13 +96,21 @@ async function dl(text) {
     }
   }
 }
+
+// 3. 主流程：种子库 + CSV 附加 + 云端课库 → 全量去重 → 增量下载
 ;(async () => {
+  await pullCloudCourseTexts(uniq)
+  const finalTexts = [...new Set([...uniq, ...texts].map(t => t.trim()).filter(Boolean))]
+  console.log('合计唯一发音文本:', finalTexts.length)
+
+  const OUT = path.join(__dirname, 'tts')
+  if (!fs.existsSync(OUT)) fs.mkdirSync(OUT)
   let ok = 0, skip = 0, fail = 0
-  const queue = [...texts]
+  const queue = [...finalTexts]
   await Promise.all(Array.from({ length: 4 }, async () => {
     while (queue.length) {
       const t = queue.shift()
-      const r = await dl(t)
+      const r = await dl(t, OUT)
       if (r === 'ok') { ok++; process.stdout.write('.') }
       else if (r === 'skip') skip++
       else fail++
@@ -98,3 +123,4 @@ async function dl(text) {
   fs.writeFileSync(path.join(OUT, 'manifest.json'), JSON.stringify({ generatedAt: new Date().toISOString(), count: files.length }, null, 2))
   process.exit(fail > 0 ? 1 : 0)
 })()
+
