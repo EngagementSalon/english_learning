@@ -1,0 +1,42 @@
+name: TTS audio pack
+
+# 定时检查云端课库 / 种子题库，自动补齐缺失的发音音频（tts/<key>.mp3）
+# 新布置的作业/视频测验里有听音题时，无需人工干预，最多几小时后音频包自动更新
+on:
+  schedule:
+    - cron: '0 */3 * * *' # 每 3 小时（UTC）检查一次
+  workflow_dispatch: # 也可在 Actions 页面手动触发
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tts-pack
+  cancel-in-progress: false
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Generate missing audio
+        continue-on-error: true
+        run: node gen-tts.js
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tts
+          if git diff --cached --quiet; then
+            echo "音频包无变化，无需提交"
+          else
+            git commit -m "chore(tts): auto-generate audio for new questions"
+            git push
+            echo "已提交并推送新增音频"
+          fi
