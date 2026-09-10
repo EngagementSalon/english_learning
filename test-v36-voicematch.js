@@ -245,11 +245,19 @@ function vmSeeds() {
   vm.runInContext('courseRenderTake()', sbC)
   const cRev = sbC._getEl('page-course').innerHTML
   assert('线下课作业提交后：显示选项文字 + 对错 + 解析', cRev.includes('vm-opt-text') && cRev.includes('feedback') && cRev.includes('原文：Housekeeping'), cRev.slice(0, 400))
-  // 考试：选项行禁用 onclick（防作弊一致性）
+  // v66 纠正：此处原断言为「考试：选项行禁用 onclick（防作弊一致性）、作答由委托处理」——
+  // 实际代码从未有事件委托，该禁用直接导致测评卷整卷点不动（学员无法作答）。测评必须可作答，
+  // 只有「本题已提交」（qz.submitted）才锁定。保留「无文字泄露 + 有答题卡」的原意继续校验。
   vm.runInContext(`courseQuiz = { phase: 'quiz', cid: 'c1', aid: 'e1', type: 'exam', title: '测评', questions: [${vmqJson}], index: 0, answers: [-1], submitted: false, correct: 0, startAt: Date.now(), endAt: null, passScore: 60 }`, sbC)
   vm.runInContext('courseRenderTake()', sbC)
   const cExam = sbC._getEl('page-course').innerHTML
-  assert('线下课考试：vm 选项无 onclick（作答由委托处理）、无文字泄露、有答题卡', cExam.includes('vm-option') && !cExam.includes('onclick="coursePick(') && !cExam.includes('vm-opt-text') && cExam.includes('course-grid-cell'), cExam.slice(0, 400))
+  assert('线下课考试：vm 选项可点（coursePick）、无文字泄露、有答题卡', cExam.includes('vm-option') && cExam.includes('onclick="coursePick(') && !cExam.includes('vm-opt-text') && cExam.includes('course-grid-cell'), cExam.slice(0, 400))
+  // v66：提交后该题必须锁定（不再可点），且测评仍不泄露选项文字
+  vm.runInContext('courseQuiz.submitted = true', sbC)
+  vm.runInContext('courseRenderTake()', sbC)
+  const cExamLocked = sbC._getEl('page-course').innerHTML
+  assert('线下课考试：本题提交后 vm 选项锁定（无 onclick）', !cExamLocked.includes('onclick="coursePick('), cExamLocked.slice(0, 300))
+  assert('线下课考试：锁定后仍不泄露选项文字', !cExamLocked.includes('vm-opt-text'), cExamLocked.slice(0, 300))
 
   console.log('\n⑦ i18n 双语键 + 管理编辑器')
   const sbI = makeSandbox({ doc: {} })

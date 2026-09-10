@@ -1255,9 +1255,12 @@ function courseRenderTake() {
   const answered = a => a !== undefined && a !== -1 && !(Array.isArray(a) && !a.length) && !(typeof a === 'string' && !a.trim())
   const showFeedback = !isExam && qz.submitted
 
+  // v66：测评（exam）模式下题目同样必须可选/可填 —— 禁用只由「本题已提交」决定。
+  // 原先 (isExam || qz.submitted) 会让测评卷所有选项不绑 onclick、填空框 disabled，导致整卷无法作答。
+  const locked = !!qz.submitted
   let optionsHtml = ''
   if (q.type === 'voicematch') {
-    const dis = (isExam || qz.submitted) ? '' : 'coursePick'
+    const dis = locked ? '' : 'coursePick'
     optionsHtml = vmOptionsHtml(q, ans, showFeedback ? 'review' : 'live', dis)
   } else if (q.type === 'single' || q.type === 'judge' || q.type === 'pronounce' || q.type === 'listen') {
     optionsHtml = q.options.map((opt, i) => {
@@ -1265,7 +1268,7 @@ function courseRenderTake() {
       if (showFeedback) { if (q.answer.includes(i)) cls += ' correct'; else if (ans === i) cls += ' wrong' }
       else if (ans === i) cls += ' selected'
       const badge = showFeedback && q.answer.includes(i) ? '✓' : LETTERS[i]
-      const dis = (isExam || qz.submitted) ? '' : `coursePick(${i})`
+      const dis = locked ? '' : `coursePick(${i})`
       return `<div class="${cls}" ${dis ? `onclick="${dis}"` : ''}>
         <div class="option-badge">${badge}</div><div class="option-text">${opt}</div></div>`
     }).join('')
@@ -1276,7 +1279,7 @@ function courseRenderTake() {
       if (showFeedback) { if (q.answer.includes(i)) cls += ' correct'; else if (sel) cls += ' wrong' }
       else if (sel) cls += ' selected'
       const badge = showFeedback && q.answer.includes(i) ? '✓' : LETTERS[i]
-      const dis = (isExam || qz.submitted) ? '' : `courseTogglePick(${i})`
+      const dis = locked ? '' : `courseTogglePick(${i})`
       return `<div class="${cls}" ${dis ? `onclick="${dis}"` : ''}>
         <div class="option-badge">${badge}</div><div class="option-text">${opt}</div></div>`
     }).join('')
@@ -1284,7 +1287,7 @@ function courseRenderTake() {
     let cls = 'input-answer'
     if (showFeedback) cls += courseCheckAnswer(q, ans) ? ' correct' : ' wrong'
     optionsHtml = `<input type="text" class="${cls}" placeholder="${t('answerPlaceholder')}" value="${escAttr(ans)}"
-      oninput="courseType(this.value)" ${(isExam || qz.submitted) ? 'disabled' : ''} />`
+      oninput="courseType(this.value)" ${locked ? 'disabled' : ''} />`
   }
 
   let feedbackHtml = ''
