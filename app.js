@@ -283,7 +283,7 @@ function navigate(page) {
   })
   const mobNav = document.querySelector('.topbar-nav')
   if (mobNav) mobNav.classList.remove('open')   // 切页后收起手机菜单
-  const renderFn = { home: renderHome, placement: renderPlacement, practice: renderPractice, exam: renderExam, progress: renderProgress, course: renderCoursePage, admin: renderAdmin, users: renderUsers, dashboard: renderDashboard }
+  const renderFn = { home: renderHome, placement: renderPlacement, practice: renderPractice, exam: renderExam, challenge: renderChallenge, progress: renderProgress, course: renderCoursePage, admin: renderAdmin, users: renderUsers, dashboard: renderDashboard }
   if (renderFn[page]) renderFn[page]()
   window.scrollTo(0, 0)
 }

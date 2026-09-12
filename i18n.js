@@ -48,6 +48,24 @@ const I18N = {
 
     // 线下课 / 班级 / 作业 / 测评
     navCourse: '📖 线下课',
+    // 标帜餐厅七天英文挑战（v68）
+    navChallenge: '🏅 七天挑战',
+    chTitle: '标帜餐厅七天英文挑战',
+    chIntro: '每天一关 50 题，全部选自「标帜餐厅常见词汇」题库。第 1、7 天为水平测试（仅可作答一次），第 2-6 天为每日练习（可反复刷）。顺序闯关，见证七天进步！',
+    chPoolInfo: (n) => `题库共 ${n} 题 · 每关 50 题 · 全员同一套题`,
+    chTestTag: '水平测试', chPracticeTag: '每日练习',
+    chDay: (n) => `第 ${n} 天`,
+    chLocked: '完成前一天解锁', chStart: '开始', chRetake: '再练一轮',
+    chOnceOnly: '水平测试仅可作答一次',
+    chQuitConfirm: '退出后本次答题进度不会保存，确定退出吗？',
+    chSubmitTest: '交卷',
+    chConfirmSubmit: (n) => n > 0 ? `还有 ${n} 题未作答，确定交卷吗？` : '确定交卷？',
+    chTestDone: '水平测试完成', chPracticeDone: '今日练习完成',
+    chBackToChallenge: '返回挑战',
+    chReportTitle: '七天进步报告',
+    chDelta: (d) => d > 0 ? `比第 1 天进步 ${d} 分，继续保持！` : (d === 0 ? '与第 1 天持平，再接再厉！' : `比第 1 天低 ${-d} 分，建议回到每日练习巩固`),
+    chReportHint: '每天正确率一览',
+    chDayDoneTag: '已完成',
     courseLoading: '正在从云端加载线下课数据…',
     courseOffline: '云端暂时无法连接。线下课数据需要联网加载，请检查网络后重试。',
     courseRetry: '重试',
@@ -634,6 +652,24 @@ const I18N = {
 
     // Courses / classes / homework / assessments
     navCourse: '📖 Courses',
+    // Signature Restaurant 7-Day Challenge (v68)
+    navChallenge: '🏅 7-Day Challenge',
+    chTitle: 'Signature Restaurant 7-Day Challenge',
+    chIntro: 'One round of 50 questions a day, all drawn from the "Signature Restaurant Vocabulary" bank. Day 1 & 7 are placement tests (one attempt only); Days 2-6 are daily practice you can repeat as much as you like. Unlock day by day and watch yourself improve!',
+    chPoolInfo: (n) => `Bank of ${n} questions · 50 per day · same set for everyone`,
+    chTestTag: 'Placement Test', chPracticeTag: 'Daily Practice',
+    chDay: (n) => `Day ${n}`,
+    chLocked: 'Finish the previous day to unlock', chStart: 'Start', chRetake: 'Practice Again',
+    chOnceOnly: 'The placement test can be taken only once',
+    chQuitConfirm: 'Your answers in this round will not be saved. Quit?',
+    chSubmitTest: 'Submit',
+    chConfirmSubmit: (n) => n > 0 ? `${n} question(s) unanswered. Submit anyway?` : 'Submit the test?',
+    chTestDone: 'Placement Test Complete', chPracticeDone: 'Daily Practice Complete',
+    chBackToChallenge: 'Back to Challenge',
+    chReportTitle: '7-Day Progress Report',
+    chDelta: (d) => d > 0 ? `+${d} points vs Day 1 — keep it up!` : (d === 0 ? 'Same as Day 1 — keep practicing!' : `${-d} points below Day 1 — review the daily practice`),
+    chReportHint: 'Accuracy by day',
+    chDayDoneTag: 'Completed',
     courseLoading: 'Loading course data from the cloud…',
     courseOffline: 'The cloud is temporarily unreachable. Course data requires an internet connection.',
     courseRetry: 'Retry',
@@ -1229,6 +1265,7 @@ function renderStaticText() {
   setTitle('navExam', 'navExam')
   setTitle('navProgress', 'navProgress')
   setTitle('navCourse', 'navCourse')
+  setTitle('navChallenge', 'navChallenge')
   setTitle('navAdmin', 'navAdmin')
   setTitle('navUsers', 'navUsers')
   setTitle('navDashboard', 'navDashboard')
