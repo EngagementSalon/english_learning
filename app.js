@@ -103,6 +103,12 @@ function _speakLocal(text, force) {
     return true
   } catch (e) { return false }
 }
+// v74：朗读文本规范化 —— 斜杠读作停顿（'Starter / Appetizer' → 'Starter, Appetizer'），
+// 避免引擎把 '/' 读成 "slash" 或生硬连读；本地合成 / 在线源 / 音频包 key 共用同一规范
+// （gen-tts.js 生成音频包时做同样规范化，key 严格一致；带 / 的旧包文件自然失效，由 CI 自动补新）
+function _normSpeakText(s) {
+  return String(s == null ? '' : s).replace(/\s*\/\s*/g, ', ').trim()
+}
 // 在线发音（v61 增强版）：多源自动降级——播放报错立即切下一源；看门狗每 TTS_WATCH_MS 检查一次，
 // 有加载进度（loadstart/progress/canplay 等）就续等一轮（弱网慢加载不误杀），完全无进度才切换；
 // 全部在线源失败时回退本地合成，仍不行才提示学员检查网络。每次尝试用全新 Audio 对象，
@@ -110,7 +116,7 @@ function _speakLocal(text, force) {
 function playListenOnline(text) {
   if (!text) return
   try {
-    const txt = String(text).trim().slice(0, 260)
+    const txt = _normSpeakText(text).slice(0, 260)
     if (!txt) return
     const srcs = _ttsSources(txt)
     const order = []
@@ -184,6 +190,8 @@ try { _armAudioUnlock() } catch (e) { /* ignore */ }
 function speakEnglish(text) {
   if (!text) return
   try {
+    text = _normSpeakText(text)
+    if (!text) return
     if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) { playListenOnline(text); return }
     _refreshListenVoices()
     const en = (_listenVoices || []).filter(v => /^en([-_]|$)/i.test(v.lang || ''))
@@ -206,15 +214,25 @@ function speakEnglish(text) {
 // v62：强制系统语音（listen 题的 🔉 按钮，在线被网络拦截时的自救通道）
 function speakLocalForce(text) {
   if (!text) return
-  if (!_speakLocal(String(text).trim(), true)) _ttsToast(t('ttsNone'))
+  if (!_speakLocal(_normSpeakText(text), true)) _ttsToast(t('ttsNone'))
+}
+// v74：发音按钮 SVG 图标（替代 emoji——部分安卓机型 emoji 字体把图标渲染得过大/拉伸变形；
+// SVG 固定 viewBox + currentColor 填充，随按钮 font-size 等比缩放且永不变形；样式见 style.css .ic-svg）
+function audioIconSvg(kind) {
+  const d = kind === 'globe'
+    ? 'M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95c-.32-1.25-.78-2.45-1.38-3.56 1.84.63 3.37 1.91 4.33 3.56zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2 0 .68.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56-1.84-.63-3.37-1.9-4.33-3.56zm2.95-8H5.08c.96-1.66 2.49-2.93 4.33-3.56C8.81 5.55 8.35 6.75 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2 0-.68.07-1.35.16-2h4.68c.09.65.16 1.32.16 2 0 .68-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95c-.96 1.65-2.49 2.93-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2 0-.68-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z'
+    : kind === 'down'
+      ? 'M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z'
+      : 'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z'
+  return `<svg class="ic-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="${d}"/></svg>`
 }
 // 题干区 HTML：listen 题只显示喇叭按钮（不暴露英文原文），其余题型照常显示题干
 function quizTitleHtml(q) {
   if (q.type === 'listen') {
     return `<div class="q-title listen-title">
-      <button class="listen-btn" type="button" data-w="${escAttr(q.question)}" onclick="speakEnglish(this.dataset.w)" title="${escAttr(t('listenPlay'))}">🔊</button>
-      <button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="speakLocalForce(this.dataset.w)" title="${escAttr(t('listenLocal'))}">🔉</button>
-      <button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="playListenOnline(this.dataset.w)" title="${escAttr(t('listenOnline'))}">🌐</button>
+      <button class="listen-btn" type="button" data-w="${escAttr(q.question)}" onclick="speakEnglish(this.dataset.w)" title="${escAttr(t('listenPlay'))}">${audioIconSvg('up')}</button>
+      <button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="speakLocalForce(this.dataset.w)" title="${escAttr(t('listenLocal'))}">${audioIconSvg('down')}</button>
+      <button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="playListenOnline(this.dataset.w)" title="${escAttr(t('listenOnline'))}">${audioIconSvg('globe')}</button>
       <span class="listen-hint">${t('listenHint')}</span>
     </div>`
   }
@@ -233,8 +251,8 @@ function vmOptRowHtml(q, ans, i, mode, pickFn) {
   if (mode === 'review') { if (isCorrect) cls += ' correct'; else if (ans === i) cls += ' wrong' }
   else if (mode === 'live' && ans === i) cls += ' selected'
   const badge = mode === 'review' && isCorrect ? '✓' : (LETTERS[i] || String.fromCharCode(65 + i))
-  const play = `<button class="vm-play" type="button" data-w="${escAttr(opt)}" onclick="event.stopPropagation();speakEnglish(this.dataset.w)" title="${escAttr(t('listenPlay'))}">🔊</button>`
-  const online = `<button class="vm-online" type="button" data-w="${escAttr(opt)}" onclick="event.stopPropagation();speakLocalForce(this.dataset.w)" title="${escAttr(t('listenLocal'))}">🔉</button><button class="vm-online" type="button" data-w="${escAttr(opt)}" onclick="event.stopPropagation();playListenOnline(this.dataset.w)" title="${escAttr(t('listenOnline'))}">🌐</button>`
+  const play = `<button class="vm-play" type="button" data-w="${escAttr(opt)}" onclick="event.stopPropagation();speakEnglish(this.dataset.w)" title="${escAttr(t('listenPlay'))}">${audioIconSvg('up')}</button>`
+  const online = `<button class="vm-online" type="button" data-w="${escAttr(opt)}" onclick="event.stopPropagation();speakLocalForce(this.dataset.w)" title="${escAttr(t('listenLocal'))}">${audioIconSvg('down')}</button><button class="vm-online" type="button" data-w="${escAttr(opt)}" onclick="event.stopPropagation();playListenOnline(this.dataset.w)" title="${escAttr(t('listenOnline'))}">${audioIconSvg('globe')}</button>`
   const onClick = mode === 'review' || !pickFn ? '' : `${pickFn}(${i})`
   const inner = mode === 'review'
     ? `${play}${online}<span class="vm-opt-text">${escHtml(opt)}</span>`
@@ -1476,7 +1494,7 @@ function renderExamResult() {
         correctAns = q.options[0]
       }
       return `<div class="review-item ${r.isCorrect ? 'correct' : 'wrong'}">
-        <div class="review-q">${i+1}. ${q.type === 'listen' || q.type === 'voicematch' ? `<button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="speakEnglish(this.dataset.w)" title="${escAttr(t('listenPlay'))}">🔊</button><button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="speakLocalForce(this.dataset.w)" title="${escAttr(t('listenLocal'))}">🔉</button><button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="playListenOnline(this.dataset.w)" title="${escAttr(t('listenOnline'))}">🌐</button> ${q.question}` : q.question}</div>
+        <div class="review-q">${i+1}. ${q.type === 'listen' || q.type === 'voicematch' ? `<button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="speakEnglish(this.dataset.w)" title="${escAttr(t('listenPlay'))}">${audioIconSvg('up')}</button><button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="speakLocalForce(this.dataset.w)" title="${escAttr(t('listenLocal'))}">${audioIconSvg('down')}</button><button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="playListenOnline(this.dataset.w)" title="${escAttr(t('listenOnline'))}">${audioIconSvg('globe')}</button> ${q.question}` : q.question}</div>
         <div class="review-ans">${t('yourAnswer')}<span class="${r.isCorrect ? 'review-correct' : 'review-wrong'}">${yourAns}</span></div>
         ${!r.isCorrect ? `<div class="review-ans">${t('correctAnswer')}：<span class="review-correct">${correctAns}</span></div>` : ''}
         ${q.explanation ? `<div class="review-ans" style="color:#6b7280">${q.explanation}</div>` : ''}

@@ -999,6 +999,9 @@ tr.row-draft td { background:#fefce8; }
   vertical-align:middle; transition:background .15s;
 }
 .listen-btn-sm:hover { background:var(--primary-dark); }
+/* v74：发音按钮 SVG 图标（替代 emoji——部分安卓机型 emoji 字体把图标渲染得过大/拉伸变形；
+   SVG 固定 viewBox + currentColor 填充，随按钮 font-size 等比缩放且永不变形） */
+.ic-svg { width:1em; height:1em; fill:currentColor; display:inline-block; vertical-align:-0.12em; }
 
 /* ====== 看字选音 voicematch 题型（题干文字 + 选项语音） ====== */
 .vm-hint { font-size:14px; color:var(--text-light); margin:2px 0 4px; }

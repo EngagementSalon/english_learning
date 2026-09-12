@@ -321,6 +321,52 @@ function chProgressHtml() {
     </div>`
 }
 
+// ====== 积分榜前三（v74）======
+// 与管理员看板 renderDashChallengeBlock 同口径：每环节按首次完成计（day-si 去重取 at 最早的 chy，
+// 重练不刷分），积分 = 答对×100 − 用时秒；学员进挑战页即可看到当前前三（60s 缓存，避免频繁拉云端）
+function chLbAggregate(rows) {
+  const list = (rows || []).filter(r => r && r.chy && r.chy.length).map(r => {
+    const first = {}
+    ;(r.chy || []).forEach(x => {
+      const k = x.day + '-' + x.si
+      if (!first[k] || (x.at || 0) < (first[k].at || 0)) first[k] = x
+    })
+    let c = 0, tsec = 0
+    Object.keys(first).forEach(k => { c += first[k].correct || 0; tsec += first[k].usedSec || 0 })
+    return { name: r.name || r.username || '', username: r.username, correct: c, sec: tsec, score: c * 100 - tsec }
+  })
+  list.sort((a, b) => (b.score - a.score) || (a.sec - b.sec) || (b.correct - a.correct))
+  return list.slice(0, 3)
+}
+function chLbRowsHtml(top) {
+  if (!top || !top.length) return `<div style="color:#9ca3af;font-size:13px;padding:2px 0">${t('chLbEmpty')}</div>`
+  const medal = i => (i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : String(i + 1))
+  return top.map((p, i) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:${i < top.length - 1 ? '1px solid #f3f4f6' : 'none'}">
+      <span style="font-size:18px;width:28px;text-align:center;flex-shrink:0">${medal(i)}</span>
+      <span style="flex:1;min-width:0;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.name)}</span>
+      <span style="color:#6b7280;font-size:12px;flex-shrink:0">${t('dashChThCorrect')} ${p.correct}</span>
+      <span style="font-weight:800;color:#b45309;flex-shrink:0">${p.score} ${t('scoreUnit')}</span>
+    </div>`).join('')
+}
+let _chLbCache = { at: 0, top: null }
+function chLbFill(top) {
+  const el = document.getElementById('chLbBody')
+  if (el) el.innerHTML = chLbRowsHtml(top)
+}
+async function chLoadLeaderboard() {
+  const now = Date.now()
+  if (_chLbCache.top && now - _chLbCache.at < 60000) { chLbFill(_chLbCache.top); return }
+  let top = null
+  try {
+    if (typeof CloudSync !== 'undefined' && CloudSync.getDashboardData) {
+      top = chLbAggregate(await CloudSync.getDashboardData())
+    }
+  } catch (e) { /* 网络失败保留旧缓存或显示空态 */ }
+  if (top) _chLbCache = { at: now, top }
+  chLbFill(_chLbCache.top)
+}
+
 function renderChallenge() {
   const el = document.getElementById('page-challenge')
   if (!el) return
@@ -330,6 +376,14 @@ function renderChallenge() {
   const rows = CHALLENGE_DAYS.map(d => chDayBlockHtml(d)).join('')
   el.innerHTML = `
     ${chProgressHtml()}
+    <div class="card" style="border:2px solid #f59e0b;margin-bottom:16px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+        <h3 style="margin:0">🏆 ${t('chLbTitle')}</h3>
+        <span style="font-size:11px;color:#9ca3af">${t('chLbRule')}</span>
+      </div>
+      <div id="chLbBody" style="color:#9ca3af;font-size:13px">${t('cloudLoading')}</div>
+      <p class="form-hint" style="margin:6px 0 0">🏆 ${t('dashChPrizeHint')}</p>
+    </div>
     ${chReportHtml()}
     <div class="card">
       <h3>${t('chTitle')}</h3>
@@ -338,6 +392,7 @@ function renderChallenge() {
       <div>${rows}</div>
     </div>
   `
+  chLoadLeaderboard()
 }
 
 function chDayBlockHtml(cfg) {
@@ -754,7 +809,7 @@ function chReviewItemHtml(r, i) {
   const yourAns = r.ans >= 0 ? `${LETTERS[r.ans]}. ${q.options[r.ans] || ''}` : t('notAnswered')
   const correctAns = q.answer.map(a => `${LETTERS[a]}. ${q.options[a]}`).join('；')
   const audioBtns = (q.type === 'listen' || q.type === 'voicematch')
-    ? `<button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="speakEnglish(this.dataset.w)" title="${escAttr(t('listenPlay'))}">🔊</button><button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="speakLocalForce(this.dataset.w)" title="${escAttr(t('listenLocal'))}">🔉</button><button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="playListenOnline(this.dataset.w)" title="${escAttr(t('listenOnline'))}">🌐</button> `
+    ? `<button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="speakEnglish(this.dataset.w)" title="${escAttr(t('listenPlay'))}">${audioIconSvg('up')}</button><button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="speakLocalForce(this.dataset.w)" title="${escAttr(t('listenLocal'))}">${audioIconSvg('down')}</button><button class="listen-btn-sm" type="button" data-w="${escAttr(q.question)}" onclick="playListenOnline(this.dataset.w)" title="${escAttr(t('listenOnline'))}">${audioIconSvg('globe')}</button> `
     : ''
   return `<div class="review-item ${r.isCorrect ? 'correct' : 'wrong'}">
     <div class="review-q">${i + 1}. ${audioBtns}${escHtml(q.question)}</div>

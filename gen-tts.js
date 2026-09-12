@@ -102,9 +102,12 @@ async function dl(text, OUT) {
 }
 
 // 3. 主流程：种子库 + CSV 附加 + 云端课库 → 全量去重 → 增量下载
+// v74：与网页端 _normSpeakText（app.js）一致 —— 斜杠读作停顿（'Starter / Appetizer' → 'Starter, Appetizer'），
+// 音频包文件名 key 基于规范化后的文本（网页端朗读前先规范化再算 key，两端严格一致）
+const normSpeak = s => String(s == null ? '' : s).replace(/\s*\/\s*/g, ', ').trim()
 ;(async () => {
   await pullCloudCourseTexts(uniq)
-  const finalTexts = [...new Set([...uniq, ...texts].map(t => t.trim()).filter(Boolean))]
+  const finalTexts = [...new Set([...uniq, ...texts].map(t => normSpeak(t)).filter(Boolean))]
   console.log('合计唯一发音文本:', finalTexts.length)
 
   const OUT = path.join(__dirname, 'tts')
