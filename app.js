@@ -1645,10 +1645,11 @@ function renderAdminList() {
             <td><span class="tag tag-type">${TYPE_LABELS[q.type]}</span></td>
             <td><span class="tag tag-diff-${q.difficulty}">${DIFFICULTY_LABELS[q.difficulty]}</span></td>
             <td>
+              ${q._seed ? `<span class="tag tag-type">${t('seedReadOnly')}</span>` : `
               <div class="admin-actions">
                 <button class="btn btn-ghost btn-sm" onclick="openEditModal('${q.id}')">${t('editBtn')}</button>
                 <button class="btn btn-danger btn-sm" onclick="adminDelete('${q.id}')">${t('deleteBtn')}</button>
-              </div>
+              </div>`}
             </td>
           </tr>`).join('')}
         </tbody>

@@ -122,7 +122,8 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   // 默认（全部）口径
   const fullHtml = getEl('dashCatBlock').innerHTML
   const catItems = (fullHtml.match(/cat-progress-item/g) || []).length
-  assert('全部口径渲染 11 个分类', catItems === 11, `got ${catItems}`)
+  // v67（题库 v9）后分类表 = 线下课题库 + 标帜餐厅常见词汇
+  assert('全部口径渲染 2 个分类（线下课题库+标帜餐厅常见词汇）', catItems === 2, `got ${catItems}`)
   // 全库分类1题数
   const cat1Full = Store.getStats().categoryStats.find(c => c.id === 1).totalQuestions
   assert('全部口径分类1题数正确', fullHtml.includes(`>${cat1Full}${' '}`) || fullHtml.includes(`>${cat1Full}<`), `期望 ${cat1Full}`)
@@ -131,9 +132,9 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   vm.runInContext("setDashDept('dining')", sandbox)
   const diningHtml = getEl('dashCatBlock').innerHTML
   const cat1Dining = Store.getStats('dining').categoryStats.find(c => c.id === 1).totalQuestions
-  const cat11Dining = Store.getStats('dining').categoryStats.find(c => c.id === 11).totalQuestions
+  const cat12Dining = Store.getStats('dining').categoryStats.find(c => c.id === 12).totalQuestions
   assert('饮食部口径分类1题数正确', diningHtml.includes(`>${cat1Dining}${' '}`) || diningHtml.includes(`>${cat1Dining}<`), `期望 ${cat1Dining}`)
-  assert('饮食部口径分类11题数 = all 题', diningHtml.includes(`>${cat11Dining}${' '}`) || diningHtml.includes(`>${cat11Dining}<`), `期望 ${cat11Dining}`)
+  assert('饮食部口径分类12题数正确（标帜餐厅词汇全 dining）', diningHtml.includes(`>${cat12Dining}${' '}`) || diningHtml.includes(`>${cat12Dining}<`), `期望 ${cat12Dining}`)
 
   console.log('\n' + (testFailed ? '❌ 部分测试失败' : '✅ 所有测试通过'))
   process.exit(testFailed ? 1 : 0)

@@ -225,7 +225,12 @@ const Store = {
         if (missing.length) mergedQuestions = mergedQuestions.concat(missing)
       }
       localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(mergedQuestions))
-      localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(INITIAL_CATEGORIES))
+      // v67（题库 v9）：分类表改为「线下课题库 + BANK 种子新分类（id>=12，如标帜餐厅常见词汇）」。
+      // 不再写 11 大主题 INITIAL_CATEGORIES——派生体系下 id=1 语义是「线下课题库」，写旧主题会名实错乱；
+      // 种子题不入本地库（getQuestions 运行时从 BANK 拼接，避免被 rebuildBankFromCourse 整体替换清掉）
+      localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(
+        [COURSE_BANK_CATEGORY].concat((typeof BANK !== 'undefined' && BANK.categories) ? BANK.categories.filter(c => Number(c.id) >= 12) : [])
+      ))
       localStorage.setItem(STORAGE_KEYS.BANK_VERSION, JSON.stringify(BANK_VERSION))
     }
     if (!localStorage.getItem(STORAGE_KEYS.QUESTIONS)) {
@@ -1028,7 +1033,10 @@ const Store = {
     if (fp === this._courseBankFp) return -1
     this._courseBankFp = fp
     localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(items))
-    localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify([COURSE_BANK_CATEGORY]))
+    // v67：派生分类表带上 BANK 种子新分类（id>=12），保证练习/管理端分类下拉完整
+    localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify([COURSE_BANK_CATEGORY].concat(
+      (typeof BANK !== 'undefined' && BANK.categories) ? BANK.categories.filter(c => Number(c.id) >= 12) : []
+    )))
     localStorage.setItem(qmapKey, JSON.stringify(qmap))
     return items.length
   },
@@ -1086,7 +1094,16 @@ const Store = {
 
   // Categories
   getCategories() {
-    return JSON.parse(localStorage.getItem(STORAGE_KEYS.CATEGORIES) || '[]')
+    const cats = JSON.parse(localStorage.getItem(STORAGE_KEYS.CATEGORIES) || '[]')
+    // v67：种子新分类（BANK 中 id>=12）拼接兜底——本地分类表可能被旧迁移/rebuild 覆盖，
+    // 拼接保证练习页/管理端下拉始终能选到种子题库分类（只拼接返回，不回写 localStorage）
+    if (typeof BANK !== 'undefined' && BANK.categories) {
+      const have = new Set(cats.map(c => Number(c.id)))
+      BANK.categories.forEach(c => {
+        if (Number(c.id) >= 12 && !have.has(Number(c.id))) { have.add(Number(c.id)); cats.push(c) }
+      })
+    }
+    return cats
   },
   getCategoryName(id) {
     const cats = this.getCategories()
@@ -1121,7 +1138,22 @@ const Store = {
   getQuestions() {
     const derived = JSON.parse(localStorage.getItem(STORAGE_KEYS.QUESTIONS) || '[]')
     const uploaded = this._getUploaded()
-    return uploaded.length ? derived.concat(uploaded) : derived
+    let qs = uploaded.length ? derived.concat(uploaded) : derived
+    // v67：种子题库拼接——BANK 中 id>=12 的新分类题（如 cat=12「标帜餐厅常见词汇」）。
+    // 种子题不写入本地存储（写入后会被 rebuildBankFromCourse 整体替换清掉），运行时拼接即可全平台共享；
+    // 按 id 去重防御（旧升级路径可能已把种子写入本地库）；_seed 标记供管理端只读展示
+    if (typeof BANK !== 'undefined' && BANK.questions) {
+      const have = new Set(qs.map(q => String(q.id)))
+      const seeds = []
+      BANK.questions.forEach(q => {
+        if (Number(q.category_id) >= 12 && !have.has(String(q.id))) {
+          have.add(String(q.id))
+          seeds.push(Object.assign({}, q, { _seed: true }))
+        }
+      })
+      if (seeds.length) qs = qs.concat(seeds)
+    }
+    return qs
   },
   // 按部门筛选题目：dining 看 dining+all，rooms 看 rooms+all，其他/空 看 all（含全部）
   // 实际调用方传 deptKey（'dining'|'rooms'|'other'|''|undefined）
@@ -1180,6 +1212,9 @@ const Store = {
   },
   updateQuestion(id, data) {
     const sid = String(id)
+    // v67：种子题（BANK 内置，cat>=12）只读——不支持编辑（管理端亦隐藏编辑按钮）
+    if (typeof BANK !== 'undefined' && BANK.questions &&
+        BANK.questions.some(q => Number(q.category_id) >= 12 && String(q.id) === sid)) return null
     // 优先在上传库中定位（id 带 'u' 前缀或命中上传题）
     let list = this._getUploaded()
     const ui = list.findIndex(q => String(q.id) === sid)
@@ -1198,6 +1233,9 @@ const Store = {
   },
   deleteQuestion(id) {
     const sid = String(id)
+    // v67：种子题（BANK 内置，cat>=12）只读——不支持删除（管理端亦隐藏删除按钮）
+    if (typeof BANK !== 'undefined' && BANK.questions &&
+        BANK.questions.some(q => Number(q.category_id) >= 12 && String(q.id) === sid)) return false
     let list = this._getUploaded()
     if (list.some(q => String(q.id) === sid)) {
       this._setUploaded(list.filter(q => String(q.id) !== sid))

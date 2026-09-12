@@ -71,9 +71,9 @@ function makeSandbox(prefill) {
   assert('自定义题 5000 保留且 dept 不变', qs1.some(q => q.id === 5000 && q.dept === 'dining'))
   assert('通用题 6000 保持 dept=all', qs1.some(q => q.id === 6000 && q.dept === 'all'))
   const bankVer1 = vm.runInContext('BANK.version', sb1)
-  assert('版本升级为 8', bankVer1 === 8, `got ${bankVer1}`)
+  assert('版本升级为 9', bankVer1 === 9, `got ${bankVer1}`)
   const verStored = sb1.localStorage.getItem('eq_bank_version')
-  assert('localStorage 版本写入 8', verStored === '8', `got ${verStored}`)
+  assert('localStorage 版本写入 9', verStored === '9', `got ${verStored}`)
 })().then(() => {
   // ---------- 场景 2：全新用户（storedVer=0 → 7），培训题直接并入饮食部 ----------
   return new Promise(resolve => {

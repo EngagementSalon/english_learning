@@ -89,12 +89,13 @@ The proper way to greet a visitor is with "good + part of the day".（问候访�
   assert('题干已无任何「连线题/词库连线/对应英文/对应中文」条目', remain.length === 0,
     '仍残留 ' + remain.length + ' 条：' + JSON.stringify(remain.slice(0, 3)))
 
-  // 总数校验：原 535 → 515（删 20 劣质）→ 527（v36 追加 12 条 voicematch 种子题，含分类 id 共 11+516）
+  // 总数校验：原 535 → 515（删 20 劣质）→ 527（v36 追加 12 条 voicematch 种子题）
+  // → v67（题库 v9）：追加分类 12「标帜餐厅常见词汇」684 题 → 题目 1200 + 分类 12 条 = 正则命中 1212
   const ids = []
   const re = /\{\s*id:\s*(\d+),/g
   let m
   while ((m = re.exec(src)) !== null) ids.push(+m[1])
-  assert('bank-data.js 总题数 = 527（535 - 20 + 12 voicematch 种子）', ids.length === 527, '现有 ' + ids.length)
+  assert('bank-data.js 总条目 = 1212（1200 题 + 12 分类）', ids.length === 1212, '现有 ' + ids.length)
 
   console.log('\n' + (failed ? '❌ 有失败项' : '✅ 全部通过'))
   process.exit(failed ? 1 : 0)

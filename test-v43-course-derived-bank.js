@@ -141,7 +141,8 @@ async function main() {
     assert('提取 5 道去重后题目（Q-A/Q-B/Q-C/Q-D/Q-LEGACY）', n === 5 && qs.length === 5, `n=${n}, len=${qs.length}`)
     assert('视频/线下课/草稿任务不参与', !qs.some(q => q.question === '草稿题'), JSON.stringify(qs.map(q => q.question)))
     assert('旧版无 type 字段作业的题目纳入', qs.some(q => q.question === 'Q-LEGACY'), JSON.stringify(qs.map(q => q.question)))
-    assert('统一分类 id=1「线下课题库」', cats.length === 1 && cats[0].id === 1 && cats[0].name === '线下课题库', JSON.stringify(cats))
+    // v67（题库 v9）后 rebuild 写入的分类表 = 线下课题库 + BANK 种子新分类（id>=12）
+    assert('统一分类 id=1「线下课题库」+ 种子分类 id=12', cats[0].id === 1 && cats[0].name === '线下课题库' && cats.length === 2 && Number(cats[1].id) === 12, JSON.stringify(cats))
     assert('题目 category_id=1 且 dept=all', qs.every(q => q.category_id === 1 && q.dept === 'all'))
     assert('difficulty 保留（1/2/3）', qs.every(q => q.difficulty >= 1 && q.difficulty <= 3), JSON.stringify(qs.map(q => q.difficulty)))
     const idMap = {}

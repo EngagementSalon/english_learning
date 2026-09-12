@@ -52,7 +52,7 @@ Store.init()
   // 1. 验证 BANK 版本 = 8
   console.log('\n1️⃣  题库版本')
   const bankVer = BANK.version
-  assert('BANK.version = 8', bankVer === 8, `got ${bankVer}`)
+  assert('BANK.version = 9', bankVer === 9, `got ${bankVer}`)
 
   // 2. 验证题目有 dept 字段
   console.log('\n2️⃣  题目 dept 字段')

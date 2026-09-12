@@ -103,7 +103,8 @@ async function main() {
     const catsAfter = JSON.parse(vm.runInContext('localStorage.getItem("eq_categories")', sb))
     assert('非课库题目被删除（3 条）', after.length === 3, 'got ' + after.length + ': ' + after.map(q => q.id).join(','))
     assert('课库题目保留（id 1/2/504）', [1, 2, 504].every(id => after.some(q => q.id === id)))
-    assert('自建分类被移除（剩 11 个分类）', catsAfter.length === 11, 'got ' + catsAfter.length)
+    // v67（题库 v9）后分类表 = 线下课题库(id1) + 标帜餐厅常见词汇(id12)：自建分类被移除，不再还原 11 大主题
+    assert('自建分类被移除（剩 线下课题库+标帜餐厅常见词汇 2 个）', catsAfter.length === 2 && catsAfter.some(c => c.id === 1) && catsAfter.some(c => c.id === 12), 'got ' + JSON.stringify(catsAfter.map(c => c.id)))
     assert('清理 flag 已置位', vm.runInContext('localStorage.getItem("eq_course_only_v42")', sb) === '1')
 
     // 二次 init 幂等：再混入非课库题不会被再次清理（flag 只执行一次）——

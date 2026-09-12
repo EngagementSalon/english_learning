@@ -60,8 +60,9 @@ Store.init()
   assert('getStats(dining) totalQuestions = dining+all', sDining.totalQuestions === diningQs.length + allDeptQs.length, `got ${sDining.totalQuestions}`)
   const cat1Dining = sDining.categoryStats.find(c => c.id === 1)
   assert('getStats(dining) 分类1 = dining 分类1 题数', cat1Dining.totalQuestions === diningQs.filter(q => q.category_id === 1).length, `got ${cat1Dining.totalQuestions}`)
-  const cat11Dining = sDining.categoryStats.find(c => c.id === 11)
-  assert('getStats(dining) 分类11 = all 题数', cat11Dining.totalQuestions === allDeptQs.length, `got ${cat11Dining.totalQuestions}`)
+  const cat12Dining = sDining.categoryStats.find(c => c.id === 12)
+  assert('getStats(dining) 分类12 = dining 分类12 题数（标帜餐厅词汇全 dining）', cat12Dining && cat12Dining.totalQuestions === diningQs.filter(q => q.category_id === 12).length,
+    `got ${cat12Dining && cat12Dining.totalQuestions} 期望 ${diningQs.filter(q => q.category_id === 12).length}`)
 
   const sRooms = Store.getStats('rooms')
   assert('getStats(rooms) totalQuestions = rooms+all', sRooms.totalQuestions === roomsQs.length + allDeptQs.length, `got ${sRooms.totalQuestions}`)
@@ -80,17 +81,17 @@ Store.init()
   const p2 = diningQs.filter(q => q.category_id === 1)[1]
   Store.addProgress({ question_id: p1.id, category_id: 1, dept: 'dining', type: p1.type, correct: true, mode: 'practice' })
   Store.addProgress({ question_id: p2.id, category_id: 1, dept: 'dining', type: p2.type, correct: false, mode: 'practice' })
-  // 模拟：答了 1 道分类11 all 题
-  const p3 = allDeptQs[0]
-  Store.addProgress({ question_id: p3.id, category_id: 11, dept: 'all', type: p3.type, correct: true, mode: 'practice' })
+  // 模拟：答了 1 道分类12（标帜餐厅词汇，dining）题 —— v67 后分类表为 线下课题库+标帜餐厅常见词汇
+  const p3 = diningQs.find(q => q.category_id === 12)
+  Store.addProgress({ question_id: p3.id, category_id: 12, dept: 'dining', type: p3.type, correct: true, mode: 'practice' })
 
   const sDining2 = Store.getStats('dining')
   const cat1b = sDining2.categoryStats.find(c => c.id === 1)
   assert('分类1 answered = 2', cat1b.answered === 2, `got ${cat1b.answered}`)
   assert('分类1 accuracy = 50%', cat1b.accuracy === 50, `got ${cat1b.accuracy}`)
-  const cat11b = sDining2.categoryStats.find(c => c.id === 11)
-  assert('分类11 answered = 1', cat11b.answered === 1, `got ${cat11b.answered}`)
-  assert('分类11 accuracy = 100%', cat11b.accuracy === 100, `got ${cat11b.accuracy}`)
+  const cat12b = sDining2.categoryStats.find(c => c.id === 12)
+  assert('分类12 answered = 1', cat12b.answered === 1, `got ${cat12b.answered}`)
+  assert('分类12 accuracy = 100%', cat12b.accuracy === 100, `got ${cat12b.accuracy}`)
 
   // progress 记录带 dept
   const prog = Store.getProgress()
