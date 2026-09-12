@@ -304,10 +304,12 @@ const CloudSync = {
         break
       case 'chy':
         // v71 七天挑战阶段完成上报：保留每次完成记录（练习重练多条；水平测试仅一条）
+        // v73：usedSec = 阶段净用时秒（积分榜用；旧事件无此字段按 0，不影响积分）
         r.chy = r.chy || []
         r.chy.push({
           day: Number(d.day) || 0, si: Number(d.si) || 0, kind: String(d.kind || 'practice'),
-          correct: Number(d.correct) || 0, total: Number(d.total) || 0, at: ev.ts,
+          correct: Number(d.correct) || 0, total: Number(d.total) || 0,
+          usedSec: Number(d.usedSec) || 0, at: ev.ts,
         })
         break
       case 'perqfix':

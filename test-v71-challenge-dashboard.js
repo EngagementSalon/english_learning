@@ -1,6 +1,6 @@
-// ====== 测试 v71：七天挑战看板统计（chy/chQ 聚合 + 挑战板块渲染） ======
-// ① CloudSync._apply：chy 事件聚合 chy 数组；perq(ch=1) 聚合 chQ 错次；普通 perq 走 perQ；rename 合并
-// ② renderDashChallengeBlock：参加名单/进度/正确率/Day1-Day7 测试分/错题排行；无数据显示提示
+// ====== 测试 v71/v73：七天挑战看板统计（chy/chQ 聚合 + 挑战板块渲染） ======
+// ① CloudSync._apply：chy 事件聚合 chy 数组（v73：usedSec 旧事件补 0）；perq(ch=1) 聚合 chQ 错次；普通 perq 走 perQ；rename 合并
+// ② renderDashChallengeBlock：积分榜（v73：首次完成口径 答对×100−用时，🥇🥈🥉+奖品提示）/参加名单/进度/正确率/Day1-Day7 测试分/错题排行；无数据显示提示
 const fs = require('fs')
 const path = require('path')
 const vm = require('vm')
@@ -63,7 +63,7 @@ function makeSandbox() {
     // 挑战阶段完成（练习重练 2 次 + 测试 1 次）
     CloudSync._apply(map, { u: 'bob', ty: 'chy', ts: 100, d: { day: 1, si: 0, kind: 'test', correct: 8, total: 20 } })
     CloudSync._apply(map, { u: 'bob', ty: 'chy', ts: 101, d: { day: 1, si: 1, kind: 'practice', correct: 25, total: 30 } })
-    CloudSync._apply(map, { u: 'bob', ty: 'chy', ts: 102, d: { day: 1, si: 1, kind: 'practice', correct: 28, total: 30 } })
+    CloudSync._apply(map, { u: 'bob', ty: 'chy', ts: 102, d: { day: 1, si: 1, kind: 'practice', correct: 28, total: 30, usedSec: 315 } })
     // 挑战错题（ch 标记）与普通练习明细
     CloudSync._apply(map, { u: 'bob', ty: 'perq', ts: 103, d: { qid: 8003, correct: 0, ch: 1 } })
     CloudSync._apply(map, { u: 'bob', ty: 'perq', ts: 104, d: { qid: 8003, correct: 0, ch: 1 } })
@@ -78,6 +78,7 @@ function makeSandbox() {
     const x = vm.runInContext('window.__map.bob.chy[0]', sb)
     return x.day === 1 && x.si === 0 && x.kind === 'test' && x.correct === 8 && x.total === 20 && x.at === 100
   })())
+  assert('chy usedSec 聚合（新事件 315 / 旧事件补 0）', vm.runInContext('window.__map.bob.chy[2].usedSec === 315 && window.__map.bob.chy[1].usedSec === 0', sb))
   assert('chQ[qid] 累计错次（8003×2）', vm.runInContext('window.__map.bob.chQ["8003"].total === 2 && window.__map.bob.chQ["8003"].correct === 0', sb))
   assert('普通 perq 不进 chQ（8001 走 perQ）', vm.runInContext('!window.__map.bob.chQ["8001"] && window.__map.bob.perQ["8001"].total === 1 && window.__map.bob.perQ["8001"].correct === 1', sb))
   assert('无用户事件被忽略', vm.runInContext('Object.keys(window.__map).length === 1', sb))
@@ -106,18 +107,19 @@ function makeSandbox() {
       {
         username: 'bob', name: '小王', dept: 'dining',
         chy: [
-          { day: 1, si: 0, kind: 'test', correct: 16, total: 20, at: 100 },       // Day1 80 分
-          { day: 1, si: 1, kind: 'practice', correct: 25, total: 30, at: 101 },
-          { day: 2, si: 0, kind: 'practice', correct: 40, total: 50, at: 200 },
+          { day: 1, si: 0, kind: 'test', correct: 16, total: 20, at: 100, usedSec: 120 },       // Day1 80 分
+          { day: 1, si: 1, kind: 'practice', correct: 25, total: 30, at: 101, usedSec: 200 },
+          { day: 1, si: 1, kind: 'practice', correct: 30, total: 30, at: 103, usedSec: 60 },    // v73 重练：不计积分（首次完成口径）
+          { day: 2, si: 0, kind: 'practice', correct: 40, total: 50, at: 200, usedSec: 300 },
         ],
         chQ: { '8003': { correct: 0, total: 2 }, '8006': { correct: 0, total: 1 } },
       },
       {
         username: 'carol', name: '小李', dept: 'rooms',
         chy: [
-          { day: 1, si: 0, kind: 'test', correct: 8, total: 20, at: 100 },        // Day1 40 分
-          { day: 7, si: 0, kind: 'practice', correct: 30, total: 30, at: 500 },
-          { day: 7, si: 1, kind: 'test', correct: 18, total: 20, at: 501 },       // Day7 90 分
+          { day: 1, si: 0, kind: 'test', correct: 8, total: 20, at: 100, usedSec: 480 },        // Day1 40 分
+          { day: 7, si: 0, kind: 'practice', correct: 30, total: 30, at: 500, usedSec: 260 },
+          { day: 7, si: 1, kind: 'test', correct: 18, total: 20, at: 501, usedSec: 150 },       // Day7 90 分
         ],
         chQ: { '8003': { correct: 0, total: 1 } },
       },
@@ -126,7 +128,13 @@ function makeSandbox() {
     vm.runInContext('renderDashChallengeBlock(window.__rows)', sb)
     const html = vm.runInContext('window.__els.dashChallengeBlock.innerHTML', sb)
     assert('参加人数 2', html.includes('>2<'), '')
-    assert('总答题数 20+30+50+20+30+20=170', html.includes('170'))
+    assert('总答题数 20+30+30+50+20+30+20=200', html.includes('200'))
+    assert('积分榜标题与奖品提示渲染', html.includes('七天挑战积分榜') && html.includes('前三名可获得奖品'))
+    assert('积分规则渲染', html.includes('× 100'))
+    assert('bob 积分 7480（81 对×100−620s；重练 30 对/60s 不计）', html.includes('7480'))
+    assert('carol 积分 4710（56 对×100−890s）', html.includes('4710'))
+    assert('🥇 bob 排在 🥈 carol 之前（积分降序）', html.indexOf('🥇') >= 0 && html.indexOf('🥇') < html.indexOf('🥈') && html.indexOf('7480') < html.indexOf('4710'))
+    assert('用时格式化（620s→10:20 / 890s→14:50）', html.includes('10:20') && html.includes('14:50'))
     assert('学员 bob / carol 均在名单', html.includes('bob') && html.includes('carol'))
     assert('进度文案（chDashProgress）渲染', html.includes('/9'))
     assert('Day1 测试分 80 与 40 显示', html.includes('80') && html.includes('40'))

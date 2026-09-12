@@ -261,6 +261,7 @@ function chStartStage(day, si) {
     index: 0, phase: 'quiz', submitted: false, correctCount: 0,
     firstWrong: [],                       // v72：首轮答错的题（错题回顾 + 次日追加复习的数据源）
     extraCount: Math.max(0, qs.length - m.count),   // v72：次日追加的前一天错题数
+    startedAt: Date.now(),                // v73：阶段开始时间 → chy usedSec（积分榜速度分）
   }
   if (chs.kind === 'test') {
     // v71：水平测试启用防作弊 —— 切屏 3 次强制交卷（按已答判分计次，与在线考试同口径）；管理员自动豁免
@@ -517,6 +518,7 @@ function chPick(i) {
 
 // 完成记录写入 days[day].stages[si]；并上报云端（chy 事件 → 数据看板挑战统计）。
 // v72：stage 记录追加 wrong = 首轮答错的 qid 列表（供次日额外复习）；chy 的 correct/total 为首次作答口径（不含回顾轮）。
+// v73：chy 增加 usedSec = 阶段净用时秒（从进入环节到完成；退出重进会重置 startedAt，无法借重练刷速度分）
 function chRecordStage(correct, total, wrongQids) {
   if (!challengeState.days[chs.day]) challengeState.days[chs.day] = { stages: {} }
   const d = challengeState.days[chs.day]
@@ -524,7 +526,8 @@ function chRecordStage(correct, total, wrongQids) {
   d.stages[chs.si] = { done: true, at: Date.now(), correct, total, wrong: (wrongQids || []).map(String) }
   challengeSave()
   Store.trackPractice(correct, total)
-  try { Store.reportChallengeStage(chs.day, chs.si, chs.kind, correct, total) } catch (e) {}
+  const usedSec = chs.startedAt ? Math.max(0, Math.round((Date.now() - chs.startedAt) / 1000)) : 0
+  try { Store.reportChallengeStage(chs.day, chs.si, chs.kind, correct, total, usedSec) } catch (e) {}
 }
 
 // ---- 每日练习（逐题反馈） ----

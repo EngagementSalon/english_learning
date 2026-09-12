@@ -3051,14 +3051,27 @@ function renderDashChallengeBlock(rows) {
     const t1 = (r.chy || []).find(x => x.kind === 'test' && x.day === 1)
     const t7 = (r.chy || []).find(x => x.kind === 'test' && x.day === 7)
     const score = x => x && x.total ? Math.round(x.correct / x.total * 100) : null
+    // v73 积分榜：每环节按首次完成计（day-si 去重取 at 最早一条，重练不刷速度分）
+    const firstByStage = {}
+    ;(r.chy || []).forEach(x => {
+      const k = x.day + '-' + x.si
+      if (!firstByStage[k] || (x.at || 0) < (firstByStage[k].at || 0)) firstByStage[k] = x
+    })
+    let lbC = 0, lbT = 0
+    Object.keys(firstByStage).forEach(k => { lbC += firstByStage[k].correct || 0; lbT += firstByStage[k].usedSec || 0 })
     return {
       username: r.username, name: r.name, dept: r.dept,
       maxDay, stagesDone, q, acc: q > 0 ? Math.round(c / q * 100) : 0,
       s1: score(t1), s7: score(t7),
+      lbC, lbT, lbScore: lbC * 100 - lbT,
       chQ: r.chQ || {},
     }
   })
   list.sort((a, b) => b.q - a.q)
+  // v73 积分榜排序：积分（答对×100−用时秒）高者在前；同分用时短者在前，再比答对数
+  const lbList = list.slice().sort((a, b) => (b.lbScore - a.lbScore) || (a.lbT - b.lbT) || (b.lbC - a.lbC))
+  const fmtSec = s => { s = Math.max(0, s || 0); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') }
+  const medal = i => (i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : String(i + 1))
   // 错题排行：跨学员合并 chQ（错次），取错误次数最多的 50 题
   const wrongAgg = {}
   list.forEach(p => {
@@ -3090,6 +3103,31 @@ function renderDashChallengeBlock(rows) {
         <div class="dash-stat"><div class="dash-val">${list.length}</div><div class="dash-lbl">${t('dashChJoin')}</div></div>
         <div class="dash-stat"><div class="dash-val">${totalQ}</div><div class="dash-lbl">${t('dashChTotalQ')}</div></div>
         <div class="dash-stat"><div class="dash-val">${avgAcc}%</div><div class="dash-lbl">${t('dashChAvg')}</div></div>
+      </div>
+      <div style="margin:4px 0 10px;padding:10px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;color:#92400e;font-size:14px;font-weight:600">🏆 ${t('dashChPrizeHint')}</div>
+      <h4 style="margin:14px 0 6px">🏆 ${t('dashChRankTitle')}</h4>
+      <p class="form-hint" style="margin:0 0 8px">${t('dashChScoreRule')}</p>
+      <div style="overflow-x:auto">
+        <table class="admin-table" style="font-size:13px">
+          <thead><tr>
+            <th style="text-align:center">${t('dashChThRank')}</th>
+            <th>${t('thUsername')}</th><th>${t('thName')}</th><th>${t('thDept')}</th>
+            <th style="text-align:center">${t('dashChThScore')}</th>
+            <th style="text-align:center">${t('dashChThCorrect')}</th>
+            <th style="text-align:center">${t('dashChThTime')}</th>
+          </tr></thead>
+          <tbody>
+            ${lbList.map((p, i) => `<tr${i < 3 ? ' style="background:#fffbeb"' : ''}>
+              <td style="text-align:center;font-size:15px">${medal(i)}</td>
+              <td>${escHtml(p.username)}</td>
+              <td>${escHtml(p.name || '—')}</td>
+              <td>${escHtml(p.dept || '—')}</td>
+              <td style="text-align:center;font-weight:700;color:#b45309">${p.lbScore}</td>
+              <td style="text-align:center">${p.lbC}</td>
+              <td style="text-align:center;color:#6b7280">${fmtSec(p.lbT)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
       </div>
       <div style="overflow-x:auto">
         <table class="admin-table" style="font-size:13px">

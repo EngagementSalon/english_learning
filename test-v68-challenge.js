@@ -264,6 +264,8 @@ const DAY = 86400000
       const o = vm.runInContext('window.__acOpts', sb)
       return o && o.maxViolations === 3 && String(o.onSubmit).includes('chCheatSubmit')
     })())
+    // v73：快进 90 秒验证 chy usedSec（阶段净用时）
+    vm.runInContext('window.__origNow = Date.now; Date.now = () => window.__origNow() + 90000', sb)
     vm.runInContext('finishChallengeTest()', sb)
     assert('交卷后 AntiCheat.stop 已调用', (vm.runInContext('window.__acStop', sb) || 0) >= 1)
     assert('Day1 测试判分 10/20 = 50 分', vm.runInContext('chs.score', sb) === 50, `got ${vm.runInContext('chs.score', sb)}`)
@@ -273,11 +275,13 @@ const DAY = 86400000
       const r = st.days[1] && st.days[1].stages[0]
       return r && r.done && r.correct === 10 && r.total === 20 && Array.isArray(r.wrong) && r.wrong.length === 10
     })())
-    assert('chy 事件已上报（day1 si0 test 10/20）', (() => {
+    assert('chy 事件已上报（day1 si0 test 10/20 + usedSec≈90s）', (() => {
       const evs = vm.runInContext('(window.__events||[]).filter(e => e.ty === "chy")', sb)
       const e = evs[0]
-      return evs.length === 1 && e.d.day === 1 && e.d.si === 0 && e.d.kind === 'test' && e.d.correct === 10 && e.d.total === 20
+      return evs.length === 1 && e.d.day === 1 && e.d.si === 0 && e.d.kind === 'test' && e.d.correct === 10 && e.d.total === 20 &&
+        typeof e.d.usedSec === 'number' && e.d.usedSec >= 90 && e.d.usedSec <= 92
     })())
+    vm.runInContext('Date.now = window.__origNow', sb)
     assert('挑战错题 perq(ch=1) 10 条、对题不报', (() => {
       const evs = vm.runInContext('(window.__events||[]).filter(e => e.ty === "perq" && e.d.ch)', sb)
       return evs.length === 10 && evs.every(e => e.d.correct === 0)
@@ -329,10 +333,11 @@ const DAY = 86400000
       return r && r.done && r.correct === 3 && r.total === 10 && Array.isArray(r.wrong) && r.wrong.length === 1 && r.wrong[0] === String(vm.runInContext('chs.questions[3].id', sb))
     })())
     assert('trackPractice(3, 10) 已调用', vm.runInContext('window.__track && window.__track.c === 3 && window.__track.t === 10', sb))
-    assert('chy 累计 2 条（practice 3/10 首次口径）', (() => {
+    assert('chy 累计 2 条（practice 3/10 首次口径 + usedSec 数值）', (() => {
       const evs = vm.runInContext('(window.__events||[]).filter(e => e.ty === "chy")', sb)
       const e = evs[1]
-      return evs.length === 2 && e.d.day === 1 && e.d.si === 1 && e.d.kind === 'practice' && e.d.correct === 3 && e.d.total === 10
+      return evs.length === 2 && e.d.day === 1 && e.d.si === 1 && e.d.kind === 'practice' && e.d.correct === 3 && e.d.total === 10 &&
+        typeof e.d.usedSec === 'number' && e.d.usedSec >= 0
     })())
     assert('addProgress 累计 26 条（测试 20 + 练习 4 + 回顾 2）', vm.runInContext('window.__progress.length', sb) === 26, `got ${vm.runInContext('window.__progress.length', sb)}`)
     assert('练习不新增 AntiCheat.start（仍 1 次）', (vm.runInContext('window.__acStart', sb) || 0) === 1)
@@ -501,14 +506,17 @@ const DAY = 86400000
     assert('防作弊启动（test 阶段 AntiCheat.start）', chSrc.includes('AntiCheat.start({ maxViolations: 3, onSubmit: chCheatSubmit })'))
     assert('防作弊强制交卷 chCheatSubmit', chSrc.includes('function chCheatSubmit'))
     assert('交卷/退出 AntiCheat.stop', (chSrc.match(/AntiCheat\.stop\(\)/g) || []).length >= 3)
-    assert('chy 上报 reportChallengeStage', chSrc.includes('Store.reportChallengeStage(chs.day, chs.si, chs.kind'))
+    assert('chy 上报 reportChallengeStage（含 usedSec）', chSrc.includes('Store.reportChallengeStage(chs.day, chs.si, chs.kind, correct, total, usedSec)'))
+    assert('chy startedAt 记录（chStartStage）', chSrc.includes('startedAt: Date.now()'))
+    assert('chy usedSec 净用时计算', chSrc.includes('Math.round((Date.now() - chs.startedAt) / 1000)'))
     assert('addProgress 带 challenge:true（练习+回顾+测试 = 3 处）', (chSrc.match(/challenge: true/g) || []).length === 3, `got ${(chSrc.match(/challenge: true/g) || []).length}`)
     assert('stage 记录含 wrong 字段', chSrc.includes('wrong: (wrongQids || []).map(String)'))
     const storeSrc = fs.readFileSync(path.join(__dirname, 'store.js'), 'utf-8')
-    assert('store.reportChallengeStage 定义', storeSrc.includes('reportChallengeStage(day, si, kind, correct, total)'))
+    assert('store.reportChallengeStage 定义（6 参含 usedSec）', storeSrc.includes('reportChallengeStage(day, si, kind, correct, total, usedSec)'))
+    assert('store chy 事件携带 usedSec', storeSrc.includes('usedSec: usedSec || 0'))
     assert('perq 只报挑战错题（省空间）', storeSrc.includes('if (!record.correct) this.reportPerQuestion(record.question_id, false, true)'))
     const cloudSrc = fs.readFileSync(path.join(__dirname, 'cloud-store.js'), 'utf-8')
-    assert("cloud-store chy 事件分支", cloudSrc.includes("case 'chy':"))
+    assert("cloud-store chy 事件分支（存 usedSec）", cloudSrc.includes("case 'chy':") && cloudSrc.includes('usedSec: Number(d.usedSec) || 0'))
     assert('cloud-store chQ 聚合', cloudSrc.includes('r.chQ = r.chQ || {}'))
     assert('cloud-store rename 合并 chy/chQ', cloudSrc.includes('tgt.chy = (tgt.chy || []).concat(r.chy)'))
   }
