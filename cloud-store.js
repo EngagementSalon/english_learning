@@ -242,6 +242,19 @@ const CloudSync = {
               }
             })
           }
+          // 合并七天挑战错题明细
+          if (r.chQ) {
+            tgt.chQ = tgt.chQ || {}
+            Object.keys(r.chQ).forEach(qid => {
+              const a = r.chQ[qid], b = tgt.chQ[qid]
+              tgt.chQ[qid] = {
+                correct: (b ? b.correct : 0) + a.correct,
+                total: (b ? b.total : 0) + a.total
+              }
+            })
+          }
+          // 合并七天挑战阶段完成记录
+          if (r.chy && r.chy.length) tgt.chy = (tgt.chy || []).concat(r.chy)
         } else {
           map[nu] = Object.assign({}, r, { username: nu })
         }
@@ -280,14 +293,22 @@ const CloudSync = {
         if (d.dept !== undefined) r.dept = String(d.dept || '')
         break
       case 'perq':
-        // 单题答题对错上报：聚合到 r.perQ[qid]
+        // 单题答题对错上报：普通作答聚合到 r.perQ[qid]；七天挑战错答（d.ch）聚合到 r.chQ[qid]（total=错次）
         if (d.qid != null) {
-          r.perQ = r.perQ || {}
+          const tgt = d.ch ? (r.chQ = r.chQ || {}) : (r.perQ = r.perQ || {})
           const qid = String(d.qid)
-          const rec = r.perQ[qid] || (r.perQ[qid] = { correct: 0, total: 0 })
+          const rec = tgt[qid] || (tgt[qid] = { correct: 0, total: 0 })
           rec.total += 1
           if (d.correct) rec.correct += 1
         }
+        break
+      case 'chy':
+        // v71 七天挑战阶段完成上报：保留每次完成记录（练习重练多条；水平测试仅一条）
+        r.chy = r.chy || []
+        r.chy.push({
+          day: Number(d.day) || 0, si: Number(d.si) || 0, kind: String(d.kind || 'practice'),
+          correct: Number(d.correct) || 0, total: Number(d.total) || 0, at: ev.ts,
+        })
         break
       case 'perqfix':
         // v38 看字选音发音修复：无效错答从每题统计的分母中剔除（correct 不变——错答本就未计入）

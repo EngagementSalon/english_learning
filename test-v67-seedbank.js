@@ -1,12 +1,14 @@
 // ====== 测试 v67：种子题库拼接（分类12「标帜餐厅常见词汇」，BANK v9）======
-// ① BANK 结构：cat=12 存在，684 题（listen/single/voicematch 各 228），id 8001-8684，dept 全 dining
+// （v71 更新：cat12 原 228 道 voicematch「看字选音」已改造为 listen「听音选中文义」，
+//   改造后 listen 456 + single 228 = 684 题、id/difficulty 不变、干扰项同池且与同词 listen 题不相交）
+// ① BANK 结构：cat=12 存在，684 题（listen 456 + single 228，无 voicematch），id 8001-8684，dept 全 dining
 // ② getQuestions 拼接：v43 清空后的空库也能看到种子题（_seed 标记）；本地库同 id 题优先（去重防御）
 // ③ getCategories 拼接：空分类表 → 含 id=12；已含 → 不重复
 // ④ 老设备迁移（eq_bank_version=8 → 9）：分类表 = 线下课题库 + 种子新分类；派生题保留
 // ⑤ 部门筛选：dining 学员可单独刷 684 题；rooms 学员 0 题
 // ⑥ rebuildBankFromCourse 整体替换派生库后种子题仍可见、分类表仍含 cat=12
 // ⑦ 种子题只读：updateQuestion → null，deleteQuestion → false
-// ⑧ 题型内容格式：listen/single 题干英文选项中文；voicematch 题干与选项全英文
+// ⑧ 题型内容格式：listen/single 题干英文、选项中文（v71 起原 voicematch 题亦为 listen + 中文选项）
 // ⑨ 源码接线：app.js 管理端 _seed 只读渲染、i18n seedReadOnly 双语
 const fs = require('fs')
 const path = require('path')
@@ -51,15 +53,15 @@ function makeSandbox(pre) {
     assert('分类 id=12「标帜餐厅常见词汇」存在', !!cat12 && cat12.name === '标帜餐厅常见词汇', JSON.stringify(cat12))
     const q12 = BANK.questions.filter(q => Number(q.category_id) === 12)
     assert('cat12 共 684 题', q12.length === 684, `got ${q12.length}`)
-    assert('listen/single/voicematch 各 228', ['listen', 'single', 'voicematch'].every(ty => q12.filter(q => q.type === ty).length === 228),
-      JSON.stringify(['listen', 'single', 'voicematch'].map(ty => q12.filter(q => q.type === ty).length)))
+    assert('listen 456 / single 228 / voicematch 0（v71 改造后）', q12.filter(q => q.type === 'listen').length === 456 && q12.filter(q => q.type === 'single').length === 228 && q12.filter(q => q.type === 'voicematch').length === 0,
+      JSON.stringify(['listen', 'single', 'voicematch'].map(ty => ty + ':' + q12.filter(q => q.type === ty).length)))
     const ids = q12.map(q => q.id)
     assert('id 区间 8001-8684 且唯一', Math.min(...ids) === 8001 && Math.max(...ids) === 8684 && new Set(ids).size === 684)
     assert('dept 全部 dining（餐饮部题库下）', q12.every(q => q.dept === 'dining'))
     assert('全部 4 选项 + answer [0] + 无重复选项', q12.every(q => q.options.length === 4 && JSON.stringify(q.answer) === '[0]' && new Set(q.options).size === 4))
-    assert('listen/single 题干英文选项中文', q12.filter(q => q.type !== 'voicematch').every(q => /^[\x00-\x7F]/.test(q.question) && q.options.every(o => /[\u4e00-\u9fff]/.test(o))),
+    assert('全部题干英文、选项中文（v71 后无英文选项题）', q12.every(q => /^[\x00-\x7F]/.test(q.question) && q.options.every(o => /[\u4e00-\u9fff]/.test(o))),
       '存在题干非英文或选项非中文的题')
-    assert('voicematch 题干与选项全英文', q12.filter(q => q.type === 'voicematch').every(q => /^[\x00-\x7F]/.test(q.question) && q.options.every(o => /^[\x00-\x7F]/.test(o))))
+    assert('cat12 无 voicematch；原 vm 题（id%3==2）均为 listen', q12.filter(q => q.id % 3 === 2).length === 228 && q12.filter(q => q.id % 3 === 2).every(q => q.type === 'listen'))
     assert('与旧种子 id 无重叠', !BANK.questions.some(q => Number(q.category_id) < 12 && q.id >= 8001 && q.id <= 8684))
   }
 
@@ -153,27 +155,34 @@ function makeSandbox(pre) {
   }
 
   // ---------- ⑦ 内容抽查 ----------
-  console.log('\n[7] 内容抽查（干扰项质量）')
+  console.log('\n[7] 内容抽查（干扰项质量，v71 改造后形态）')
   {
     const sb = makeSandbox()
     const BANK = vm.runInContext('BANK', sb)
     const q12 = BANK.questions.filter(q => Number(q.category_id) === 12)
     const byEn = en => q12.filter(q => q.question === en)
     const milk = byEn('Oat milk')
-    assert('Oat milk 三题齐全', milk.length === 3 && new Set(milk.map(q => q.type)).size === 3, JSON.stringify(milk.map(q => q.type)))
-    const vmMilk = milk.find(q => q.type === 'voicematch')
-    assert('voicematch 干扰含同系奶基词（* milk）', vmMilk.options.slice(1).some(o => /milk$/i.test(o)), JSON.stringify(vmMilk.options))
+    assert('Oat milk 三题齐全（2 listen + 1 single）', milk.length === 3 && milk.filter(q => q.type === 'listen').length === 2 && milk.filter(q => q.type === 'single').length === 1, JSON.stringify(milk.map(q => q.type)))
+    const vmMilk = milk.find(q => q.id % 3 === 2)   // 原 voicematch（id 8078），v71 改造为 listen
+    assert('原 vm 题（8078）现为 listen + 中文选项 + 单句解析', !!vmMilk && vmMilk.type === 'listen' && vmMilk.options.every(o => /[\u4e00-\u9fff]/.test(o)) && /^Oat milk = .+。$/.test(vmMilk.explanation), JSON.stringify(vmMilk))
+    const milkListen = milk.filter(q => q.type === 'listen')
+    const dSets = milkListen.map(q => new Set(q.options.slice(1)))
+    assert('同词两 listen 干扰项无交集（排除同词 listen 干扰）', dSets[0].size === 3 && dSets[1].size === 3 && [...dSets[0]].every(o => !dSets[1].has(o)), JSON.stringify(milkListen.map(q => q.options)))
+    assert('改造题干扰项来自同池中文释义（含奶基/餐饮词均可）', milkListen.every(q => q.options.slice(1).every(o => typeof o === 'string' && o.length > 0)))
     const explOk = q12.every(q => typeof q.explanation === 'string' && q.explanation.length > 4)
     assert('全部有解析', explOk)
-    // 干扰项不得等于正确项
-    assert('中文干扰项 ≠ 正确释义', q12.filter(q => q.type !== 'voicematch').every(q => {
+    // 干扰项不得等于正确项（v71 后全库 684 题均为中文选项，一并校验）
+    assert('中文干扰项 ≠ 正确释义（全部 684 题）', q12.every(q => {
       const correct = q.options[q.answer[0]]
       return q.options.filter(o => o === correct).length === 1
     }))
-    assert('voicematch 干扰项 ≠ 正确词', q12.filter(q => q.type === 'voicematch').every(q => {
-      const correct = q.options[q.answer[0]]
-      return q.options.filter(o => o === correct).length === 1
-    }))
+    // 同词多题正确释义一致（听音/看题两种入口答案必须相同）
+    const groupOK = (() => {
+      const g = {}
+      q12.forEach(q => { (g[q.question] = g[q.question] || []).push(q.options[q.answer[0]]) })
+      return Object.keys(g).every(en => new Set(g[en]).size === 1)
+    })()
+    assert('同词各题正确释义一致', groupOK)
   }
 
   // ---------- ⑧ 源码接线 ----------

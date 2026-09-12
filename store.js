@@ -1287,17 +1287,32 @@ const Store = {
     localStorage.setItem(STORAGE_KEYS.PROGRESS, JSON.stringify(list))
     // —— 每道题答题明细上报云端（管理员看板跨设备聚合每题正确率）——
     // 练习/在线考试都会走 addProgress，这里统一上报，无需逐个调用点改
+    // record.challenge = true 表示七天挑战作答：只上报错题（chQ 省空间，对答正确率走 chy 阶段事件）
     if (record && record.question_id != null && typeof CloudSync !== 'undefined') {
-      this.reportPerQuestion(record.question_id, !!record.correct)
+      if (record.challenge) {
+        if (!record.correct) this.reportPerQuestion(record.question_id, false, true)
+      } else {
+        this.reportPerQuestion(record.question_id, !!record.correct)
+      }
     }
   },
   // 上报单题答题对错到云端（perq 事件）
-  // 云端聚合结构：聚合记录的 perQ[qid] = { correct, total }
-  reportPerQuestion(qid, correct) {
+  // 云端聚合结构：聚合记录的 perQ[qid] = { correct, total }；挑战错题（isChallenge）聚合到 chQ[qid] = { wrong }
+  reportPerQuestion(qid, correct, isChallenge) {
     const s = this.getSession()
     if (!s || !s.username) return
     if (typeof CloudSync === 'undefined' || !CloudSync.enqueue) return
-    CloudSync.enqueue({ u: s.username, n: s.name || '', ty: 'perq', d: { qid: Number(qid), correct: correct ? 1 : 0 } })
+    const d = isChallenge
+      ? { qid: Number(qid), correct: 0, ch: 1 }
+      : { qid: Number(qid), correct: correct ? 1 : 0 }
+    CloudSync.enqueue({ u: s.username, n: s.name || '', ty: 'perq', d })
+  },
+  // v71：七天挑战阶段完成上报（chy 事件）→ 数据看板聚合参与名单 / 进度 / 每阶段分数 / Day1-Day7 测试分
+  reportChallengeStage(day, si, kind, correct, total) {
+    const s = this.getSession()
+    if (!s || !s.username) return
+    if (typeof CloudSync === 'undefined' || !CloudSync.enqueue) return
+    CloudSync.enqueue({ u: s.username, n: s.name || '', ty: 'chy', d: { day: day || 0, si: si || 0, kind: kind || 'practice', correct: correct || 0, total: total || 0 } })
   },
 
   // v38：看字选音发音修复的分数修正（一次性迁移，由 init 调用，见 init 内说明）

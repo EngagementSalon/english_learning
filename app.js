@@ -2956,6 +2956,8 @@ async function renderDashboard() {
 
     <div id="dashCatBlock"></div>
 
+    <div id="dashChallengeBlock"></div>
+
     <h2 style="margin:24px 0 12px;font-size:18px">📊 ${t('dashDetailTitle')}</h2>
     <div class="card" style="padding:0;overflow-x:auto">
       <table class="admin-table dash-table">
@@ -3015,8 +3017,130 @@ async function renderDashboard() {
     <p class="form-hint" style="margin-top:12px">${t('dashHint')}</p>
   `
   renderDashCatBlock()
+  renderDashChallengeBlock(rows)
   _perQLastRows = rows
   renderPerQBlock(rows)
+}
+
+// ====== 管理员看板：七天挑战统计（v71） ======
+// 数据来源：chy 事件（阶段完成：参与名单 / 进度 / 每阶段分数 / Day1-Day7 测试分）
+//          + perq 的 ch 标记（chQ[qid] = { correct:0, total:错次 }，错题排行）
+function renderDashChallengeBlock(rows) {
+  const el = document.getElementById('dashChallengeBlock')
+  if (!el) return
+  const parts = (rows || []).filter(r => r && r.chy && r.chy.length)
+  if (!parts.length) {
+    el.innerHTML = `<div class="card" style="margin-top:16px;padding:24px;text-align:center;color:#9ca3af">🏅 ${t('dashChNone')}</div>`
+    return
+  }
+  // 汇总
+  let totalQ = 0, totalC = 0
+  const list = parts.map(r => {
+    const q = (r.chy || []).reduce((s, c) => s + (c.total || 0), 0)
+    const c = (r.chy || []).reduce((s, x) => s + (x.correct || 0), 0)
+    totalQ += q; totalC += c
+    // 进度：完成的（day,si）去重取最新；最高天
+    const seen = {}
+    let stagesDone = 0, maxDay = 0
+    ;(r.chy || []).forEach(x => {
+      const k = x.day + '-' + x.si
+      if (!seen[k]) { seen[k] = true; stagesDone++ }
+      if (x.day > maxDay) maxDay = x.day
+    })
+    // 测试分：Day1 / Day7 的水平测试（test 只上报一次）
+    const t1 = (r.chy || []).find(x => x.kind === 'test' && x.day === 1)
+    const t7 = (r.chy || []).find(x => x.kind === 'test' && x.day === 7)
+    const score = x => x && x.total ? Math.round(x.correct / x.total * 100) : null
+    return {
+      username: r.username, name: r.name, dept: r.dept,
+      maxDay, stagesDone, q, acc: q > 0 ? Math.round(c / q * 100) : 0,
+      s1: score(t1), s7: score(t7),
+      chQ: r.chQ || {},
+    }
+  })
+  list.sort((a, b) => b.q - a.q)
+  // 错题排行：跨学员合并 chQ（错次），取错误次数最多的 50 题
+  const wrongAgg = {}
+  list.forEach(p => {
+    Object.keys(p.chQ).forEach(qid => {
+      const rec = p.chQ[qid]
+      if (!rec) return
+      const a = wrongAgg[qid] || (wrongAgg[qid] = { wrong: 0 })
+      a.wrong += rec.total
+    })
+  })
+  const qMap = {}
+  Store.getQuestions().forEach(q => { qMap[q.id] = q })
+  const wrongList = Object.keys(wrongAgg)
+    .filter(qid => qMap[qid])
+    .map(qid => {
+      const q = qMap[qid]
+      return { qid: Number(qid), question: q.question, type: TYPE_LABELS[q.type] || q.type, wrong: wrongAgg[qid].wrong }
+    })
+    .sort((a, b) => b.wrong - a.wrong)
+    .slice(0, 50)
+  const avgAcc = totalQ > 0 ? Math.round(totalC / totalQ * 100) : 0
+  const scoreCell = s => s == null
+    ? '<span style="color:#9ca3af;font-size:12px">—</span>'
+    : `<span style="font-weight:700;color:${s >= 80 ? '#059669' : s >= 60 ? '#d97706' : '#dc2626'}">${s}</span>`
+  el.innerHTML = `
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin-bottom:8px">🏅 ${t('dashChTitle')}</h3>
+      <div class="dashboard-summary" style="margin-bottom:12px">
+        <div class="dash-stat"><div class="dash-val">${list.length}</div><div class="dash-lbl">${t('dashChJoin')}</div></div>
+        <div class="dash-stat"><div class="dash-val">${totalQ}</div><div class="dash-lbl">${t('dashChTotalQ')}</div></div>
+        <div class="dash-stat"><div class="dash-val">${avgAcc}%</div><div class="dash-lbl">${t('dashChAvg')}</div></div>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="admin-table" style="font-size:13px">
+          <thead><tr>
+            <th>${t('thUsername')}</th><th>${t('thName')}</th><th>${t('thDept')}</th>
+            <th>${t('dashChThProgress')}</th>
+            <th style="text-align:center">${t('dashChThQ')}</th>
+            <th style="text-align:center">${t('dashChThAcc')}</th>
+            <th style="text-align:center">${t('dashChThDay1')}</th>
+            <th style="text-align:center">${t('dashChThDay7')}</th>
+          </tr></thead>
+          <tbody>
+            ${list.map(p => `<tr>
+              <td>${escHtml(p.username)}</td>
+              <td>${escHtml(p.name || '—')}</td>
+              <td>${escHtml(p.dept || '—')}</td>
+              <td style="font-size:12px;color:#6b7280">${t('chDashProgress', p.maxDay, p.stagesDone)}</td>
+              <td style="text-align:center">${p.q}</td>
+              <td style="text-align:center"><span class="perq-rate ${p.acc >= 80 ? 'perq-good' : p.acc >= 60 ? 'perq-ok' : 'perq-bad'}">${p.acc}%</span></td>
+              <td style="text-align:center">${scoreCell(p.s1)}</td>
+              <td style="text-align:center">${scoreCell(p.s7)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <p class="form-hint" style="margin:8px 0 0">${t('dashChHint')}</p>
+    </div>
+    ${wrongList.length ? `
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin-bottom:8px">📌 ${t('dashChWrongTitle')}</h3>
+      <p class="form-hint" style="margin-bottom:10px">${t('dashChWrongHint')}</p>
+      <div style="overflow-x:auto">
+        <table class="admin-table" style="font-size:13px">
+          <thead><tr>
+            <th>${t('perQThQid')}</th>
+            <th style="min-width:220px">${t('perQThQuestion')}</th>
+            <th>${t('perQThCat')}</th>
+            <th style="text-align:center">${t('dashChThWrong')}</th>
+          </tr></thead>
+          <tbody>
+            ${wrongList.map(x => `<tr>
+              <td style="color:#6b7280">#${x.qid}</td>
+              <td>${escHtml(x.question)}</td>
+              <td>${escHtml(x.type)}</td>
+              <td style="text-align:center"><span class="perq-rate perq-bad">${x.wrong}</span></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>` : ''}
+  `
 }
 
 // ====== 管理员看板：分类题库分布（按部门切换） ======
