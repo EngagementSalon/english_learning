@@ -922,7 +922,25 @@ function renderPractice() {
       </div>
     </div>
     <div id="practiceQuiz"></div>
+    ${challengeEntryHtml()}
   `
+}
+
+// 七天挑战入口卡片（v70：入口移入练习页下方，不再是独立导航项）
+function challengeEntryHtml() {
+  challengeLoad()
+  const doneDays = CHALLENGE_DAYS.filter(d => chDayDone(d.day)).length
+  return `
+    <div class="card" onclick="navigate('challenge')" style="cursor:pointer;margin-top:16px;border:2px solid #f59e0b">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="font-size:32px">🏅</div>
+        <div style="flex:1;min-width:0">
+          <h3 style="margin:0 0 4px">${t('chTitle')}</h3>
+          <p class="form-hint" style="margin:0">${t('chEntryHint', doneDays)}</p>
+        </div>
+        <div style="font-size:22px;color:#9ca3af">›</div>
+      </div>
+    </div>`
 }
 
 function startPractice() {

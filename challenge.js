@@ -1,22 +1,22 @@
-// ====== 标帜餐厅七天英文挑战（v68；v69 测试改 20 题） ======
-// 题源：分类 12「标帜餐厅常见词汇」（684 题）。固定种子（CHALLENGE_SEED）洗牌后按天切片：
-// Day1/Day7 水平测试各 20 题，Day2-6 每日练习各 50 题（共 290 题，全员同一套题）。
-// Day1/Day7 = 水平测试（统一判分、仅可作答一次）；Day2-6 = 每日练习（逐题即时反馈、可重练）。
-// 进度存 localStorage eq_challenge_v1（按登录用户绑定）；每题经 Store.addProgress(mode:'practice')
+// ====== 标帜餐厅七天英文挑战（v68 引入；v70 入口移入练习页 + Day1/7 双阶段） ======
+// 题源：分类 12「标帜餐厅常见词汇」（684 题）。固定种子（CHALLENGE_SEED）洗牌后按阶段切片：
+//   Day1 = 水平测试 20 题 → 巩固练习 30 题；Day2-6 = 每日练习 50 题；Day7 = 巩固练习 30 题 → 水平测试 20 题。
+// 全员同一套题（挑战共用 350 题）；Day1 与 Day7 的测试题集不同，进步数据真实。
+// 入口在练习页底部（app.js renderPractice 挂入口卡片，navigate('challenge') 打开本页）。
+// 进度存 localStorage eq_challenge_v2（绑定登录用户）；每题经 Store.addProgress(mode:'practice')
 // 与 Store.trackPractice 汇入进度页/数据看板（口径与普通练习一致，分类 12 自动聚合）。
 // 复用 app.js 工具：shuffleOptions / checkAnswer / quizTitleHtml / vmOptionsHtml / autoplayListen。
 
 const CHALLENGE_SEED = 20260912
-const CHALLENGE_TEST_COUNT = 20
-const CHALLENGE_KEY = 'eq_challenge_v1'
+const CHALLENGE_KEY = 'eq_challenge_v2'
 const CHALLENGE_DAYS = [
-  { day: 1, kind: 'test', count: CHALLENGE_TEST_COUNT },
-  { day: 2, kind: 'practice', count: 50 },
-  { day: 3, kind: 'practice', count: 50 },
-  { day: 4, kind: 'practice', count: 50 },
-  { day: 5, kind: 'practice', count: 50 },
-  { day: 6, kind: 'practice', count: 50 },
-  { day: 7, kind: 'test', count: CHALLENGE_TEST_COUNT },
+  { day: 1, stages: [ { kind: 'test', count: 20 }, { kind: 'practice', count: 30 } ] },
+  { day: 2, stages: [ { kind: 'practice', count: 50 } ] },
+  { day: 3, stages: [ { kind: 'practice', count: 50 } ] },
+  { day: 4, stages: [ { kind: 'practice', count: 50 } ] },
+  { day: 5, stages: [ { kind: 'practice', count: 50 } ] },
+  { day: 6, stages: [ { kind: 'practice', count: 50 } ] },
+  { day: 7, stages: [ { kind: 'practice', count: 30 }, { kind: 'test', count: 20 } ] },
 ]
 
 // mulberry32 伪随机（固定种子 → 分配可复现、全员一致）
@@ -47,20 +47,29 @@ function challengePool() {
   return uniq
 }
 
-// 第 N 关题目（id 序稳定；切片起点 = 前面各关题数累加；选项顺序每次进入重洗，答案位置不固定）
-function challengeDayQuestions(day) {
+// 全部阶段的扁平元数据（切片起点 = 前面各阶段题数累加）
+function challengeStageMeta() {
   let start = 0
+  const out = []
   for (const d of CHALLENGE_DAYS) {
-    if (d.day === day) break
-    start += d.count
+    d.stages.forEach((s, si) => {
+      out.push({ day: d.day, si, kind: s.kind, count: s.count, start })
+      start += s.count
+    })
   }
-  const cfg = CHALLENGE_DAYS.find(d => d.day === day)
-  return challengePool().slice(start, start + cfg.count).map(shuffleOptions)
+  return out
 }
-
-function challengeKind(day) {
-  const d = CHALLENGE_DAYS.find(x => x.day === day)
-  return d ? d.kind : 'practice'
+function challengeStageInfo(day, si) {
+  return challengeStageMeta().find(x => x.day === day && x.si === si)
+}
+// 第 N 天第 si 阶段题目（id 序稳定；选项顺序每次进入重洗，答案位置不固定）
+function challengeStageQuestions(day, si) {
+  const m = challengeStageInfo(day, si)
+  return challengePool().slice(m.start, m.start + m.count).map(shuffleOptions)
+}
+function challengeKindOf(day, si) {
+  const m = challengeStageInfo(day, si)
+  return m ? m.kind : 'practice'
 }
 
 // ---- 挑战进度（localStorage，绑定登录用户） ----
@@ -82,30 +91,61 @@ function challengeLoad() {
 function challengeSave() {
   try { localStorage.setItem(CHALLENGE_KEY, JSON.stringify(challengeState)) } catch (e) {}
 }
-function challengeDayDone(day) {
+function chStageRec(day, si) {
   const d = challengeState && challengeState.days[day]
-  return !!(d && d.done)
+  return d && d.stages ? d.stages[si] : null
 }
-function challengeDayUnlocked(day) {
-  return day === 1 || challengeDayDone(day - 1)
+function chStageDone(day, si) {
+  const r = chStageRec(day, si)
+  return !!(r && r.done)
 }
-function challengeScore(day) {
-  const d = challengeState && challengeState.days[day]
-  if (!d || !d.done || !d.total) return null
-  return Math.round(d.correct / d.total * 100)
+// 一天完成 = 当天全部阶段完成
+function chDayDone(day) {
+  const cfg = CHALLENGE_DAYS.find(x => x.day === day)
+  return !!cfg && cfg.stages.every((_, si) => chStageDone(day, si))
+}
+function chDayUnlocked(day) {
+  return day === 1 || chDayDone(day - 1)
+}
+// 阶段解锁：首阶段随天解锁；后续阶段需前一阶段完成
+function chStageUnlocked(day, si) {
+  return si === 0 ? chDayUnlocked(day) : chStageDone(day, si - 1)
+}
+function chStageScore(day, si) {
+  const r = chStageRec(day, si)
+  if (!r || !r.done || !r.total) return null
+  return Math.round(r.correct / r.total * 100)
+}
+// 当天合并正确率（报告条形图用）
+function chDayScore(day) {
+  const cfg = CHALLENGE_DAYS.find(x => x.day === day)
+  if (!cfg) return null
+  let c = 0, t = 0
+  cfg.stages.forEach((_, si) => {
+    const r = chStageRec(day, si)
+    if (r && r.done) { c += r.correct; t += r.total }
+  })
+  return t ? Math.round(c / t * 100) : null
+}
+// 某天水平测试的正确率（进步报告对比用；无测试的天返回 null）
+function chTestScoreOfDay(day) {
+  const cfg = CHALLENGE_DAYS.find(x => x.day === day)
+  if (!cfg) return null
+  const si = cfg.stages.findIndex(s => s.kind === 'test')
+  return si >= 0 ? chStageScore(day, si) : null
 }
 
 // ---- 挑战会话（内存态，切页保留，退出丢弃） ----
 let chs = null
 
-function chStartDay(day) {
+function chStartStage(day, si) {
   challengeLoad()
-  if (!challengeDayUnlocked(day)) return
-  if (challengeKind(day) === 'test' && challengeDayDone(day)) return // 水平测试仅一次
-  const qs = challengeDayQuestions(day)
+  if (!chStageUnlocked(day, si)) return
+  if (challengeKindOf(day, si) === 'test' && chStageDone(day, si)) return // 水平测试仅一次
+  const qs = challengeStageQuestions(day, si)
   if (!qs.length) return
   chs = {
-    day, kind: challengeKind(day),
+    day, si, kind: challengeKindOf(day, si),
     questions: qs,
     answers: qs.map(() => -1),
     index: 0, phase: 'quiz', submitted: false, correctCount: 0,
@@ -132,7 +172,7 @@ function renderChallenge() {
   challengeLoad()
   if (chs && (chs.phase === 'quiz' || chs.phase === 'result')) { renderChallengeQuiz(); return }
   const poolN = challengePool().length
-  const rows = CHALLENGE_DAYS.map(d => chDayRowHtml(d)).join('')
+  const rows = CHALLENGE_DAYS.map(d => chDayBlockHtml(d)).join('')
   el.innerHTML = `
     ${chReportHtml()}
     <div class="card">
@@ -144,14 +184,24 @@ function renderChallenge() {
   `
 }
 
-function chDayRowHtml(cfg) {
-  const day = cfg.day
-  const done = challengeDayDone(day)
-  const unlocked = challengeDayUnlocked(day)
-  const isTest = cfg.kind === 'test'
+function chDayBlockHtml(cfg) {
+  const done = chDayDone(cfg.day)
+  const unlocked = chDayUnlocked(cfg.day)
+  const rows = cfg.stages.map((s, si) => chStageRowHtml(cfg.day, si, s)).join('')
+  return `
+    <div style="padding:12px 0;border-bottom:1px solid #e5e7eb">
+      <div style="font-weight:800;margin-bottom:4px;color:${done ? '#059669' : unlocked ? '#111827' : '#9ca3af'}">${t('chDay', cfg.day)}${done ? ' <span style="font-size:12px;color:#059669">✓</span>' : ''}</div>
+      ${rows}
+    </div>`
+}
+
+function chStageRowHtml(day, si, s) {
+  const done = chStageDone(day, si)
+  const unlocked = chStageUnlocked(day, si)
+  const isTest = s.kind === 'test'
+  const score = chStageScore(day, si)
   const tag = isTest ? t('chTestTag') : t('chPracticeTag')
   const tagCls = isTest ? 'tag tag-type' : 'tag tag-category'
-  const score = challengeScore(day)
   let right = ''
   if (done) {
     if (isTest) {
@@ -161,35 +211,33 @@ function chDayRowHtml(cfg) {
         <div style="font-size:11px;color:#9ca3af">${t('chOnceOnly')}</div>
       </div>`
     } else {
-      right = `<button class="btn btn-ghost btn-sm" onclick="chStartDay(${day})" style="flex-shrink:0">${t('chRetake')}</button>`
+      right = `<button class="btn btn-ghost btn-sm" onclick="chStartStage(${day},${si})" style="flex-shrink:0">${t('chRetake')}</button>`
     }
   } else if (unlocked) {
-    right = `<button class="btn btn-primary btn-sm" onclick="chStartDay(${day})" style="flex-shrink:0">${t('chStart')}</button>`
+    right = `<button class="btn btn-primary btn-sm" onclick="chStartStage(${day},${si})" style="flex-shrink:0">${t('chStart')}</button>`
   } else {
-    right = `<span style="font-size:12px;color:#9ca3af;flex-shrink:0">🔒 ${t('chLocked')}</span>`
+    const lockText = si > 0 ? t('chStageLocked') : t('chLocked')
+    right = `<span style="font-size:12px;color:#9ca3af;flex-shrink:0">🔒 ${lockText}</span>`
   }
-  const dRec = done ? challengeState.days[day] : null
-  const left = `
-    <div style="min-width:52px;font-weight:800;color:${done ? '#059669' : unlocked ? '#111827' : '#9ca3af'}">${t('chDay', day)}</div>
-    <div style="flex:1;min-width:0">
-      <div><span class="${tagCls}" style="margin-right:6px">${tag}</span><span style="font-size:13px;color:#6b7280">${t('questionsUnit', cfg.count)}</span></div>
-      ${dRec ? `<div style="font-size:12px;color:#059669;margin-top:2px">✓ ${t('chDayDoneTag')} · ${dRec.correct}/${dRec.total}</div>` : ''}
-    </div>`
+  const rec = done ? chStageRec(day, si) : null
   return `
-    <div style="display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #e5e7eb">
-      ${left}
+    <div style="display:flex;align-items:center;gap:10px;padding:6px 0">
+      <div style="flex:1;min-width:0">
+        <span class="${tagCls}" style="margin-right:6px">${tag}</span>
+        <span style="font-size:13px;color:#6b7280">${t('questionsUnit', s.count)}</span>
+        ${rec && !isTest ? `<span style="font-size:12px;color:#059669;margin-left:8px">✓ ${rec.correct}/${rec.total}</span>` : ''}
+      </div>
       ${right}
     </div>`
 }
 
-// 七天进步报告（Day1 与 Day7 均完成后显示）
+// 七天进步报告（Day1 与 Day7 的水平测试均完成后显示；对比测试分，条形图展示每天合并正确率）
 function chReportHtml() {
   if (!challengeState) return ''
-  const d1 = challengeState.days[1], d7 = challengeState.days[7]
-  if (!d1 || !d1.done || !d7 || !d7.done) return ''
-  const s1 = challengeScore(1), s7 = challengeScore(7)
+  const s1 = chTestScoreOfDay(1), s7 = chTestScoreOfDay(7)
+  if (s1 == null || s7 == null) return ''
   const bars = CHALLENGE_DAYS.map(({ day }) => {
-    const s = challengeScore(day)
+    const s = chDayScore(day)
     if (s == null) return ''
     const color = s >= 80 ? '#059669' : s >= 60 ? '#d97706' : '#dc2626'
     return `
@@ -309,6 +357,16 @@ function chPick(i) {
   renderChallengeQuiz()
 }
 
+// 完成记录写入 days[day].stages[si]
+function chRecordStage(correct, total) {
+  if (!challengeState.days[chs.day]) challengeState.days[chs.day] = { stages: {} }
+  const d = challengeState.days[chs.day]
+  if (!d.stages) d.stages = {}
+  d.stages[chs.si] = { done: true, at: Date.now(), correct, total }
+  challengeSave()
+  Store.trackPractice(correct, total)
+}
+
 // ---- 每日练习（逐题反馈） ----
 function chSubmitAnswer() {
   const q = chs.questions[chs.index]
@@ -335,11 +393,7 @@ function chNext() {
   }
 }
 function chFinishPractice() {
-  const total = chs.questions.length
-  const correct = chs.correctCount
-  challengeState.days[chs.day] = { done: true, at: Date.now(), correct, total }
-  challengeSave()
-  Store.trackPractice(correct, total)
+  chRecordStage(chs.correctCount, chs.questions.length)
   chs.phase = 'result'
   renderChallengeQuiz()
 }
@@ -372,9 +426,7 @@ function finishChallengeTest() {
     })
     return { q, ans: chs.answers[i], isCorrect }
   })
-  challengeState.days[chs.day] = { done: true, at: Date.now(), correct, total }
-  challengeSave()
-  Store.trackPractice(correct, total)
+  chRecordStage(correct, total)
   chs.review = review
   chs.score = Math.round(correct / total * 100)
   chs.phase = 'result'

@@ -49,10 +49,11 @@ const I18N = {
     // 线下课 / 班级 / 作业 / 测评
     navCourse: '📖 线下课',
     // 标帜餐厅七天英文挑战（v68）
-    navChallenge: '🏅 七天挑战',
     chTitle: '标帜餐厅七天英文挑战',
-    chIntro: '每天一关 50 题，全部选自「标帜餐厅常见词汇」题库。第 1、7 天为水平测试（仅可作答一次），第 2-6 天为每日练习（可反复刷）。顺序闯关，见证七天进步！',
-    chPoolInfo: (n) => `题库共 ${n} 题 · 每日练习 50 题 · 水平测试 20 题 · 全员同一套题`,
+    chIntro: '第 1 天：水平测试 20 题（仅一次）→ 巩固练习 30 题；第 2-6 天：每日练习 50 题；第 7 天：巩固练习 30 题 → 水平测试 20 题（仅一次）。全部选自「标帜餐厅常见词汇」题库，顺序闯关，见证七天进步！',
+    chPoolInfo: (n) => `题库共 ${n} 题 · 挑战共用 350 题 · 全员同一套题`,
+    chEntryHint: (d) => `已完成 ${d}/7 天 · 第 1、7 天含 20 题水平测试 · 点击进入`,
+    chStageLocked: '完成上方环节后解锁',
     chTestTag: '水平测试', chPracticeTag: '每日练习',
     chDay: (n) => `第 ${n} 天`,
     chLocked: '完成前一天解锁', chStart: '开始', chRetake: '再练一轮',
@@ -653,10 +654,11 @@ const I18N = {
     // Courses / classes / homework / assessments
     navCourse: '📖 Courses',
     // Signature Restaurant 7-Day Challenge (v68)
-    navChallenge: '🏅 7-Day Challenge',
     chTitle: 'Signature Restaurant 7-Day Challenge',
-    chIntro: 'One round of 50 questions a day, all drawn from the "Signature Restaurant Vocabulary" bank. Day 1 & 7 are placement tests (one attempt only); Days 2-6 are daily practice you can repeat as much as you like. Unlock day by day and watch yourself improve!',
-    chPoolInfo: (n) => `Bank of ${n} questions · 50 per practice day · 20 per test · same set for everyone`,
+    chIntro: 'Day 1: a 20-question placement test (one attempt) followed by 30 consolidation questions; Days 2-6: 50 daily practice questions; Day 7: 30 consolidation questions followed by the 20-question placement test (one attempt). All drawn from the "Signature Restaurant Vocabulary" bank — unlock day by day and watch yourself improve!',
+    chPoolInfo: (n) => `Bank of ${n} questions · 350 used across the challenge · same set for everyone`,
+    chEntryHint: (d) => `${d}/7 days done · Day 1 & 7 include a 20-question test · tap to open`,
+    chStageLocked: 'Finish the step above to unlock',
     chTestTag: 'Placement Test', chPracticeTag: 'Daily Practice',
     chDay: (n) => `Day ${n}`,
     chLocked: 'Finish the previous day to unlock', chStart: 'Start', chRetake: 'Practice Again',
@@ -1265,7 +1267,6 @@ function renderStaticText() {
   setTitle('navExam', 'navExam')
   setTitle('navProgress', 'navProgress')
   setTitle('navCourse', 'navCourse')
-  setTitle('navChallenge', 'navChallenge')
   setTitle('navAdmin', 'navAdmin')
   setTitle('navUsers', 'navUsers')
   setTitle('navDashboard', 'navDashboard')
