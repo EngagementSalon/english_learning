@@ -74,13 +74,18 @@ function makeSandbox(pre) {
     dayIds.push(ids)
   }
   const allChallenge = dayIds.flat()
-  assert('7 天 × 50 = 350 题', allChallenge.length === 350, `got ${allChallenge.length}`)
-  assert('350 题互不重叠', new Set(allChallenge).size === 350)
+  assert('Day1 = 20 题（水平测试）', dayIds[0].length === 20, `got ${dayIds[0].length}`)
+  assert('Day7 = 20 题（水平测试）', dayIds[6].length === 20, `got ${dayIds[6].length}`)
+  assert('Day2-6 各 50 题（每日练习）', dayIds.slice(1, 6).every(ids => ids.length === 50))
+  assert('挑战共 290 题（20+50×5+20）', allChallenge.length === 290, `got ${allChallenge.length}`)
+  assert('290 题互不重叠', new Set(allChallenge).size === 290)
   assert('Day1 与 Day7 题集不同（进步对比真实）', JSON.stringify(dayIds[0]) !== JSON.stringify(dayIds[6]))
   {
-    // day N 题目 = pool[(N-1)*50 .. N*50)
+    // 切片起点 = 前面各关题数累加：Day3 起点 = 20+50 = 70；Day7 起点 = 20+50×5 = 270
     const d3 = vm.runInContext('challengeDayQuestions(3).map(q => q.id)', sb)
-    assert('Day3 = pool[100..150) 顺序一致', JSON.stringify(d3) === JSON.stringify(poolIds.slice(100, 150)))
+    assert('Day3 = pool[70..120) 顺序一致', JSON.stringify(d3) === JSON.stringify(poolIds.slice(70, 120)))
+    const d7 = vm.runInContext('challengeDayQuestions(7).map(q => q.id)', sb)
+    assert('Day7 = pool[270..290) 顺序一致', JSON.stringify(d7) === JSON.stringify(poolIds.slice(270, 290)))
   }
   {
     const types = new Set(vm.runInContext('challengeDayQuestions(1).map(q => q.type)', sb))
@@ -175,14 +180,14 @@ function makeSandbox(pre) {
     vm.runInContext(`
       chs = null
       chStartDay(1)
-      // 前 10 题答对，其余留空
+      // 前 10 题答对，其余留空（Day1 = 20 题）
       chs.questions.slice(0, 10).forEach((q, i) => { chs.index = i; chPick(q.answer[0]) })
-      chs.index = 49
+      chs.index = 19
     `, sb)
     vm.runInContext('finishChallengeTest()', sb)
-    assert('Day1 测试判分 10/50 = 20 分', vm.runInContext('chs.score', sb) === 20, `got ${vm.runInContext('chs.score', sb)}`)
-    assert('Day1 逐题 addProgress（50 条）', vm.runInContext('window.__progress.length', sb) === 50 + 4, `got ${vm.runInContext('window.__progress.length', sb)}`)
-    assert('review 长度 50 且含对错标记', vm.runInContext('chs.review.length === 50 && chs.review.filter(r => r.isCorrect).length === 10', sb))
+    assert('Day1 测试判分 10/20 = 50 分', vm.runInContext('chs.score', sb) === 50, `got ${vm.runInContext('chs.score', sb)}`)
+    assert('Day1 逐题 addProgress（20 条 + 练习 4 条）', vm.runInContext('window.__progress.length', sb) === 20 + 4, `got ${vm.runInContext('window.__progress.length', sb)}`)
+    assert('review 长度 20 且含对错标记', vm.runInContext('chs.review.length === 20 && chs.review.filter(r => r.isCorrect).length === 10', sb))
     assert('Day1 done 后再 chStartDay(1) 被拒绝', (() => {
       vm.runInContext('chBack(); chStartDay(1)', sb)
       return vm.runInContext('chs === null', sb)
@@ -193,13 +198,13 @@ function makeSandbox(pre) {
   console.log('\n[6] challengeScore 与报告前置')
   {
     const s1 = vm.runInContext('challengeScore(1)', sb)
-    assert('Day1 score = 20%', s1 === 20, `got ${s1}`)
+    assert('Day1 score = 50%', s1 === 50, `got ${s1}`)
     assert('Day7 未完成 score = null', vm.runInContext('challengeScore(7)', sb) === null)
     assert('报告在 Day7 未完成时不渲染（返回空串）', vm.runInContext('String(chReportHtml())', sb) === '')
     vm.runInContext('challengeState.days[7] = { done: true, at: 2, correct: 45, total: 50 }', sb)
     assert('Day7 45/50 → score 90%', vm.runInContext('challengeScore(7)', sb) === 90)
     const html = vm.runInContext('String(chReportHtml())', sb)
-    assert('Day1+Day7 完成后报告含分数与增量', html.includes('20') && html.includes('90') && html.length > 100)
+    assert('Day1+Day7 完成后报告含分数与增量', html.includes('50') && html.includes('90') && html.length > 100)
   }
 
   // ---------- ⑦ i18n ----------

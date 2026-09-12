@@ -1,22 +1,22 @@
-// ====== 标帜餐厅七天英文挑战（v68） ======
-// 题源：分类 12「标帜餐厅常见词汇」（684 题）。固定种子（CHALLENGE_SEED）洗牌后切 7 关 × 50 题，
-// 全员同一套题便于横向对比；Day1 与 Day7 题集不同，进步数据真实。
+// ====== 标帜餐厅七天英文挑战（v68；v69 测试改 20 题） ======
+// 题源：分类 12「标帜餐厅常见词汇」（684 题）。固定种子（CHALLENGE_SEED）洗牌后按天切片：
+// Day1/Day7 水平测试各 20 题，Day2-6 每日练习各 50 题（共 290 题，全员同一套题）。
 // Day1/Day7 = 水平测试（统一判分、仅可作答一次）；Day2-6 = 每日练习（逐题即时反馈、可重练）。
 // 进度存 localStorage eq_challenge_v1（按登录用户绑定）；每题经 Store.addProgress(mode:'practice')
 // 与 Store.trackPractice 汇入进度页/数据看板（口径与普通练习一致，分类 12 自动聚合）。
 // 复用 app.js 工具：shuffleOptions / checkAnswer / quizTitleHtml / vmOptionsHtml / autoplayListen。
 
 const CHALLENGE_SEED = 20260912
-const CHALLENGE_PER_DAY = 50
+const CHALLENGE_TEST_COUNT = 20
 const CHALLENGE_KEY = 'eq_challenge_v1'
 const CHALLENGE_DAYS = [
-  { day: 1, kind: 'test' },
-  { day: 2, kind: 'practice' },
-  { day: 3, kind: 'practice' },
-  { day: 4, kind: 'practice' },
-  { day: 5, kind: 'practice' },
-  { day: 6, kind: 'practice' },
-  { day: 7, kind: 'test' },
+  { day: 1, kind: 'test', count: CHALLENGE_TEST_COUNT },
+  { day: 2, kind: 'practice', count: 50 },
+  { day: 3, kind: 'practice', count: 50 },
+  { day: 4, kind: 'practice', count: 50 },
+  { day: 5, kind: 'practice', count: 50 },
+  { day: 6, kind: 'practice', count: 50 },
+  { day: 7, kind: 'test', count: CHALLENGE_TEST_COUNT },
 ]
 
 // mulberry32 伪随机（固定种子 → 分配可复现、全员一致）
@@ -47,10 +47,15 @@ function challengePool() {
   return uniq
 }
 
-// 第 N 关题目（id 序稳定；选项顺序每次进入重洗，答案位置不固定）
+// 第 N 关题目（id 序稳定；切片起点 = 前面各关题数累加；选项顺序每次进入重洗，答案位置不固定）
 function challengeDayQuestions(day) {
-  const start = (day - 1) * CHALLENGE_PER_DAY
-  return challengePool().slice(start, start + CHALLENGE_PER_DAY).map(shuffleOptions)
+  let start = 0
+  for (const d of CHALLENGE_DAYS) {
+    if (d.day === day) break
+    start += d.count
+  }
+  const cfg = CHALLENGE_DAYS.find(d => d.day === day)
+  return challengePool().slice(start, start + cfg.count).map(shuffleOptions)
 }
 
 function challengeKind(day) {
@@ -167,7 +172,7 @@ function chDayRowHtml(cfg) {
   const left = `
     <div style="min-width:52px;font-weight:800;color:${done ? '#059669' : unlocked ? '#111827' : '#9ca3af'}">${t('chDay', day)}</div>
     <div style="flex:1;min-width:0">
-      <div><span class="${tagCls}" style="margin-right:6px">${tag}</span><span style="font-size:13px;color:#6b7280">${t('questionsUnit', CHALLENGE_PER_DAY)}</span></div>
+      <div><span class="${tagCls}" style="margin-right:6px">${tag}</span><span style="font-size:13px;color:#6b7280">${t('questionsUnit', cfg.count)}</span></div>
       ${dRec ? `<div style="font-size:12px;color:#059669;margin-top:2px">✓ ${t('chDayDoneTag')} · ${dRec.correct}/${dRec.total}</div>` : ''}
     </div>`
   return `
