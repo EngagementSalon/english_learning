@@ -1,12 +1,16 @@
-// ====== 标帜餐厅七天英文挑战（v68 引入；v70 入口移入练习页 + Day1/7 双阶段；v71 难度递增+时间锁+防作弊+看板上报） ======
+// ====== 标帜餐厅七天英文挑战（v68 引入；v70 入口移入练习页 + Day1/7 双阶段；v71 难度递增+时间锁+防作弊+看板上报；
+//        v72 每日 30 题 + 测试每次随机 + 练习错题当天刷到全对 + 前一天错题次日额外复习 + 听音题醒目注解） ======
 // 题源：分类 12「标帜餐厅常见词汇」（684 题 = 456 listen + 228 single，v71 起无 voicematch）。
-// 按难度分桶（1/2/3）后按天配比抽取（CHALLENGE_DIFF_PLAN）：Day1 以难度 1 为主，Day7 以难度 2/3 收尾，
-// 每天平均难度从 1.12 线性递增到 2.16；桶内固定种子（CHALLENGE_SEED）洗牌 → 全员同一套题。
-//   Day1 = 水平测试 20 题 → 巩固练习 30 题；Day2-6 = 每日练习 50 题；Day7 = 巩固练习 30 题 → 水平测试 20 题。
+// 练习序列（固定）：按难度分桶（1/2/3）按天配比抽取（CHALLENGE_DIFF_PLAN），Day1 均值 1.0 → Day7 均值 2.2；
+//   Day1 巩固练习 10 题 → Day2-6 每日练习 30 题 → Day7 巩固练习 10 题，共 170 题，全员同一套练习题。
+// 水平测试（随机，v72）：Day1/Day7 各 20 题 = 每次进入时从全池分层随机抽取（难度1×10 + 难度2×7 + 难度3×3），
+//   每位学员、每次进入题目都不同；仍仅一次判分机会。
+// 错题闭环（v72）：每日练习首次答错的题必须进入「错题回顾」轮刷到全对，该天才算完成；
+//   前一天所有环节（练习+测试）的错题会在次日开始时额外追加到练习题末尾（不占每日 30 题配额），滚动复习。
 // 入口在练习页底部（app.js renderPractice 挂入口卡片，navigate('challenge') 打开本页）。
-// 进度存 localStorage eq_challenge_v2（绑定登录用户）；每题经 Store.addProgress(mode:'practice', challenge:true)
-// 与 Store.trackPractice 汇入进度页/数据看板（口径与普通练习一致，分类 12 自动聚合）。
-// 阶段完成经 Store.reportChallengeStage 上报云端（chy 事件），管理端数据看板聚合参与名单/进度/测试分。
+// 进度存 localStorage eq_challenge_v2（绑定登录用户；v72 就地扩展 stage.wrong 字段，旧进度兼容）；
+// 每题经 Store.addProgress(mode:'practice', challenge:true) 与 Store.trackPractice 汇入进度页/数据看板。
+// 阶段完成经 Store.reportChallengeStage 上报云端（chy 事件，correct/total 为首次作答口径，不含回顾轮）。
 // 时间锁（v71）：Day N 解锁需 Day N-1 全部完成且已过完成日次日 0 点（本地时区）——每天只能推进一天。
 // 防作弊（v71）：水平测试接入 AntiCheat（切屏 3 次强制交卷计分，与在线考试同口径；管理员自动豁免）。
 // 复用 app.js 工具：shuffleOptions / checkAnswer / quizTitleHtml / vmOptionsHtml / autoplayListen。
@@ -14,18 +18,23 @@
 const CHALLENGE_SEED = 20260912
 const CHALLENGE_KEY = 'eq_challenge_v2'
 const CHALLENGE_DAYS = [
-  { day: 1, stages: [ { kind: 'test', count: 20 }, { kind: 'practice', count: 30 } ] },
-  { day: 2, stages: [ { kind: 'practice', count: 50 } ] },
-  { day: 3, stages: [ { kind: 'practice', count: 50 } ] },
-  { day: 4, stages: [ { kind: 'practice', count: 50 } ] },
-  { day: 5, stages: [ { kind: 'practice', count: 50 } ] },
-  { day: 6, stages: [ { kind: 'practice', count: 50 } ] },
-  { day: 7, stages: [ { kind: 'practice', count: 30 }, { kind: 'test', count: 20 } ] },
+  { day: 1, stages: [ { kind: 'test', count: 20 }, { kind: 'practice', count: 10 } ] },
+  { day: 2, stages: [ { kind: 'practice', count: 30 } ] },
+  { day: 3, stages: [ { kind: 'practice', count: 30 } ] },
+  { day: 4, stages: [ { kind: 'practice', count: 30 } ] },
+  { day: 5, stages: [ { kind: 'practice', count: 30 } ] },
+  { day: 6, stages: [ { kind: 'practice', count: 30 } ] },
+  { day: 7, stages: [ { kind: 'practice', count: 10 }, { kind: 'test', count: 20 } ] },
 ]
-// 每天难度配比 [难度1, 难度2, 难度3] 的题数（每天共 50 题；合计 175/154/21，均在题库容量 408/252/24 内）
+// 挑战总题量（不含次日额外错题复习；进度条分母）
+const CHALLENGE_TOTAL = CHALLENGE_DAYS.reduce((s, d) => s + d.stages.reduce((x, y) => x + y.count, 0), 0)   // 210
+// 练习序列难度配比 [难度1, 难度2, 难度3]，与各天 practice 阶段一一对应（10/30/30/30/30/30/10，共 170 题）。
+// 合计 82/82/6，均在题库容量 408/252/24 内；Day1 均值 1.0 → Day7 均值 2.2，难度逐日递增。
 const CHALLENGE_DIFF_PLAN = [
-  [44, 6, 0], [39, 11, 0], [33, 17, 0], [26, 23, 1], [19, 28, 3], [11, 33, 6], [3, 36, 11],
+  [10, 0, 0], [24, 6, 0], [19, 11, 0], [14, 16, 0], [9, 20, 1], [5, 23, 2], [1, 6, 3],
 ]
+// 水平测试分层随机配比：难度1×10 + 难度2×7 + 难度3×3 = 20 题（保证测试覆盖全部难度）
+const CHALLENGE_TEST_PLAN = [10, 7, 3]
 
 // mulberry32 伪随机（固定种子 → 分配可复现、全员一致）
 function challengeRng(seed) {
@@ -38,9 +47,9 @@ function challengeRng(seed) {
   }
 }
 
-// 挑战序列：分类 12 全部题（id 去重防御）→ 按难度分桶（桶内固定种子洗牌）→ 按天配比抽取 350 题。
-// 返回数组即挑战序列：Day1 的 50 题在前（前 20=测试、后 30=巩固），依次到 Day7 的 50 题在后。
-// 难度逐天递增：Day1 均值 1.12 → Day7 均值 2.16；题库总量不足配比时自动顺延到下一个难度桶。
+// 练习序列：分类 12 全部题（id 去重防御）→ 按难度分桶（桶内固定种子洗牌）→ 按档配比抽取 170 题。
+// 返回数组即练习序列：Day1 巩固练习 10 题在前，依次到 Day7 巩固练习 10 题在后（测试题不占序列，见下）。
+// 难度逐日递增：Day1 均值 1.0 → Day7 均值 2.2；题库总量不足配比时自动顺延到下一个难度桶。
 function challengePool() {
   const all = Store.getQuestions().filter(q => Number(q.category_id) === 12)
   const seen = new Set()
@@ -74,14 +83,14 @@ function challengePool() {
   return out
 }
 
-// 全部阶段的扁平元数据（切片起点 = 前面各阶段题数累加）
+// 全部阶段的扁平元数据（切片起点 = 前面各 practice 阶段题数累加；test 随机抽题不占固定序列）
 function challengeStageMeta() {
   let start = 0
   const out = []
   for (const d of CHALLENGE_DAYS) {
     d.stages.forEach((s, si) => {
       out.push({ day: d.day, si, kind: s.kind, count: s.count, start })
-      start += s.count
+      if (s.kind === 'practice') start += s.count
     })
   }
   return out
@@ -89,10 +98,63 @@ function challengeStageMeta() {
 function challengeStageInfo(day, si) {
   return challengeStageMeta().find(x => x.day === day && x.si === si)
 }
-// 第 N 天第 si 阶段题目（id 序稳定；选项顺序每次进入重洗，答案位置不固定）
+// 水平测试随机抽题（v72）：从全池按 CHALLENGE_TEST_PLAN 分层随机（难度1×10 + 难度2×7 + 难度3×3），
+// 每次进入（每位学员、每一场）题目都不同；库存不足时自动少抽。
+function challengeRandomQuestions(total) {
+  const all = Store.getQuestions().filter(q => Number(q.category_id) === 12)
+  const seen = new Set()
+  const buckets = { 1: [], 2: [], 3: [] }
+  for (const q of all) {
+    const k = String(q.id)
+    if (!seen.has(k)) {
+      seen.add(k)
+      const d = Math.min(3, Math.max(1, Number(q.difficulty) || 1))
+      buckets[d].push(q)
+    }
+  }
+  const out = []
+  ;[1, 2, 3].forEach((d, i) => {
+    const b = buckets[d].slice()
+    for (let k = b.length - 1; k > 0; k--) {
+      const j = Math.floor(Math.random() * (k + 1))
+      const tmp = b[k]; b[k] = b[j]; b[j] = tmp
+    }
+    for (let k = 0; k < CHALLENGE_TEST_PLAN[i] && out.length < total && k < b.length; k++) out.push(b[k])
+  })
+  return out.map(shuffleOptions)
+}
+// 前一天所有环节的错题（v72）：汇总 stages[].wrong（qid 去重）→ 取回题目 → 选项重洗。
+// 旧进度记录无 wrong 字段时返回空数组（兼容 v71 及更早的已完成阶段）。
+function chPrevDayWrongQuestions(prevDay) {
+  const cfg = CHALLENGE_DAYS.find(x => x.day === prevDay)
+  if (!cfg) return []
+  const seen = new Set()
+  const out = []
+  cfg.stages.forEach((_, si) => {
+    const r = chStageRec(prevDay, si)
+    const ws = r && Array.isArray(r.wrong) ? r.wrong : []
+    ws.forEach(qid => {
+      const k = String(qid)
+      if (seen.has(k)) return
+      seen.add(k)
+      const q = Store.getQuestion(Number(k)) || Store.getQuestion(k)
+      if (q) out.push(shuffleOptions(q))
+    })
+  })
+  return out
+}
+// 第 N 天第 si 阶段题目：
+//   test → 每次随机分层抽 20 题；practice → 固定序列切片 + （Day N≥2 首环节）追加前一天错题（额外，不占配额）。
+//   选项顺序每次进入重洗，答案位置不固定。
 function challengeStageQuestions(day, si) {
   const m = challengeStageInfo(day, si)
-  return challengePool().slice(m.start, m.start + m.count).map(shuffleOptions)
+  if (m.kind === 'test') return challengeRandomQuestions(20)
+  const qs = challengePool().slice(m.start, m.start + m.count).map(shuffleOptions)
+  if (day > 1 && si === 0) {
+    const extra = chPrevDayWrongQuestions(day - 1)
+    return qs.concat(extra)
+  }
+  return qs
 }
 function challengeKindOf(day, si) {
   const m = challengeStageInfo(day, si)
@@ -191,11 +253,14 @@ function chStartStage(day, si) {
   if (challengeKindOf(day, si) === 'test' && chStageDone(day, si)) return // 水平测试仅一次
   const qs = challengeStageQuestions(day, si)
   if (!qs.length) return
+  const m = challengeStageInfo(day, si)
   chs = {
     day, si, kind: challengeKindOf(day, si),
     questions: qs,
     answers: qs.map(() => -1),
     index: 0, phase: 'quiz', submitted: false, correctCount: 0,
+    firstWrong: [],                       // v72：首轮答错的题（错题回顾 + 次日追加复习的数据源）
+    extraCount: Math.max(0, qs.length - m.count),   // v72：次日追加的前一天错题数
   }
   if (chs.kind === 'test') {
     // v71：水平测试启用防作弊 —— 切屏 3 次强制交卷（按已答判分计次，与在线考试同口径）；管理员自动豁免
@@ -212,7 +277,7 @@ function chCheatSubmit() {
 }
 
 function chQuit() {
-  if (chs && chs.phase === 'quiz' && !confirm(t('chQuitConfirm'))) return
+  if (chs && (chs.phase === 'quiz' || chs.phase === 'review') && !confirm(t('chQuitConfirm'))) return
   AntiCheat.stop()
   chs = null
   renderChallenge()
@@ -225,12 +290,12 @@ function isChAnswered(i) {
 }
 
 // ====== 概览页 ======
-// 学员总进度卡（v71）：7 天格子（✓ 完成 / 数字 可做 / 🔒 未解锁）+ 环节与题数总进度条
+// 学员总进度卡（v71）：7 天格子（✓ 完成 / 数字 可做 / 🔒 未解锁）+ 环节与题数总进度条（v72 分母 = CHALLENGE_TOTAL 210）
 function chProgressHtml() {
   const meta = challengeStageMeta()
   const doneStages = meta.filter(m => chStageDone(m.day, m.si)).length
   const doneQ = meta.reduce((s, m) => chStageDone(m.day, m.si) ? s + m.count : s, 0)
-  const pct = Math.round(doneQ / 350 * 100)
+  const pct = Math.round(doneQ / CHALLENGE_TOTAL * 100)
   const cells = CHALLENGE_DAYS.map(d => {
     const done = chDayDone(d.day)
     const unlocked = chDayUnlocked(d.day)
@@ -259,7 +324,7 @@ function renderChallenge() {
   const el = document.getElementById('page-challenge')
   if (!el) return
   challengeLoad()
-  if (chs && (chs.phase === 'quiz' || chs.phase === 'result')) { renderChallengeQuiz(); return }
+  if (chs && (chs.phase === 'quiz' || chs.phase === 'review' || chs.phase === 'result')) { renderChallengeQuiz(); return }
   const bankN = Store.getQuestions().filter(q => Number(q.category_id) === 12).length
   const rows = CHALLENGE_DAYS.map(d => chDayBlockHtml(d)).join('')
   el.innerHTML = `
@@ -355,6 +420,7 @@ function renderChallengeQuiz() {
   const el = document.getElementById('page-challenge')
   if (!el) return
   if (!chs) { el.innerHTML = ''; return }
+  if (chs.phase === 'review') { renderChallengeReview(); return }
   if (chs.phase === 'result') { chRenderResult(); return }
   const q = chs.questions[chs.index]
   const isTest = chs.kind === 'test'
@@ -410,7 +476,8 @@ function renderChallengeQuiz() {
         <span class="tag tag-type">${TYPE_LABELS[q.type] || q.type}</span>
       </div>
       ${quizTitleHtml(q)}
-      <div class="options-list">${chOptionsHtml(q, submitted)}</div>
+      ${q.type === 'listen' ? `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;font-size:13px;color:#92400e;margin-bottom:12px">🔊 ${t('listenHint')}</div>` : ''}
+      <div class="options-list">${chOptionsHtml(q, submitted, chs.answers[chs.index], 'chPick')}</div>
       ${feedbackHtml}
       <div class="quiz-footer">
         <div class="quiz-progress">${t('questionOf', chs.index + 1, chs.questions.length)}</div>
@@ -421,11 +488,10 @@ function renderChallengeQuiz() {
   if (!submitted) autoplayListen(q)
 }
 
-// 三种单选题型（listen/single/voicematch）选项区
-function chOptionsHtml(q, submitted) {
-  const ans = chs.answers[chs.index]
+// 三种单选题型（listen/single/voicematch）选项区（v72 参数化：练习/回顾轮共用）
+function chOptionsHtml(q, submitted, ans, pickFn) {
   if (q.type === 'voicematch') {
-    return vmOptionsHtml(q, ans, submitted ? 'review' : 'live', 'chPick')
+    return vmOptionsHtml(q, ans, submitted ? 'review' : 'live', pickFn)
   }
   return q.options.map((opt, i) => {
     let cls = 'option-item'
@@ -436,7 +502,7 @@ function chOptionsHtml(q, submitted) {
       cls += ' selected'
     }
     const badge = submitted && q.answer.includes(i) ? '✓' : LETTERS[i]
-    return `<div class="${cls}" onclick="${submitted ? '' : `chPick(${i})`}">
+    return `<div class="${cls}" onclick="${submitted ? '' : `${pickFn}(${i})`}">
       <div class="option-badge">${badge}</div>
       <div class="option-text">${opt}</div>
     </div>`
@@ -449,12 +515,13 @@ function chPick(i) {
   renderChallengeQuiz()
 }
 
-// 完成记录写入 days[day].stages[si]；并上报云端（chy 事件 → 数据看板挑战统计）
-function chRecordStage(correct, total) {
+// 完成记录写入 days[day].stages[si]；并上报云端（chy 事件 → 数据看板挑战统计）。
+// v72：stage 记录追加 wrong = 首轮答错的 qid 列表（供次日额外复习）；chy 的 correct/total 为首次作答口径（不含回顾轮）。
+function chRecordStage(correct, total, wrongQids) {
   if (!challengeState.days[chs.day]) challengeState.days[chs.day] = { stages: {} }
   const d = challengeState.days[chs.day]
   if (!d.stages) d.stages = {}
-  d.stages[chs.si] = { done: true, at: Date.now(), correct, total }
+  d.stages[chs.si] = { done: true, at: Date.now(), correct, total, wrong: (wrongQids || []).map(String) }
   challengeSave()
   Store.trackPractice(correct, total)
   try { Store.reportChallengeStage(chs.day, chs.si, chs.kind, correct, total) } catch (e) {}
@@ -468,6 +535,7 @@ function chSubmitAnswer() {
   chs.submitted = true
   const correct = checkAnswer(q, ans)
   if (correct) chs.correctCount++
+  else chs.firstWrong.push(q)   // v72：首轮错题记录（当天回顾轮 + 次日额外复习）
   Store.addProgress({
     question_id: q.id,
     category_id: q.category_id,
@@ -487,9 +555,122 @@ function chNext() {
   }
 }
 function chFinishPractice() {
-  chRecordStage(chs.correctCount, chs.questions.length)
+  const total = chs.questions.length
+  if (chs.firstWrong.length) {
+    // v72：当天错题必须刷到全对才算完成 —— 进入错题回顾轮（只做答错的题，循环至全对）
+    chs.phase = 'review'
+    chs.reviewQs = chs.firstWrong.slice()
+    chs.reviewRound = 1
+    chs.reviewIdx = 0
+    chs.reviewAnswers = chs.reviewQs.map(() => -1)
+    chs.reviewSubmitted = false
+    chs.reviewWrongNow = []
+    renderChallengeReview()
+    return
+  }
+  chRecordStage(chs.correctCount, total, [])
   chs.phase = 'result'
   renderChallengeQuiz()
+}
+
+// ---- 错题回顾轮（v72）：只抽本轮仍错的题，全对即完成该阶段 ----
+function chReviewPick(i) {
+  if (!chs || chs.phase !== 'review') return
+  chs.reviewAnswers[chs.reviewIdx] = i
+  renderChallengeReview()
+}
+function chReviewSubmit() {
+  const q = chs.reviewQs[chs.reviewIdx]
+  const ans = chs.reviewAnswers[chs.reviewIdx]
+  if (ans === undefined || ans === -1) return
+  chs.reviewSubmitted = true
+  const correct = checkAnswer(q, ans)
+  if (!correct) chs.reviewWrongNow.push(q)
+  Store.addProgress({
+    question_id: q.id,
+    category_id: q.category_id,
+    dept: q.dept || '',
+    type: q.type,
+    correct,
+    mode: 'practice',
+    challenge: true,
+  })
+  renderChallengeReview()
+}
+function chReviewNext() {
+  if (chs.reviewIdx < chs.reviewQs.length - 1) {
+    chs.reviewIdx++
+    chs.reviewSubmitted = false
+    renderChallengeReview()
+    return
+  }
+  // 本轮结束
+  if (chs.reviewWrongNow.length) {
+    chs.reviewQs = chs.reviewWrongNow.slice()
+    chs.reviewRound++
+    chs.reviewIdx = 0
+    chs.reviewAnswers = chs.reviewQs.map(() => -1)
+    chs.reviewSubmitted = false
+    chs.reviewWrongNow = []
+    renderChallengeReview()
+    return
+  }
+  // 全对 → 阶段完成（chy 上报首次作答口径 correct/total）
+  chRecordStage(chs.correctCount, chs.questions.length, chs.firstWrong.map(q => q.id))
+  chs.phase = 'result'
+  renderChallengeQuiz()
+}
+
+// 错题回顾轮渲染（练习模式逐题反馈；顶部显示轮次与回顾提示）
+function renderChallengeReview() {
+  const el = document.getElementById('page-challenge')
+  if (!el) return
+  if (!chs || chs.phase !== 'review') { el.innerHTML = ''; return }
+  const q = chs.reviewQs[chs.reviewIdx]
+  const submitted = !!chs.reviewSubmitted
+
+  let feedbackHtml = ''
+  if (submitted) {
+    const isCorrect = checkAnswer(q, chs.reviewAnswers[chs.reviewIdx])
+    feedbackHtml = `<div class="feedback ${isCorrect ? 'correct' : 'wrong'}">
+      <strong>${isCorrect ? t('correctFeedback') : t('wrongFeedback')}</strong>
+      <div class="explanation">${q.explanation || t('noExplanation')}</div>
+      <div class="explanation">${t('correctAnswer')}：${q.answer.map(i => LETTERS[i]).join(', ')}</div>
+    </div>`
+  }
+
+  const last = chs.reviewIdx >= chs.reviewQs.length - 1
+  const footerBtns = !submitted
+    ? `<button class="btn btn-primary" onclick="chReviewSubmit()">${t('submitAnswer')}</button>`
+    : last
+      ? `<button class="btn btn-success" onclick="chReviewNext()">${chs.reviewWrongNow.length ? t('chReviewNextRound') : t('chReviewFinish')}</button>`
+      : `<button class="btn btn-primary" onclick="chReviewNext()">${t('nextQuestion')}</button>`
+
+  el.innerHTML = `
+    <div class="exam-timer" style="margin-bottom:12px">
+      <div>
+        <strong>${t('chDay', chs.day)}</strong>
+        <span class="tag tag-category" style="margin-left:8px">${t('chReviewTag')}</span>
+        <span style="font-size:12px;color:#6b7280;margin-left:8px">${t('chReviewRound', chs.reviewRound)}</span>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="chQuit()" title="✕">✕</button>
+    </div>
+    <div class="card">
+      <p class="form-hint" style="margin:0 0 10px">✏️ ${t('chReviewHint')}</p>
+      <div class="q-meta">
+        <span class="tag tag-type">${TYPE_LABELS[q.type] || q.type}</span>
+      </div>
+      ${quizTitleHtml(q)}
+      ${q.type === 'listen' ? `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;font-size:13px;color:#92400e;margin-bottom:12px">🔊 ${t('listenHint')}</div>` : ''}
+      <div class="options-list">${chOptionsHtml(q, submitted, chs.reviewAnswers[chs.reviewIdx], 'chReviewPick')}</div>
+      ${feedbackHtml}
+      <div class="quiz-footer">
+        <div class="quiz-progress">${t('questionOf', chs.reviewIdx + 1, chs.reviewQs.length)}</div>
+        <div style="display:flex;gap:8px">${footerBtns}</div>
+      </div>
+    </div>
+  `
+  if (!submitted) autoplayListen(q)
 }
 
 // ---- 水平测试（统一判分） ----
@@ -508,9 +689,11 @@ function finishChallengeTest() {
   AntiCheat.stop() // 交卷（正常或强制）即停监听
   const total = chs.questions.length
   let correct = 0
+  const wrongQids = []
   const review = chs.questions.map((q, i) => {
     const isCorrect = checkAnswer(q, chs.answers[i])
     if (isCorrect) correct++
+    else wrongQids.push(q.id)   // v72：测试错题也进入次日额外复习池
     Store.addProgress({
       question_id: q.id,
       category_id: q.category_id,
@@ -522,7 +705,7 @@ function finishChallengeTest() {
     })
     return { q, ans: chs.answers[i], isCorrect }
   })
-  chRecordStage(correct, total)
+  chRecordStage(correct, total, wrongQids)
   chs.review = review
   chs.score = Math.round(correct / total * 100)
   chs.phase = 'result'
@@ -549,10 +732,14 @@ function chRenderResult() {
       <p style="color:#6b7280;margin-bottom:8px">${t('practiceResult', correct, total, pct)}</p>
     </div>`
   const report = isTest && chs.day === 7 ? chReportHtml() : ''
+  // v72：练习结果页显示前日错题复习量（本次作答含的额外题数）
+  const extraNote = !isTest && chs.extraCount > 0
+    ? `<p style="font-size:13px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;display:inline-block">🔁 ${t('chExtraDone', chs.extraCount)}</p><br>`
+    : ''
   const review = isTest ? `
     <h3 class="section-title">${t('reviewTitle')}</h3>
     ${chs.review.map((r, i) => chReviewItemHtml(r, i)).join('')}` : ''
-  el.innerHTML = hero + report + review + `
+  el.innerHTML = hero + extraNote + report + review + `
     <div style="text-align:center;margin-top:24px">
       <button class="btn btn-primary" onclick="chBack()">${t('chBackToChallenge')}</button>
     </div>`
