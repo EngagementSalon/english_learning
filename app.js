@@ -2993,6 +2993,8 @@ async function renderDashboard() {
 
     <div id="dashCatBlock"></div>
 
+    ${dashChExamGateHtml()}
+
     <div id="dashChallengeBlock"></div>
 
     <h2 style="margin:24px 0 12px;font-size:18px">📊 ${t('dashDetailTitle')}</h2>
@@ -3058,6 +3060,45 @@ async function renderDashboard() {
   renderDashChallengeBlock(rows)
   _perQLastRows = rows
   renderPerQBlock(rows)
+}
+
+// ====== 管理员看板：期末考试开关（v76） ======
+// 七天挑战第 7 天期末考试为手动开放：存云端 doc.chExamOpen（cloud-store setChallengeExamOpen），
+// 学员端经 _getDoc 侧信道 _chExamOpen 读取；零参与时也要显示（管理员可提前开考）。
+function dashChExamGateHtml() {
+  const open = typeof CloudSync !== 'undefined' && CloudSync._chExamOpen === true
+  const badge = open
+    ? `<span style="font-size:12px;font-weight:800;color:#059669;background:#d1fae5;border-radius:10px;padding:2px 10px">● ${t('dashChExamOn')}</span>`
+    : `<span style="font-size:12px;font-weight:800;color:#9ca3af;background:#f3f4f6;border-radius:10px;padding:2px 10px">● ${t('dashChExamOff')}</span>`
+  return `
+    <div class="card" style="margin-top:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <div style="min-width:0">
+          <div style="font-size:15px;font-weight:700;margin-bottom:2px">🎓 ${t('dashChExamTitle')} ${badge}</div>
+          <div style="font-size:12px;color:#6b7280">${t('dashChExamHint')}</div>
+        </div>
+        <button id="dashChExamBtn" class="btn btn-sm ${open ? 'btn-danger' : 'btn-primary'}" style="flex-shrink:0" onclick="dashToggleChExam()">${open ? t('dashChExamCloseBtn') : t('dashChExamOpenBtn')}</button>
+      </div>
+    </div>`
+}
+async function dashToggleChExam() {
+  const cur = typeof CloudSync !== 'undefined' && CloudSync._chExamOpen === true
+  const next = !cur
+  const btn = document.getElementById('dashChExamBtn')
+  if (btn) btn.disabled = true
+  try {
+    const res = await CloudSync.setChallengeExamOpen(next)
+    if (res && res.ok) {
+      CloudSync._chExamOpen = next
+      renderDashboard()   // 重渲染看板刷新徽章与按钮（顺带刷新其余板块数据）
+    } else {
+      alert(t('dashChExamFail'))
+      if (btn) btn.disabled = false
+    }
+  } catch (e) {
+    alert(t('dashChExamFail'))
+    if (btn) btn.disabled = false
+  }
 }
 
 // ====== 管理员看板：七天挑战统计（v71） ======

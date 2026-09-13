@@ -220,6 +220,15 @@ function chDayUnlocked(day) {
 function chStageUnlocked(day, si) {
   return si === 0 ? chDayUnlocked(day) : chStageDone(day, si - 1)
 }
+
+// v76 期末考试门禁：仅 Day7 的水平测试需管理员在云端开启（doc.chExamOpen）；
+// Day1 摸底测试不受影响；已完成的期末考试仍显示成绩。云端不可达/未拉取时视为未开放。
+function chIsFinalExam(day, si) {
+  return day === 7 && challengeKindOf(day, si) === 'test'
+}
+function chFinalExamLocked() {
+  try { return !(typeof CloudSync !== 'undefined' && CloudSync._chExamOpen === true) } catch (e) { return true }
+}
 function chStageScore(day, si) {
   const r = chStageRec(day, si)
   if (!r || !r.done || !r.total) return null
@@ -250,6 +259,11 @@ let chs = null
 function chStartStage(day, si) {
   challengeLoad()
   if (!chStageUnlocked(day, si)) return
+  // v76：期末考试需管理员开启（入口已锁，此处二次拦截防控制台/旧 DOM 调用）
+  if (chIsFinalExam(day, si) && !chStageDone(day, si) && chFinalExamLocked()) {
+    alert(t('chExamLockedAlert'))
+    return
+  }
   if (challengeKindOf(day, si) === 'test' && chStageDone(day, si)) return // 水平测试仅一次
   const qs = challengeStageQuestions(day, si)
   if (!qs.length) return
@@ -350,6 +364,7 @@ function chLbRowsHtml(top) {
     </div>`).join('')
 }
 let _chLbCache = { at: 0, top: null }
+let _chGateRendered = null   // v76：挑战页渲染时的期末考试锁定态（拉取后变化则重渲染入口）
 function chLbFill(top) {
   const el = document.getElementById('chLbBody')
   if (el) el.innerHTML = chLbRowsHtml(top)
@@ -365,6 +380,14 @@ async function chLoadLeaderboard() {
   } catch (e) { /* 网络失败保留旧缓存或显示空态 */ }
   if (top) _chLbCache = { at: now, top }
   chLbFill(_chLbCache.top)
+  // v76：积分榜拉取顺带刷新了考试开关侧信道（_getDoc）→ 管理员刚开启/关闭时重渲染入口；
+  // 仅概览页响应（答题中 renderChallenge 会走会话分支，不打断作答）
+  try {
+    if (typeof CloudSync !== 'undefined' && CloudSync._chExamOpen !== undefined
+      && _chGateRendered !== null && chFinalExamLocked() !== _chGateRendered) {
+      renderChallenge()
+    }
+  } catch (e) { /* ignore */ }
 }
 
 function renderChallenge() {
@@ -372,6 +395,7 @@ function renderChallenge() {
   if (!el) return
   challengeLoad()
   if (chs && (chs.phase === 'quiz' || chs.phase === 'review' || chs.phase === 'result')) { renderChallengeQuiz(); return }
+  _chGateRendered = chFinalExamLocked()   // v76：记录本次渲染的考试门禁态
   const bankN = Store.getQuestions().filter(q => Number(q.category_id) === 12).length
   const rows = CHALLENGE_DAYS.map(d => chDayBlockHtml(d)).join('')
   el.innerHTML = `
@@ -425,7 +449,12 @@ function chStageRowHtml(day, si, s) {
       right = `<button class="btn btn-ghost btn-sm" onclick="chStartStage(${day},${si})" style="flex-shrink:0">${t('chRetake')}</button>`
     }
   } else if (unlocked) {
-    right = `<button class="btn btn-primary btn-sm" onclick="chStartStage(${day},${si})" style="flex-shrink:0">${t('chStart')}</button>`
+    // v76：期末考试未开放（管理员未开启）→ 锁定文案，不给开始按钮
+    if (chIsFinalExam(day, si) && chFinalExamLocked()) {
+      right = `<span style="font-size:12px;color:#9ca3af;flex-shrink:0">🔒 ${t('chExamLocked')}</span>`
+    } else {
+      right = `<button class="btn btn-primary btn-sm" onclick="chStartStage(${day},${si})" style="flex-shrink:0">${t('chStart')}</button>`
+    }
   } else {
     // 锁定文案：阶段锁（si>0）= 完成上方环节；天锁 = 前置天未完成 → chLocked，已完成但未到次日 → chTomorrow
     const lockText = si > 0 ? t('chStageLocked')

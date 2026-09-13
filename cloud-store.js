@@ -96,6 +96,10 @@ const CloudSync = {
     const txt = await r.text()
     const doc = JSON.parse(txt)
     if (!doc || typeof doc !== 'object' || !Array.isArray(doc.events)) throw new Error('bad cloud doc')
+    // v76 侧信道：七天挑战期末考试开关（doc 顶层字段，默认缺省=关闭）。
+    // 所有拉取路径（周期探测 / fetchSyncSummary / getDashboardData / 开关写后校验）都经此处，
+    // 学员端/管理端读 CloudSync._chExamOpen 即得最新状态。
+    this._chExamOpen = doc.chExamOpen === true
     try { localStorage.setItem('eq_cloud_cache', txt) } catch (e) { /* ignore */ }
     return doc
   },
@@ -203,6 +207,27 @@ const CloudSync = {
       if (tries < 3) this._logoGuardTimer = setTimeout(heal, Math.max(1000, this._logoGuardDelay))
     }
     this._logoGuardTimer = setTimeout(heal, Math.max(50, this._logoGuardDelay))
+  },
+
+  // ---------- 七天挑战期末考试开关（v76，全平台同步） ----------
+  // 说明：开关存于云文档顶层字段 chExamOpen（缺省 = 关闭），与 Logo 同层的平台级配置，
+  // 不随事件折叠。管理员开启后，学员端才可进入第 7 天期末考试（Day1 摸底测试不受影响）。
+  // 读-改-写 + 写后校验重试；成功后立即同步本地侧信道，无需等待下次拉取。
+  async setChallengeExamOpen(open) {
+    const val = !!open
+    let saved = false
+    for (let attempt = 0; attempt < 4 && !saved; attempt++) {
+      try {
+        const doc = await this._getDoc()
+        doc.chExamOpen = val
+        doc.chExamAt = Date.now()
+        await this._putDoc(doc)
+        const check = await this._getDoc()
+        if (check.chExamOpen === val) saved = true
+      } catch (e) { /* 网络波动等 → 重试 */ }
+    }
+    if (saved) this._chExamOpen = val
+    return saved ? { ok: true } : { ok: false, reason: 'network' }
   },
 
   // ---------- 聚合 ----------
