@@ -293,13 +293,30 @@ const CloudSync = {
         if (d.dept !== undefined) r.dept = String(d.dept || '')
         break
       case 'perq':
-        // 单题答题对错上报：普通作答聚合到 r.perQ[qid]；七天挑战错答（d.ch）聚合到 r.chQ[qid]（total=错次）
+        // 单题答题对错上报。v75 瘦身（200 人规模容量优化）：
+        //   全局每题正确率聚合 map.__q[qid] = [correct, total]（跨学员合并、随 base 折叠保留，
+        //   正确率看板数据源）；个人明细只记错题：普通作答答错 → r.perQ[qid] = {correct:0, total:错次}，
+        //   答对不再逐题记录（整体正确率由 __q 支撑，个人体积降为 O(错题数)）；
+        //   七天挑战错答（d.ch）→ r.chQ[qid]（不变，不进全局正确率）
         if (d.qid != null) {
-          const tgt = d.ch ? (r.chQ = r.chQ || {}) : (r.perQ = r.perQ || {})
           const qid = String(d.qid)
-          const rec = tgt[qid] || (tgt[qid] = { correct: 0, total: 0 })
-          rec.total += 1
-          if (d.correct) rec.correct += 1
+          if (d.ch) {
+            const t2 = (r.chQ = r.chQ || {})
+            const rec2 = t2[qid] || (t2[qid] = { correct: 0, total: 0 })
+            rec2.total += 1
+            if (d.correct) rec2.correct += 1
+          } else {
+            const q = (map.__q = map.__q || {})
+            const agg = q[qid] || (q[qid] = [0, 0])
+            agg[1] += 1
+            if (d.correct) agg[0] += 1
+            if (!d.correct) {
+              // 兜底：base 里的老用户记录可能没有 perQ 字段（早期版本折叠产物），必须先补空表
+              const t3 = (r.perQ = r.perQ || {})
+              const rec3 = t3[qid] || (t3[qid] = { correct: 0, total: 0 })
+              rec3.total += 1
+            }
+          }
         }
         break
       case 'chy':
@@ -315,10 +332,17 @@ const CloudSync = {
       case 'perqfix':
         // v38 看字选音发音修复：无效错答从每题统计的分母中剔除（correct 不变——错答本就未计入）
         if (d.qid != null) {
-          r.perQ = r.perQ || {}
           const qidF = String(d.qid)
-          const recF = r.perQ[qidF]
-          if (recF) recF.total = Math.max(recF.correct || 0, recF.total - (d.wrongFix || 1))
+          // v75：全局聚合分母同步剔除（不低于已答对数）
+          if (map.__q && map.__q[qidF]) {
+            map.__q[qidF][1] = Math.max(map.__q[qidF][0], map.__q[qidF][1] - (d.wrongFix || 1))
+          }
+          // 个人错题明细：错次回退（答对者无条目，自然跳过）；清零即移除条目（v75 省体积）
+          const recF = r.perQ && r.perQ[qidF]
+          if (recF) {
+            recF.total = Math.max(recF.correct || 0, recF.total - (d.wrongFix || 1))
+            if (recF.total <= 0) delete r.perQ[qidF]
+          }
         }
         break
       case 'examfix':
@@ -378,7 +402,11 @@ const CloudSync = {
     }
     // 重新构建包含 base + events 的聚合表（与看板同样的合并方式）
     const map = {}
-    Object.keys(doc.base || {}).forEach(u => { map[u] = Object.assign({}, doc.base[u], { username: u }) })
+    Object.keys(doc.base || {}).forEach(u => {
+      // v75：__q 等内部聚合键不是用户，原样放入（不加 username，避免混进看板名单）
+      if (u.charAt(0) === '_') { map[u] = doc.base[u]; return }
+      map[u] = Object.assign({}, doc.base[u], { username: u })
+    })
     const events = (doc.events || []).concat(this._queue())
     events.forEach(ev => this._apply(map, ev))
     return { ok: true, doc, map }
@@ -402,9 +430,17 @@ const CloudSync = {
       if (!doc) return null  // 无缓存 → 调用方走本地统计
     }
     const map = {}
-    Object.keys(doc.base || {}).forEach(u => { map[u] = Object.assign({}, doc.base[u], { username: u }) })
+    Object.keys(doc.base || {}).forEach(u => {
+      // v75：__q 等内部聚合键不是用户，原样放入（不加 username，避免混进看板名单）
+      if (u.charAt(0) === '_') { map[u] = doc.base[u]; return }
+      map[u] = Object.assign({}, doc.base[u], { username: u })
+    })
     const events = (doc.events || []).concat(this._queue())
     events.forEach(ev => this._apply(map, ev))
+    // v75：缓存全局每题聚合与云端文档体积（正确率看板/存储用量指示条用；
+    // 挂在实例上而不改返回结构——学员端挑战页也复用本方法取数组）
+    this._lastQStats = map.__q || {}
+    try { this._lastDocBytes = JSON.stringify(doc).length } catch (e) { /* ignore */ }
     return Object.keys(map).map(u => map[u]).filter(r => r.username)
   },
 

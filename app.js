@@ -2937,6 +2937,25 @@ function dashSwitchTab(v) {
   if (bo) bo.className = 'btn btn-sm ' + (v === 'online' ? 'btn-primary' : 'btn-ghost')
   if (bf) bf.className = 'btn btn-sm ' + (v === 'offline' ? 'btn-primary' : 'btn-ghost')
 }
+// v75：云端存储用量指示条（共享用户数据文档 / 1MB 上限，数据看板顶部）
+function dashStorageBarHtml() {
+  const bytes = (typeof CloudSync !== 'undefined' && CloudSync._lastDocBytes) || 0
+  if (!bytes) return ''
+  const CAP = 1024 * 1024
+  const pct = Math.min(100, Math.round(bytes / CAP * 100))
+  const kb = Math.round(bytes / 1024)
+  const color = pct >= 90 ? '#dc2626' : pct >= 70 ? '#d97706' : '#16a34a'
+  return `
+    <div class="card" style="margin-bottom:16px;padding:12px 16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:6px">
+        <span style="font-size:13px;font-weight:700">💾 ${t('dashStoreTitle')}</span>
+        <span style="font-size:12px;font-weight:700;color:${color}">${kb} KB / 1 MB · ${pct}%</span>
+      </div>
+      <div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:${pct}%;background:${color}"></div></div>
+      <p class="form-hint" style="margin:6px 0 0">${t('dashStoreHint')}</p>
+    </div>`
+}
+
 async function renderDashboard() {
   if (!Store.isAdmin()) return
   const session = Store.getSession()
@@ -3030,6 +3049,7 @@ async function renderDashboard() {
       <button class="btn btn-sm ${dashTab === 'online' ? 'btn-primary' : 'btn-ghost'}" id="dashTabBtnOnline" onclick="dashSwitchTab('online')">🌐 ${t('dashTabOnline')}</button>
       <button class="btn btn-sm ${dashTab === 'offline' ? 'btn-primary' : 'btn-ghost'}" id="dashTabBtnOffline" onclick="dashSwitchTab('offline')">🏫 ${t('dashTabOffline')}</button>
     </div>
+    ${dashStorageBarHtml()}
     <div id="dashOnlineBlock">${onlineHtml}</div>
     <div id="dashOfflineBlock" style="${dashTab === 'offline' ? '' : 'display:none'}">${offlineHtml}</div>
     <p class="form-hint" style="margin-top:12px">${t('dashHint')}</p>
@@ -3242,17 +3262,24 @@ function setDashDept(val) {
 }
 
 // ====== 每道题正确率（管理员看板）======
-// 数据来源：各学员云端 perQ 聚合（perQ[qid]={correct,total}），跨所有学员合并成全题统计
+// 数据来源（v75 瘦身）：全局聚合 CloudSync._lastQStats（__q[qid]=[correct,total]，含对/错全量，
+// 随云端 base 折叠保留）；个人 perQ 瘦身后只记错题，仅在 __q 缺该题时补充（防旧数据双算）
 let perQDept = ''   // '' 全部 | 'dining' | 'rooms'
 let perQSort = 'rate' // 'rate' 按正确率 | 'attempts' 按答题次数
 function renderPerQBlock(rows) {
   const el = document.getElementById('perQBlock')
   if (!el) return
-  // 1) 合并所有学员的 perQ → 全题统计
+  // 1) 合并全题统计：__q 优先，旧完整 perQ 补充 __q 没有的题
   const agg = {}   // qid -> { correct, total }
+  const _qs = (typeof CloudSync !== 'undefined' && CloudSync._lastQStats) || {}
+  Object.keys(_qs).forEach(qid => {
+    const a = _qs[qid]
+    if (a && a.length === 2) agg[qid] = { correct: a[0], total: a[1] }
+  })
   ;(rows || []).forEach(r => {
     if (!r || !r.perQ) return
     Object.keys(r.perQ).forEach(qid => {
+      if (agg[qid]) return   // __q 已含该题全量（新语义），跳过避免错题双算
       const rec = r.perQ[qid]
       if (!rec) return
       const a = agg[qid] || (agg[qid] = { correct: 0, total: 0 })

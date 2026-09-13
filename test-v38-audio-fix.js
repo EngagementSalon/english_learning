@@ -213,9 +213,9 @@ function makeAudioSandbox({ ua, voices, utterOnstart }) {
         { u: 's1', ty: 'examfix', d: { scoreOld: 80, scoreNew: 85, passedOld: true, passedNew: true } },
       ]
       evs.forEach(ev => CloudSync._apply(map, ev))
-      return map.s1
+      return Object.assign(map.s1, { __q5: map.__q && map.__q['525'] })
     })()`, sb)
-    assert('perqfix：qid525 分母 2→1，正确数不变', out.perQ && out.perQ['525'].total === 1 && out.perQ['525'].correct === 1, JSON.stringify(out.perQ))
+    assert('perqfix：__q[525] 分母 2→1、正确数不变；个人错次清零移除条目（v75）', out.__q5 && out.__q5[0] === 1 && out.__q5[1] === 1 && !out.perQ['525'], JSON.stringify({ __q5: out.__q5, perQ: out.perQ }))
     assert('examfix：均分 80→85（examCount 不变）', out.examScoreSum === 85 && out.examCount === 1, JSON.stringify({ sum: out.examScoreSum, n: out.examCount }))
     assert('examfix：best 85', out.examBest === 85, 'got ' + out.examBest)
     // 未及格 → 及格修正
@@ -229,7 +229,7 @@ function makeAudioSandbox({ ua, voices, utterOnstart }) {
       return map.s2
     })()`, sb)
     assert('examfix：55→63 且及格数 +1', out2.examScoreSum === 63 && out2.examPassCount === 1, JSON.stringify({ sum: out2.examScoreSum, pass: out2.examPassCount }))
-    // 保护：perqfix 超额剔除不小于 correct
+    // 保护：perqfix 超额剔除不低于已答对数（v75：__q 分母下限 = correct；个人无错题条目不受影响）
     const out3 = vm.runInContext(`(() => {
       const map = {}
       ;[
@@ -238,9 +238,9 @@ function makeAudioSandbox({ ua, voices, utterOnstart }) {
         { u: 's3', ty: 'perq', d: { qid: 9, correct: 1 } },
         { u: 's3', ty: 'perqfix', d: { qid: 9, wrongFix: 5 } },
       ].forEach(ev => CloudSync._apply(map, ev))
-      return map.s3.perQ['9']
+      return { q: map.__q && map.__q['9'], p: map.s3.perQ['9'] }
     })()`, sb)
-    assert('perqfix 超额剔除 → total 下限 = correct', out3.total === 2 && out3.correct === 2, JSON.stringify(out3))
+    assert('perqfix 超额剔除 → __q 分母下限 = correct（2 对不受扣减）', out3.q && out3.q[0] === 2 && out3.q[1] === 2 && !out3.p, JSON.stringify(out3))
   }
 
   console.log(failed ? '\n❌ 有失败项' : '\n✅ 全部通过')

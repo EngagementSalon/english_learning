@@ -80,8 +80,8 @@ function makeSandbox() {
   })())
   assert('chy usedSec 聚合（新事件 315 / 旧事件补 0）', vm.runInContext('window.__map.bob.chy[2].usedSec === 315 && window.__map.bob.chy[1].usedSec === 0', sb))
   assert('chQ[qid] 累计错次（8003×2）', vm.runInContext('window.__map.bob.chQ["8003"].total === 2 && window.__map.bob.chQ["8003"].correct === 0', sb))
-  assert('普通 perq 不进 chQ（8001 走 perQ）', vm.runInContext('!window.__map.bob.chQ["8001"] && window.__map.bob.perQ["8001"].total === 1 && window.__map.bob.perQ["8001"].correct === 1', sb))
-  assert('无用户事件被忽略', vm.runInContext('Object.keys(window.__map).length === 1', sb))
+  assert('普通 perq 不进 chQ；答对只进全局 __q（v75 瘦身不逐题记对）', vm.runInContext('!window.__map.bob.chQ["8001"] && !window.__map.bob.perQ["8001"] && window.__map.__q["8001"][0] === 1 && window.__map.__q["8001"][1] === 1', sb))
+  assert('无用户事件被忽略（除 v75 内部聚合键 __q 外仅 bob 一个用户）', vm.runInContext('Object.keys(window.__map).filter(k => k.charAt(0) !== "_").length === 1 && !!window.__map.__q', sb))
   {
     // rename 合并：bob → alice
     vm.runInContext(`
