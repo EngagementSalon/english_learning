@@ -340,7 +340,10 @@ select { min-width: 120px; }
   cursor: pointer;
   transition: all .15s;
 }
-.option-item:hover { border-color: var(--primary-light); background: #F7F8DD; }
+/* v77：hover 仅限有真实指针的设备 —— 触屏设备点选后残留的 sticky hover 会让下一题选项「自己亮着」 */
+@media (hover: hover) {
+  .option-item:hover { border-color: var(--primary-light); background: #F7F8DD; }
+}
 .option-item.selected { border-color: var(--primary); background: var(--brand-soft); }
 .option-item.correct { border-color: var(--success); background: #f0fdf4; }
 .option-item.wrong { border-color: var(--danger); background: #fef2f2; }

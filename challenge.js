@@ -1,5 +1,6 @@
 // ====== 标帜餐厅七天英文挑战（v68 引入；v70 入口移入练习页 + Day1/7 双阶段；v71 难度递增+时间锁+防作弊+看板上报；
-//        v72 每日 30 题 + 测试每次随机 + 练习错题当天刷到全对 + 前一天错题次日额外复习 + 听音题醒目注解） ======
+//        v72 每日 30 题 + 测试每次随机 + 练习错题当天刷到全对 + 前一天错题次日额外复习 + 听音题醒目注解；
+//        v77 挑战整体需管理员手动开放（chOpen）：未开放/已结束时全部环节灰掉锁定） ======
 // 题源：分类 12「标帜餐厅常见词汇」（684 题 = 456 listen + 228 single，v71 起无 voicematch）。
 // 练习序列（固定）：按难度分桶（1/2/3）按天配比抽取（CHALLENGE_DIFF_PLAN），Day1 均值 1.0 → Day7 均值 2.2；
 //   Day1 巩固练习 10 题 → Day2-6 每日练习 30 题 → Day7 巩固练习 10 题，共 170 题，全员同一套练习题。
@@ -229,6 +230,14 @@ function chIsFinalExam(day, si) {
 function chFinalExamLocked() {
   try { return !(typeof CloudSync !== 'undefined' && CloudSync._chExamOpen === true) } catch (e) { return true }
 }
+// v77 挑战门禁：整个七天挑战需管理员在云端开放（doc.chOpen，缺省=关闭）。
+// 云端不可达/未拉取时视为未开放；关闭后学员端全部环节灰掉（曾开放过 → 显示「已结束」）。
+function chOpenLocked() {
+  try { return !(typeof CloudSync !== 'undefined' && CloudSync._chOpen === true) } catch (e) { return true }
+}
+function chOpenEverOpened() {
+  try { return typeof CloudSync !== 'undefined' && (Number(CloudSync._chOpenAt) || 0) > 0 } catch (e) { return false }
+}
 function chStageScore(day, si) {
   const r = chStageRec(day, si)
   if (!r || !r.done || !r.total) return null
@@ -258,6 +267,11 @@ let chs = null
 
 function chStartStage(day, si) {
   challengeLoad()
+  // v77：挑战未开放（管理员未开启/已结束）→ 全局拦截（入口已灰掉，此处二次拦截防控制台调用）
+  if (chOpenLocked()) {
+    alert(t('chNotOpenAlert'))
+    return
+  }
   if (!chStageUnlocked(day, si)) return
   // v76：期末考试需管理员开启（入口已锁，此处二次拦截防控制台/旧 DOM 调用）
   if (chIsFinalExam(day, si) && !chStageDone(day, si) && chFinalExamLocked()) {
@@ -380,12 +394,12 @@ async function chLoadLeaderboard() {
   } catch (e) { /* 网络失败保留旧缓存或显示空态 */ }
   if (top) _chLbCache = { at: now, top }
   chLbFill(_chLbCache.top)
-  // v76：积分榜拉取顺带刷新了考试开关侧信道（_getDoc）→ 管理员刚开启/关闭时重渲染入口；
+  // v76/v77：积分榜拉取顺带刷新了开关侧信道（_getDoc）→ 管理员刚开/关挑战或考试时重渲染入口；
   // 仅概览页响应（答题中 renderChallenge 会走会话分支，不打断作答）
   try {
-    if (typeof CloudSync !== 'undefined' && CloudSync._chExamOpen !== undefined
-      && _chGateRendered !== null && chFinalExamLocked() !== _chGateRendered) {
-      renderChallenge()
+    if (typeof CloudSync !== 'undefined' && _chGateRendered !== null) {
+      const cur = { open: chOpenLocked(), exam: chFinalExamLocked() }
+      if (cur.open !== _chGateRendered.open || cur.exam !== _chGateRendered.exam) renderChallenge()
     }
   } catch (e) { /* ignore */ }
 }
@@ -395,10 +409,19 @@ function renderChallenge() {
   if (!el) return
   challengeLoad()
   if (chs && (chs.phase === 'quiz' || chs.phase === 'review' || chs.phase === 'result')) { renderChallengeQuiz(); return }
-  _chGateRendered = chFinalExamLocked()   // v76：记录本次渲染的考试门禁态
+  // v77：记录本次渲染的门禁态（挑战开关 + 考试开关），拉取后变化则重渲染入口
+  _chGateRendered = { open: chOpenLocked(), exam: chFinalExamLocked() }
   const bankN = Store.getQuestions().filter(q => Number(q.category_id) === 12).length
   const rows = CHALLENGE_DAYS.map(d => chDayBlockHtml(d)).join('')
+  // v77：挑战未开放/已结束横幅（进度/积分榜/报告仍可查看）
+  const chClosedBanner = chOpenLocked()
+    ? `<div class="card" style="border:2px solid ${chOpenEverOpened() ? '#9ca3af' : '#f59e0b'};margin-bottom:16px;text-align:center;padding:18px">
+        <div style="font-size:15px;font-weight:800;margin-bottom:4px">${chOpenEverOpened() ? '🏁 ' + t('chEnded') : '🔒 ' + t('chNotOpen')}</div>
+        <div style="font-size:12px;color:#6b7280">${chOpenEverOpened() ? t('chEndedHint') : t('chNotOpenHint')}</div>
+      </div>`
+    : ''
   el.innerHTML = `
+    ${chClosedBanner}
     ${chProgressHtml()}
     <div class="card" style="border:2px solid #f59e0b;margin-bottom:16px">
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:4px">
@@ -438,7 +461,11 @@ function chStageRowHtml(day, si, s) {
   const tag = isTest ? t('chTestTag') : t('chPracticeTag')
   const tagCls = isTest ? 'tag tag-type' : 'tag tag-category'
   let right = ''
-  if (done) {
+  // v77：挑战未开放/已结束 → 全部入口灰掉（已完成测试仍显示分数，不给重练/开始）
+  if (chOpenLocked() && !(done && isTest)) {
+    const closedTxt = chOpenEverOpened() ? t('chEnded') : t('chNotOpenShort')
+    right = `<span style="font-size:12px;color:#9ca3af;flex-shrink:0">🔒 ${closedTxt}</span>`
+  } else if (done) {
     if (isTest) {
       const color = score >= 80 ? '#059669' : score >= 60 ? '#d97706' : '#dc2626'
       right = `<div style="text-align:right;flex-shrink:0">

@@ -89,7 +89,7 @@ function makeChSandbox(examOpen) {
     dismiss() {},
     isAdminUser() { return false },
   }
-  sb.CloudSync = { enqueue() {}, _chExamOpen: examOpen }
+  sb.CloudSync = { enqueue() {}, _chExamOpen: examOpen, _chOpen: true }   // v77 挑战门禁默认开放（行为见 test-v77）
   vm.createContext(sb)
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'bank-data.js'), 'utf-8'), sb)
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'store.js'), 'utf-8'), sb)

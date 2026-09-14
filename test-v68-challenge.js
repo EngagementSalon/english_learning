@@ -53,10 +53,11 @@ function makeSandbox(pre) {
     dismiss() {},
     isAdminUser() { return false },
   }
-  // 云事件队列 mock（chy / perq 上报捕获）；v76 期末考试门禁默认开放（本文件测既有流程，门禁行为见 test-v76）
+  // 云事件队列 mock（chy / perq 上报捕获）；v76/v77 门禁默认开放（本文件测既有流程，门禁行为见 test-v76 / test-v77）
   sb.CloudSync = {
     enqueue(ev) { (sb.window.__events = sb.window.__events || []).push(ev) },
     _chExamOpen: true,
+    _chOpen: true,
   }
   vm.createContext(sb)
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'bank-data.js'), 'utf-8'), sb)

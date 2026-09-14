@@ -944,10 +944,13 @@ function renderPractice() {
   `
 }
 
-// 七天挑战入口卡片（v70：入口移入练习页下方，不再是独立导航项）
+// 七天挑战入口卡片（v70：入口移入练习页下方，不再是独立导航项；v77 未开放/已结束时提示锁定态）
 function challengeEntryHtml() {
   challengeLoad()
   const doneDays = CHALLENGE_DAYS.filter(d => chDayDone(d.day)).length
+  const lockHint = typeof chOpenLocked === 'function' && chOpenLocked()
+    ? `<p class="form-hint" style="margin:4px 0 0;color:#9ca3af">${chOpenEverOpened() ? '🏁 ' + t('chEnded') : '🔒 ' + t('chNotOpen')}</p>`
+    : ''
   return `
     <div class="card" onclick="navigate('challenge')" style="cursor:pointer;margin-top:16px;border:2px solid #f59e0b">
       <div style="display:flex;align-items:center;gap:12px">
@@ -955,6 +958,7 @@ function challengeEntryHtml() {
         <div style="flex:1;min-width:0">
           <h3 style="margin:0 0 4px">${t('chTitle')}</h3>
           <p class="form-hint" style="margin:0">${t('chEntryHint', doneDays)}</p>
+          ${lockHint}
         </div>
         <div style="font-size:22px;color:#9ca3af">›</div>
       </div>
@@ -2993,6 +2997,8 @@ async function renderDashboard() {
 
     <div id="dashCatBlock"></div>
 
+    ${dashChOpenGateHtml()}
+
     ${dashChExamGateHtml()}
 
     <div id="dashChallengeBlock"></div>
@@ -3060,6 +3066,46 @@ async function renderDashboard() {
   renderDashChallengeBlock(rows)
   _perQLastRows = rows
   renderPerQBlock(rows)
+}
+
+// ====== 管理员看板：七天挑战开放开关（v77） ======
+// 挑战整体为手动开放：存云端 doc.chOpen（cloud-store setChallengeOpen），开放时写 chOpenAt；
+// 学员端经 _getDoc 侧信道 _chOpen/_chOpenAt 读取；零参与时也要显示（可提前开放）。
+function dashChOpenGateHtml() {
+  const open = typeof CloudSync !== 'undefined' && CloudSync._chOpen === true
+  const badge = open
+    ? `<span style="font-size:12px;font-weight:800;color:#059669;background:#d1fae5;border-radius:10px;padding:2px 10px">● ${t('dashChOpenOn')}</span>`
+    : `<span style="font-size:12px;font-weight:800;color:#9ca3af;background:#f3f4f6;border-radius:10px;padding:2px 10px">● ${t('dashChOpenOff')}</span>`
+  return `
+    <div class="card" style="margin-top:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <div style="min-width:0">
+          <div style="font-size:15px;font-weight:700;margin-bottom:2px">🏆 ${t('dashChOpenTitle')} ${badge}</div>
+          <div style="font-size:12px;color:#6b7280">${t('dashChOpenHint')}</div>
+        </div>
+        <button id="dashChOpenBtn" class="btn btn-sm ${open ? 'btn-danger' : 'btn-primary'}" style="flex-shrink:0" onclick="dashToggleChOpen()">${open ? t('dashChOpenCloseBtn') : t('dashChOpenOpenBtn')}</button>
+      </div>
+    </div>`
+}
+async function dashToggleChOpen() {
+  const cur = typeof CloudSync !== 'undefined' && CloudSync._chOpen === true
+  const next = !cur
+  const btn = document.getElementById('dashChOpenBtn')
+  if (btn) btn.disabled = true
+  try {
+    const res = await CloudSync.setChallengeOpen(next)
+    if (res && res.ok) {
+      CloudSync._chOpen = next
+      if (next) CloudSync._chOpenAt = Date.now()
+      renderDashboard()   // 重渲染看板刷新徽章与按钮（顺带刷新其余板块数据）
+    } else {
+      alert(t('dashChExamFail'))
+      if (btn) btn.disabled = false
+    }
+  } catch (e) {
+    alert(t('dashChExamFail'))
+    if (btn) btn.disabled = false
+  }
 }
 
 // ====== 管理员看板：期末考试开关（v76） ======

@@ -100,6 +100,10 @@ const CloudSync = {
     // 所有拉取路径（周期探测 / fetchSyncSummary / getDashboardData / 开关写后校验）都经此处，
     // 学员端/管理端读 CloudSync._chExamOpen 即得最新状态。
     this._chExamOpen = doc.chExamOpen === true
+    // v77 侧信道：七天挑战整体开关（doc 顶层字段，默认缺省=关闭）+ 最近一次开放时间。
+    // 关闭时保留 chOpenAt → 学员端据「曾开放过」区分「未开放 / 已结束」两种锁定文案。
+    this._chOpen = doc.chOpen === true
+    this._chOpenAt = Number(doc.chOpenAt) || 0
     try { localStorage.setItem('eq_cloud_cache', txt) } catch (e) { /* ignore */ }
     return doc
   },
@@ -227,6 +231,30 @@ const CloudSync = {
       } catch (e) { /* 网络波动等 → 重试 */ }
     }
     if (saved) this._chExamOpen = val
+    return saved ? { ok: true } : { ok: false, reason: 'network' }
+  },
+
+  // ---------- 七天挑战开放开关（v77，全平台同步） ----------
+  // 说明：开关存于云文档顶层字段 chOpen（缺省 = 关闭），与 chExamOpen 同层的平台级配置，
+  // 不随事件折叠。开放时写 chOpenAt=now；关闭时保留 chOpenAt（学员端据此显示「已结束」而非「未开放」）。
+  // 读-改-写 + 写后校验重试；成功后立即同步本地侧信道，无需等待下次拉取。
+  async setChallengeOpen(open) {
+    const val = !!open
+    let saved = false
+    for (let attempt = 0; attempt < 4 && !saved; attempt++) {
+      try {
+        const doc = await this._getDoc()
+        doc.chOpen = val
+        if (val) doc.chOpenAt = Date.now()
+        await this._putDoc(doc)
+        const check = await this._getDoc()
+        if (check.chOpen === val) saved = true
+      } catch (e) { /* 网络波动等 → 重试 */ }
+    }
+    if (saved) {
+      this._chOpen = val
+      if (val) this._chOpenAt = Date.now()
+    }
     return saved ? { ok: true } : { ok: false, reason: 'network' }
   },
 
