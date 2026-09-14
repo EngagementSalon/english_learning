@@ -238,6 +238,11 @@ function chOpenLocked() {
 function chOpenEverOpened() {
   try { return typeof CloudSync !== 'undefined' && (Number(CloudSync._chOpenAt) || 0) > 0 } catch (e) { return false }
 }
+// v78 积分权重：第七天期末考试（day 7 的 test）答对每题按 3 倍计分，其余环节 1 倍。
+// 看板 app.js dashChStageWeight 与之同口径（test-v78 断言两侧对同一输入得分一致）；管理员不参加排名。
+function chLbStageWeight(day, kind) {
+  return (Number(day) === 7 && kind === 'test') ? 3 : 1
+}
 function chStageScore(day, si) {
   const r = chStageRec(day, si)
   if (!r || !r.done || !r.total) return null
@@ -351,17 +356,23 @@ function chProgressHtml() {
 
 // ====== 积分榜前三（v74）======
 // 与管理员看板 renderDashChallengeBlock 同口径：每环节按首次完成计（day-si 去重取 at 最早的 chy，
-// 重练不刷分），积分 = 答对×100 − 用时秒；学员进挑战页即可看到当前前三（60s 缓存，避免频繁拉云端）
+// 重练不刷分），积分 = Σ(答对×100×环节权重) − Σ用时秒；v78：第七天期末考试 3 倍权重，管理员不参加排名。
 function chLbAggregate(rows) {
-  const list = (rows || []).filter(r => r && r.chy && r.chy.length).map(r => {
+  // v78：管理员账号不参加排名（学员端前三同样剔除）
+  const list = (rows || []).filter(r => r && r.role !== 'admin' && r.chy && r.chy.length).map(r => {
     const first = {}
     ;(r.chy || []).forEach(x => {
       const k = x.day + '-' + x.si
       if (!first[k] || (x.at || 0) < (first[k].at || 0)) first[k] = x
     })
-    let c = 0, tsec = 0
-    Object.keys(first).forEach(k => { c += first[k].correct || 0; tsec += first[k].usedSec || 0 })
-    return { name: r.name || r.username || '', username: r.username, correct: c, sec: tsec, score: c * 100 - tsec }
+    let c = 0, tsec = 0, pts = 0
+    Object.keys(first).forEach(k => {
+      const x = first[k]
+      c += x.correct || 0
+      tsec += x.usedSec || 0
+      pts += (x.correct || 0) * 100 * chLbStageWeight(x.day, x.kind)
+    })
+    return { name: r.name || r.username || '', username: r.username, correct: c, sec: tsec, score: pts - tsec }
   })
   list.sort((a, b) => (b.score - a.score) || (a.sec - b.sec) || (b.correct - a.correct))
   return list.slice(0, 3)

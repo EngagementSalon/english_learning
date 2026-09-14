@@ -1,6 +1,6 @@
 // ====== 测试 v71/v73：七天挑战看板统计（chy/chQ 聚合 + 挑战板块渲染） ======
 // ① CloudSync._apply：chy 事件聚合 chy 数组（v73：usedSec 旧事件补 0）；perq(ch=1) 聚合 chQ 错次；普通 perq 走 perQ；rename 合并
-// ② renderDashChallengeBlock：积分榜（v73：首次完成口径 答对×100−用时，🥇🥈🥉+奖品提示）/参加名单/进度/正确率/Day1-Day7 测试分/错题排行；无数据显示提示
+// ② renderDashChallengeBlock：积分榜（v73：首次完成口径 答对×100−用时，🥇🥈🥉+奖品提示；v78：第七天期末考试 3 倍权重 + 管理员不参加排名）/参加名单/进度/正确率/Day1-Day7 测试分/错题排行；无数据显示提示
 const fs = require('fs')
 const path = require('path')
 const vm = require('vm')
@@ -47,6 +47,7 @@ function makeSandbox() {
   const appSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8')
   vm.runInContext(extractFn(appSrc, 'escHtml'), sb)
   vm.runInContext(extractFn(appSrc, 'renderDashChallengeBlock'), sb)
+  vm.runInContext(extractFn(appSrc, 'dashChStageWeight'), sb)   // v78：积分环节权重（第七天期末考试 3 倍）
   vm.runInContext('const TYPE_LABELS = new Proxy({}, { get: (_, k) => k })', sb)
   vm.runInContext('Store.init()', sb)
   return sb
@@ -130,10 +131,12 @@ function makeSandbox() {
     assert('参加人数 2', html.includes('>2<'), '')
     assert('总答题数 20+30+30+50+20+30+20=200', html.includes('200'))
     assert('积分榜标题与奖品提示渲染', html.includes('七天挑战积分榜') && html.includes('前三名可获得奖品'))
-    assert('积分规则渲染', html.includes('× 100'))
+    assert('积分规则渲染（答对×100 − 用时）', html.includes('× 100'))
     assert('bob 积分 7480（81 对×100−620s；重练 30 对/60s 不计）', html.includes('7480'))
-    assert('carol 积分 4710（56 对×100−890s）', html.includes('4710'))
-    assert('🥇 bob 排在 🥈 carol 之前（积分降序）', html.indexOf('🥇') >= 0 && html.indexOf('🥇') < html.indexOf('🥈') && html.indexOf('7480') < html.indexOf('4710'))
+    assert('carol 积分 8310（8×100 + 30×100 + 18×300(Day7 考试 3 倍) − 890s）', html.includes('8310'), '')
+    assert('🥇 carol（8310）排在 🥈 bob（7480）之前（积分降序）', html.indexOf('🥇') >= 0 && html.indexOf('🥇') < html.indexOf('🥈') && html.indexOf('8310') < html.indexOf('7480'))
+    assert('v78 积分规则含「第七天期末考试每题按 3 倍计分」', html.includes('第七天期末考试每题按 3 倍计分'))
+    assert('v78 积分榜含「管理员账号不参加排名」说明', html.includes('管理员账号不参加排名'))
     assert('用时格式化（620s→10:20 / 890s→14:50）', html.includes('10:20') && html.includes('14:50'))
     assert('学员 bob / carol 均在名单', html.includes('bob') && html.includes('carol'))
     assert('进度文案（chDashProgress）渲染', html.includes('/9'))

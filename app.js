@@ -3150,6 +3150,11 @@ async function dashToggleChExam() {
 // ====== 管理员看板：七天挑战统计（v71） ======
 // 数据来源：chy 事件（阶段完成：参与名单 / 进度 / 每阶段分数 / Day1-Day7 测试分）
 //          + perq 的 ch 标记（chQ[qid] = { correct:0, total:错次 }，错题排行）
+// v78 积分权重：第七天期末考试（day 7 的 test）答对每题 3 倍，其余 1 倍；管理员不参加排名。
+function dashChStageWeight(day, kind) {
+  if (typeof chLbStageWeight === 'function') return chLbStageWeight(day, kind)   // 优先复用 challenge.js 同口径实现
+  return (Number(day) === 7 && kind === 'test') ? 3 : 1
+}
 function renderDashChallengeBlock(rows) {
   const el = document.getElementById('dashChallengeBlock')
   if (!el) return
@@ -3176,25 +3181,32 @@ function renderDashChallengeBlock(rows) {
     const t1 = (r.chy || []).find(x => x.kind === 'test' && x.day === 1)
     const t7 = (r.chy || []).find(x => x.kind === 'test' && x.day === 7)
     const score = x => x && x.total ? Math.round(x.correct / x.total * 100) : null
-    // v73 积分榜：每环节按首次完成计（day-si 去重取 at 最早一条，重练不刷速度分）
+    // v73 积分榜：每环节按首次完成计（day-si 去重取 at 最早一条，重练不刷速度分）；
+    // v78：答对分按环节权重（第七天期末考试 3 倍），用时扣分不变
     const firstByStage = {}
     ;(r.chy || []).forEach(x => {
       const k = x.day + '-' + x.si
       if (!firstByStage[k] || (x.at || 0) < (firstByStage[k].at || 0)) firstByStage[k] = x
     })
-    let lbC = 0, lbT = 0
-    Object.keys(firstByStage).forEach(k => { lbC += firstByStage[k].correct || 0; lbT += firstByStage[k].usedSec || 0 })
+    let lbC = 0, lbT = 0, lbPts = 0
+    Object.keys(firstByStage).forEach(k => {
+      const x = firstByStage[k]
+      lbC += x.correct || 0
+      lbT += x.usedSec || 0
+      lbPts += (x.correct || 0) * 100 * dashChStageWeight(x.day, x.kind)
+    })
     return {
-      username: r.username, name: r.name, dept: r.dept,
+      username: r.username, name: r.name, dept: r.dept, role: r.role,
       maxDay, stagesDone, q, acc: q > 0 ? Math.round(c / q * 100) : 0,
       s1: score(t1), s7: score(t7),
-      lbC, lbT, lbScore: lbC * 100 - lbT,
+      lbC, lbT, lbScore: lbPts - lbT,
       chQ: r.chQ || {},
     }
   })
   list.sort((a, b) => b.q - a.q)
-  // v73 积分榜排序：积分（答对×100−用时秒）高者在前；同分用时短者在前，再比答对数
-  const lbList = list.slice().sort((a, b) => (b.lbScore - a.lbScore) || (a.lbT - b.lbT) || (b.lbC - a.lbC))
+  // v73 积分榜排序：积分（答对×权重×100−用时秒）高者在前；同分用时短者在前，再比答对数
+  // v78：管理员账号不参加排名（进度明细表与汇总仍含管理员，便于自查）
+  const lbList = list.filter(p => p.role !== 'admin').slice().sort((a, b) => (b.lbScore - a.lbScore) || (a.lbT - b.lbT) || (b.lbC - a.lbC))
   const fmtSec = s => { s = Math.max(0, s || 0); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') }
   const medal = i => (i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : String(i + 1))
   // 错题排行：跨学员合并 chQ（错次），取错误次数最多的 50 题
@@ -3232,6 +3244,7 @@ function renderDashChallengeBlock(rows) {
       <div style="margin:4px 0 10px;padding:10px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;color:#92400e;font-size:14px;font-weight:600">🏆 ${t('dashChPrizeHint')}</div>
       <h4 style="margin:14px 0 6px">🏆 ${t('dashChRankTitle')}</h4>
       <p class="form-hint" style="margin:0 0 8px">${t('dashChScoreRule')}</p>
+      <p class="form-hint" style="margin:0 0 8px">${t('dashChNoAdminRank')}</p>
       <div style="overflow-x:auto">
         <table class="admin-table" style="font-size:13px">
           <thead><tr>
@@ -3242,7 +3255,7 @@ function renderDashChallengeBlock(rows) {
             <th style="text-align:center">${t('dashChThTime')}</th>
           </tr></thead>
           <tbody>
-            ${lbList.map((p, i) => `<tr${i < 3 ? ' style="background:#fffbeb"' : ''}>
+            ${lbList.length ? lbList.map((p, i) => `<tr${i < 3 ? ' style="background:#fffbeb"' : ''}>
               <td style="text-align:center;font-size:15px">${medal(i)}</td>
               <td>${escHtml(p.username)}</td>
               <td>${escHtml(p.name || '—')}</td>
@@ -3250,7 +3263,7 @@ function renderDashChallengeBlock(rows) {
               <td style="text-align:center;font-weight:700;color:#b45309">${p.lbScore}</td>
               <td style="text-align:center">${p.lbC}</td>
               <td style="text-align:center;color:#6b7280">${fmtSec(p.lbT)}</td>
-            </tr>`).join('')}
+            </tr>`).join('') : `<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:16px">${t('dashChRankEmpty')}</td></tr>`}
           </tbody>
         </table>
       </div>

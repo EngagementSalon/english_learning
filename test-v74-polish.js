@@ -3,7 +3,7 @@
 //    正确项恒首位（answer [0]，运行时 shuffleOptions 重洗），同词各题释义一致、选项顺序各异
 // ② _normSpeakText：斜杠读作停顿（'/' → ', '），speakEnglish / speakLocalForce / playListenOnline 三入口统一规范
 // ③ playListenOnline 音频包 key 基于规范化文本（与 gen-tts.js normSpeak 严格一致，带 / 旧 key 自然失效）
-// ④ chLbAggregate：学员端挑战页「当前积分榜前三」（与看板同口径：day-si 去重取 at 最早 chy，score=答对×100−用时）
+// ④ chLbAggregate：学员端挑战页「当前积分榜前三」（与看板同口径：day-si 去重取 at 最早 chy，score=Σ答对×100×权重−用时；v78 第七天考试 3 倍 + 管理员不参加排名）
 // ⑤ 源码接线：发音按钮 emoji → SVG（audioIconSvg + .ic-svg）、i18n zh/en 成对、gen-tts 同步规范化
 const fs = require('fs')
 const path = require('path')
@@ -203,6 +203,7 @@ function makeSandbox() {
   {
     const sb = { console, Math, JSON, Object, Array, String, Number }
     vm.createContext(sb)
+    vm.runInContext(extractFn(chSrc, 'chLbStageWeight'), sb)   // v78：环节权重（第七天期末考试 3 倍）
     vm.runInContext(extractFn(chSrc, 'chLbAggregate'), sb)
     const rows = [
       {
@@ -224,14 +225,16 @@ function makeSandbox() {
       },
     ]
     const top = vm.runInContext(`chLbAggregate(${JSON.stringify(rows)})`, sb)
-    assert('bob 7480（81 对×100−620s，重练 30 对/60s 不计）', top[0].username === 'bob' && top[0].score === 7480 && top[0].correct === 81 && top[0].sec === 620, JSON.stringify(top[0]))
-    assert('carol 4710（56 对×100−890s）', top[1].username === 'carol' && top[1].score === 4710 && top[1].correct === 56 && top[1].sec === 890, JSON.stringify(top[1]))
-    assert('积分降序（🥇bob 在前）', top[0].score > top[1].score)
+    // v78：Day7 考试 18 对 ×300 → carol = 8×100 + 30×100 + 18×300 − 890 = 8310（超过 bob 的 7480）
+    assert('carol 8310（Day7 考试 3 倍：8×100+30×100+18×300−890s）', top[0].username === 'carol' && top[0].score === 8310 && top[0].correct === 56 && top[0].sec === 890, JSON.stringify(top[0]))
+    assert('bob 7480（81 对×100−620s，重练 30 对/60s 不计）', top[1].username === 'bob' && top[1].score === 7480 && top[1].correct === 81 && top[1].sec === 620, JSON.stringify(top[1]))
+    assert('积分降序（🥇carol 在前）', top[0].score > top[1].score)
     // slice 3 + 同分按用时升序
-    const rows4 = rows.concat([{ username: 'dave', name: '老张', chy: [{ day: 1, si: 0, correct: 80, total: 100, at: 1, usedSec: 520 }] }])   // 7480 分 / 520s → 同分先于 bob
+    const rows4 = rows.concat([{ username: 'dave', name: '老张', chy: [{ day: 1, si: 0, correct: 80, total: 100, at: 1, usedSec: 520 }] }])   // 7480 分 / 520s → 与 bob 同分，用时更短
     const top3 = vm.runInContext(`chLbAggregate(${JSON.stringify(rows4)})`, sb)
-    assert('只取前三（第 4 人 carol 被截断）', top3.length === 3 && top3.map(x => x.username).join(',') === 'dave,bob,carol', JSON.stringify(top3.map(x => x.username)))
-    assert('同分按用时升序（dave 520s 先于 bob 620s）', top3[0].username === 'dave' && top3[0].score === 7480 && top3[0].sec === 520)
+    assert('只取前三（carol 8310 / dave 7480 / bob 7480）', top3.length === 3 && top3.map(x => x.username).join(',') === 'carol,dave,bob', JSON.stringify(top3.map(x => x.username)))
+    assert('同分按用时升序（dave 520s 先于 bob 620s）', top3[1].username === 'dave' && top3[1].score === 7480 && top3[1].sec === 520)
+    assert('v78 管理员账号不参加排名（学员端前三剔除）', vm.runInContext(`chLbAggregate([{ username: 'admin2', role: 'admin', chy: [{ day: 1, si: 0, correct: 99, total: 100, at: 1, usedSec: 0 }] }, { username: 'stu', chy: [{ day: 1, si: 0, correct: 10, total: 10, at: 1, usedSec: 0 }] }]).map(x => x.username).join(',') === 'stu'`, sb))
     // 同分同秒比答对数
     const rowsTie = [
       { username: 'nina', name: 'N', chy: [{ day: 1, si: 0, correct: 50, total: 60, at: 1, usedSec: 100 }] },   // 5000 分 / 100s
@@ -260,8 +263,8 @@ function makeSandbox() {
       const cnt = (i18nSrc.match(new RegExp(k + ':', 'g')) || []).length
       assert(`i18n ${k} zh/en 成对（恰好 2 处）`, cnt === 2, 'count=' + cnt)
     })
-    assert('i18n 中文文案正确', i18nSrc.includes("chLbTitle: '当前积分榜前三'") && i18nSrc.includes("chLbEmpty: '还没有学员完成挑战环节，快来做第一个！'") && i18nSrc.includes("chLbRule: '答对越多、用时越短，积分越高'"))
-    assert('i18n 英文文案正确', i18nSrc.includes("chLbTitle: 'Current Top 3'") && i18nSrc.includes("chLbEmpty: 'No one has finished a challenge stage yet — be the first!'") && i18nSrc.includes("chLbRule: 'More correct answers in less time scores higher'"))
+    assert('i18n 中文文案正确', i18nSrc.includes("chLbTitle: '当前积分榜前三'") && i18nSrc.includes("chLbEmpty: '还没有学员完成挑战环节，快来做第一个！'") && i18nSrc.includes("chLbRule: '答对越多、用时越短，积分越高；第七天期末考试每题按 3 倍计分'"))
+    assert('i18n 英文文案正确', i18nSrc.includes("chLbTitle: 'Current Top 3'") && i18nSrc.includes("chLbEmpty: 'No one has finished a challenge stage yet — be the first!'") && i18nSrc.includes("chLbRule: 'More correct answers in less time scores higher; Day-7 final exam answers score 3×'"))
     assert('app.js 看板积分榜（v73）未回退', appSrc.includes('lbScore') && i18nSrc.includes("dashChRankTitle: '七天挑战积分榜'"))
   }
 
