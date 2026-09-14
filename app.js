@@ -527,9 +527,9 @@ function enterApp() {
   applyRoleVisibility()
   updateUserInfoDisplay()
   startHeartbeat() // —— 启动会话心跳，累计登录时长 ——
-  // 学员首次进入：先做水平测试，自动定级 L1-L4
+  // 学员首次进入：先做水平测试，自动定级 L1-L4（v81 起由 PLACEMENT_ENABLED 控制，暂时关闭 → 直达首页）
   const s = Store.getSession()
-  if (s && s.role === 'student' && !Store.getUserLevel()) {
+  if (PLACEMENT_ENABLED && s && s.role === 'student' && !Store.getUserLevel()) {
     placementState = { phase: 'intro', auto: true }
     navigate('placement')
   } else {
@@ -542,9 +542,15 @@ function applyRoleVisibility() {
   document.querySelectorAll('.admin-only').forEach(el => {
     el.style.display = isAdmin ? '' : 'none'
   })
+  // v81：水平测试暂时关闭 → 导航栏入口一并隐藏（PLACEMENT_ENABLED 恢复 true 即回来）
+  const np = document.getElementById('navPlacement')
+  if (np) np.style.display = PLACEMENT_ENABLED ? '' : 'none'
 }
 
 // ====== 水平测试（自动分档 L1-L4）======
+// v81：水平测试暂时关闭（功能与代码全部保留）——恢复方法：把 PLACEMENT_ENABLED 改回 true，
+// 登录后强制测评、导航栏「🎯 水平测试」、首页功能卡/未定级卡/重新定级按钮即全部恢复显示。
+const PLACEMENT_ENABLED = false
 let placementState = { phase: 'intro', auto: false, questions: [], index: 0, answers: [], result: null }
 
 function renderPlacement() {
@@ -799,8 +805,8 @@ function renderHome() {
           <div class="level-status-desc">${LEVEL_DESC[lv]}</div>
         </div>
       </div>
-      <button class="btn btn-ghost" onclick="navigate('placement')">${t('regrade')}</button>
-    </div>` : (Store.getSession() && Store.getSession().role === 'student' ? `
+      ${PLACEMENT_ENABLED ? `<button class="btn btn-ghost" onclick="navigate('placement')">${t('regrade')}</button>` : ''}
+    </div>` : (PLACEMENT_ENABLED && Store.getSession() && Store.getSession().role === 'student' ? `
     <div class="level-status-card level-status-pending">
       <div class="level-status-left">
         <span class="level-badge level-0">?</span>
@@ -831,11 +837,12 @@ function renderHome() {
     </div>
     <h3 class="section-title">${t('sectionFeatures')}</h3>
     <div class="feature-grid">
+      ${PLACEMENT_ENABLED ? `
       <div class="feature-card" onclick="navigate('placement')">
         <div class="icon">🎯</div>
         <h3>${t('featurePlacementT')}</h3>
         <p>${t('featurePlacementD')}</p>
-      </div>
+      </div>` : ''}
       <div class="feature-card" onclick="navigate('practice')">
         <div class="icon">✏️</div>
         <h3>${t('featurePracticeT')}</h3>
