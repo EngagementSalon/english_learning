@@ -1,9 +1,11 @@
 // ====== 标帜餐厅七天英文挑战（v68 引入；v70 入口移入练习页 + Day1/7 双阶段；v71 难度递增+时间锁+防作弊+看板上报；
 //        v72 每日 30 题 + 测试每次随机 + 练习错题当天刷到全对 + 前一天错题次日额外复习 + 听音题醒目注解；
-//        v77 挑战整体需管理员手动开放（chOpen）：未开放/已结束时全部环节灰掉锁定） ======
+//        v77 挑战整体需管理员手动开放（chOpen）：未开放/已结束时全部环节灰掉锁定；
+//        v79 练习题序改为人手一套：种子按登录用户名派生，每人随机序列不同（难度配比与逐日递增不变） ======
 // 题源：分类 12「标帜餐厅常见词汇」（684 题 = 456 listen + 228 single，v71 起无 voicematch）。
-// 练习序列（固定）：按难度分桶（1/2/3）按天配比抽取（CHALLENGE_DIFF_PLAN），Day1 均值 1.0 → Day7 均值 2.2；
-//   Day1 巩固练习 10 题 → Day2-6 每日练习 30 题 → Day7 巩固练习 10 题，共 170 题，全员同一套练习题。
+// 练习序列（每人一套，v79）：按难度分桶（1/2/3）按天配比抽取（CHALLENGE_DIFF_PLAN），Day1 均值 1.0 → Day7 均值 2.2；
+//   Day1 巩固练习 10 题 → Day2-6 每日练习 30 题 → Day7 巩固练习 10 题，共 170 题；
+//   种子 = CHALLENGE_SEED + 用户名哈希 → 不同学员题序不同，同一学员序列固定（重练同题、选项每次重洗）。
 // 水平测试（随机，v72）：Day1/Day7 各 20 题 = 每次进入时从全池分层随机抽取（难度1×10 + 难度2×7 + 难度3×3），
 //   每位学员、每次进入题目都不同；仍仅一次判分机会。
 // 错题闭环（v72）：每日练习首次答错的题必须进入「错题回顾」轮刷到全对，该天才算完成；
@@ -37,7 +39,7 @@ const CHALLENGE_DIFF_PLAN = [
 // 水平测试分层随机配比：难度1×10 + 难度2×7 + 难度3×3 = 20 题（保证测试覆盖全部难度）
 const CHALLENGE_TEST_PLAN = [10, 7, 3]
 
-// mulberry32 伪随机（固定种子 → 分配可复现、全员一致）
+// mulberry32 伪随机（v79：种子按登录用户名派生 → 每人一套专属序列，同账号可复现）
 function challengeRng(seed) {
   let s = seed >>> 0
   return function () {
@@ -48,7 +50,16 @@ function challengeRng(seed) {
   }
 }
 
-// 练习序列：分类 12 全部题（id 去重防御）→ 按难度分桶（桶内固定种子洗牌）→ 按档配比抽取 170 题。
+// v79：练习题序种子 = CHALLENGE_SEED + FNV-1a(登录用户名)。
+// 不同用户名 → 不同序列（人人题目不同）；未登录/测试环境兜底 'anon'（行为与 v78 固定种子一致）。
+function chUserSeed() {
+  const str = challengeUid()
+  let h = 2166136261
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) }
+  return (CHALLENGE_SEED + (h >>> 0)) >>> 0
+}
+
+// 练习序列：分类 12 全部题（id 去重防御）→ 按难度分桶（桶内按用户名派生种子洗牌）→ 按档配比抽取 170 题。
 // 返回数组即练习序列：Day1 巩固练习 10 题在前，依次到 Day7 巩固练习 10 题在后（测试题不占序列，见下）。
 // 难度逐日递增：Day1 均值 1.0 → Day7 均值 2.2；题库总量不足配比时自动顺延到下一个难度桶。
 function challengePool() {
@@ -65,7 +76,7 @@ function challengePool() {
     buckets[d].push(q)
   }
   ;[1, 2, 3].forEach(d => {
-    const rng = challengeRng(CHALLENGE_SEED + d * 7919)
+    const rng = challengeRng(chUserSeed() + d * 7919)
     for (let i = buckets[d].length - 1; i > 0; i--) {
       const j = Math.floor(rng() * (i + 1))
       const tmp = buckets[d][i]; buckets[d][i] = buckets[d][j]; buckets[d][j] = tmp
@@ -145,7 +156,7 @@ function chPrevDayWrongQuestions(prevDay) {
   return out
 }
 // 第 N 天第 si 阶段题目：
-//   test → 每次随机分层抽 20 题；practice → 固定序列切片 + （Day N≥2 首环节）追加前一天错题（额外，不占配额）。
+//   test → 每次随机分层抽 20 题；practice → 本人专属序列切片（v79 人手一套）+ （Day N≥2 首环节）追加前一天错题（额外，不占配额）。
 //   选项顺序每次进入重洗，答案位置不固定。
 function challengeStageQuestions(day, si) {
   const m = challengeStageInfo(day, si)
