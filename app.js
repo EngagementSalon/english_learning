@@ -3184,6 +3184,15 @@ function renderDashChallengeBlock(rows) {
       if (!seen[k]) { seen[k] = true; stagesDone++ }
       if (x.day > maxDay) maxDay = x.day
     })
+    // v82 每日打卡：每天完成的阶段数（chy 按 day-si 去重）→ 2=全部完成（打卡）/1=部分/0=未打卡。
+    // 阶段数与 challenge.js CHALLENGE_DAYS 对应（Day1/7 各 2 阶段，Day2-6 各 1 阶段），本地声明避免跨文件依赖
+    const stageCnt = { 1: 2, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 2 }
+    const checkin = []
+    for (let d = 1; d <= 7; d++) {
+      let n = 0
+      for (let si = 0; si < stageCnt[d]; si++) if (seen[d + '-' + si]) n++
+      checkin.push(n === 0 ? 0 : n === stageCnt[d] ? 2 : 1)
+    }
     // 测试分：Day1 / Day7 的水平测试（test 只上报一次）
     const t1 = (r.chy || []).find(x => x.kind === 'test' && x.day === 1)
     const t7 = (r.chy || []).find(x => x.kind === 'test' && x.day === 7)
@@ -3206,11 +3215,18 @@ function renderDashChallengeBlock(rows) {
       username: r.username, name: r.name, dept: r.dept, role: r.role,
       maxDay, stagesDone, q, acc: q > 0 ? Math.round(c / q * 100) : 0,
       s1: score(t1), s7: score(t7),
+      checkin,
       lbC, lbT, lbScore: lbPts - lbT,
       chQ: r.chQ || {},
     }
   })
   list.sort((a, b) => b.q - a.q)
+  // v82 每日打卡汇总：每天完成（全部阶段）的人数
+  const checkinStats = [0, 0, 0, 0, 0, 0, 0]
+  list.forEach(p => (p.checkin || []).forEach((c, i) => { if (c === 2) checkinStats[i]++ }))
+  const checkinCell = c => c === 2
+    ? '<span style="color:#059669;font-weight:700">✅</span>'
+    : c === 1 ? '<span style="color:#d97706;font-weight:700">◐</span>' : '<span style="color:#d1d5db">—</span>'
   // v73 积分榜排序：积分（答对×权重×100−用时秒）高者在前；同分用时短者在前，再比答对数
   // v78：管理员账号不参加排名（进度明细表与汇总仍含管理员，便于自查）
   const lbList = list.filter(p => p.role !== 'admin').slice().sort((a, b) => (b.lbScore - a.lbScore) || (a.lbT - b.lbT) || (b.lbC - a.lbC))
@@ -3283,6 +3299,10 @@ function renderDashChallengeBlock(rows) {
             <th style="text-align:center">${t('dashChThAcc')}</th>
             <th style="text-align:center">${t('dashChThDay1')}</th>
             <th style="text-align:center">${t('dashChThDay7')}</th>
+            <th colspan="7" style="text-align:center;border-left:2px solid #e5e7eb">📅 ${t('dashChThCheckin')}</th>
+          </tr><tr>
+            <th colspan="8" style="border:none;background:none"></th>
+            ${[1, 2, 3, 4, 5, 6, 7].map(d => `<th style="text-align:center;border-left:${d === 1 ? '2px solid #e5e7eb' : 'none'};font-weight:600">D${d}</th>`).join('')}
           </tr></thead>
           <tbody>
             ${list.map(p => `<tr>
@@ -3294,11 +3314,13 @@ function renderDashChallengeBlock(rows) {
               <td style="text-align:center"><span class="perq-rate ${p.acc >= 80 ? 'perq-good' : p.acc >= 60 ? 'perq-ok' : 'perq-bad'}">${p.acc}%</span></td>
               <td style="text-align:center">${scoreCell(p.s1)}</td>
               <td style="text-align:center">${scoreCell(p.s7)}</td>
+              ${(p.checkin || []).map((c, i) => `<td style="text-align:center;border-left:${i === 0 ? '2px solid #e5e7eb' : 'none'}">${checkinCell(c)}</td>`).join('')}
             </tr>`).join('')}
           </tbody>
         </table>
       </div>
-      <p class="form-hint" style="margin:8px 0 0">${t('dashChHint')}</p>
+      <p class="form-hint" style="margin:8px 0 0">${t('dashChCheckinLegend')} · ${t('dashChCheckinStatsLabel')}：${checkinStats.map((n, i) => `D${i + 1} ${n}`).join(' · ')}</p>
+      <p class="form-hint" style="margin:4px 0 0">${t('dashChHint')}</p>
     </div>
     ${wrongList.length ? `
     <div class="card" style="margin-top:16px">
