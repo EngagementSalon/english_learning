@@ -467,9 +467,9 @@ const DAY = 86400000
       const s = vm.runInContext('t("chDashProgress", 4, 5)', sb)
       return typeof s === 'string' && s.includes('4') && s.includes('5')
     })())
-    assert('chPoolInfo 含「难度逐日递增」与「每次随机」', (() => {
+    assert('chPoolInfo 含「难度逐日递增」与「每人题目随机不同」', (() => {
       const s = vm.runInContext('t("chPoolInfo", 684)', sb)
-      return s.includes('难度逐日递增') && s.includes('每次随机')
+      return s.includes('难度逐日递增') && s.includes('每人题目随机不同') && s.includes('考题出自本人已刷题目')
     })())
     assert('chIntro 提及 30 题 + 错题次日复习', (() => {
       const s = vm.runInContext('t("chIntro")', sb)

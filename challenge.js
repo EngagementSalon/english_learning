@@ -6,8 +6,9 @@
 // 练习序列（每人一套，v79）：按难度分桶（1/2/3）按天配比抽取（CHALLENGE_DIFF_PLAN），Day1 均值 1.0 → Day7 均值 2.2；
 //   Day1 巩固练习 10 题 → Day2-6 每日练习 30 题 → Day7 巩固练习 10 题，共 170 题；
 //   种子 = CHALLENGE_SEED + 用户名哈希 → 不同学员题序不同，同一学员序列固定（重练同题、选项每次重洗）。
-// 水平测试（随机，v72）：Day1/Day7 各 20 题 = 每次进入时从全池分层随机抽取（难度1×10 + 难度2×7 + 难度3×3），
-//   每位学员、每次进入题目都不同；仍仅一次判分机会。
+// 水平测试（v80 起考已刷题）：Day1/Day7 各 20 题，每次进入分层随机（难度1×10 + 难度2×7 + 难度3×3）；
+//   题源 = 本人已刷过的练习题（个人序列中已完成练习阶段覆盖的前缀）；Day1 摸底时还没刷过题 → 回退全库随机。
+//   每次进入题目都不同；仍仅一次判分机会。
 // 错题闭环（v72）：每日练习首次答错的题必须进入「错题回顾」轮刷到全对，该天才算完成；
 //   前一天所有环节（练习+测试）的错题会在次日开始时额外追加到练习题末尾（不占每日 30 题配额），滚动复习。
 // 入口在练习页底部（app.js renderPractice 挂入口卡片，navigate('challenge') 打开本页）。
@@ -110,13 +111,12 @@ function challengeStageMeta() {
 function challengeStageInfo(day, si) {
   return challengeStageMeta().find(x => x.day === day && x.si === si)
 }
-// 水平测试随机抽题（v72）：从全池按 CHALLENGE_TEST_PLAN 分层随机（难度1×10 + 难度2×7 + 难度3×3），
-// 每次进入（每位学员、每一场）题目都不同；库存不足时自动少抽。
-function challengeRandomQuestions(total) {
-  const all = Store.getQuestions().filter(q => Number(q.category_id) === 12)
+// 分层随机抽题核心（v80 重构）：从给定题源按 CHALLENGE_TEST_PLAN 分层随机（难度1×10 + 难度2×7 + 难度3×3）
+// 抽 total 题（id 去重，库存不足时自动少抽），选项重洗。
+function challengeStratifiedDraw(source, total) {
   const seen = new Set()
   const buckets = { 1: [], 2: [], 3: [] }
-  for (const q of all) {
+  for (const q of source) {
     const k = String(q.id)
     if (!seen.has(k)) {
       seen.add(k)
@@ -134,6 +134,22 @@ function challengeRandomQuestions(total) {
     for (let k = 0; k < CHALLENGE_TEST_PLAN[i] && out.length < total && k < b.length; k++) out.push(b[k])
   })
   return out.map(shuffleOptions)
+}
+// 全库随机抽题（v80 前 test 唯一题源；现保留给 Day1 摸底——尚无已刷题时回退使用）
+function challengeRandomQuestions(total) {
+  return challengeStratifiedDraw(Store.getQuestions().filter(q => Number(q.category_id) === 12), total)
+}
+// v80：考试题目出自本人已刷过的练习题——题源 = 个人练习序列中「已完成练习阶段」覆盖的前缀
+//（线性解锁 → 已完成阶段恰为个人序列的前缀），从中分层随机抽 20 题；
+// Day1 摸底时还没有已刷题（前缀不足一场考试）→ 回退全库随机。
+function challengeTestQuestions() {
+  const pool = challengePool()
+  let k = 0
+  challengeStageMeta().forEach(m => {
+    if (m.kind === 'practice' && chStageDone(m.day, m.si)) k = Math.max(k, m.start + m.count)
+  })
+  if (k < 20) return challengeRandomQuestions(20)
+  return challengeStratifiedDraw(pool.slice(0, k), 20)
 }
 // 前一天所有环节的错题（v72）：汇总 stages[].wrong（qid 去重）→ 取回题目 → 选项重洗。
 // 旧进度记录无 wrong 字段时返回空数组（兼容 v71 及更早的已完成阶段）。
@@ -156,11 +172,12 @@ function chPrevDayWrongQuestions(prevDay) {
   return out
 }
 // 第 N 天第 si 阶段题目：
-//   test → 每次随机分层抽 20 题；practice → 本人专属序列切片（v79 人手一套）+ （Day N≥2 首环节）追加前一天错题（额外，不占配额）。
+//   test → 从本人已刷题（v80；Day1 摸底尚无已刷题时回退全库）分层随机抽 20 题；
+//   practice → 本人专属序列切片（v79 人手一套）+ （Day N≥2 首环节）追加前一天错题（额外，不占配额）。
 //   选项顺序每次进入重洗，答案位置不固定。
 function challengeStageQuestions(day, si) {
   const m = challengeStageInfo(day, si)
-  if (m.kind === 'test') return challengeRandomQuestions(20)
+  if (m.kind === 'test') return challengeTestQuestions()
   const qs = challengePool().slice(m.start, m.start + m.count).map(shuffleOptions)
   if (day > 1 && si === 0) {
     const extra = chPrevDayWrongQuestions(day - 1)
