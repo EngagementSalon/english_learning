@@ -3115,9 +3115,11 @@ async function dashToggleChOpen() {
   }
 }
 
-// ====== 管理员看板：重置某学员的七天挑战（v83） ======
-// 二次确认后调 CloudSync.setChallengeReset：① 云端该学员 chy/chQ 清零（看板进度、测试分、打卡、积分榜立即归零）
-// ② doc.chResets[用户名] 打时间戳 → 该学员端下次打开挑战页自动清空本地进度，从 Day1 重新开始。
+// ====== 管理员看板：重置某学员的挑战考试成绩（v83 引入，v84 收窄口径） ======
+// 二次确认后调 CloudSync.setChallengeReset：① 云端过滤掉该学员 chy 中 kind==='test' 的记录
+//（Day1 摸底 / Day7 期末考试成绩清零，看板两列成绩与积分中的考试部分同步归零）
+// ② doc.chResets[用户名] 时间戳 + chResetModes[用户名]='exam' → 该学员端下次打开挑战页只清本地测试阶段记录
+//（可重新参加考试），练习进度 / 每日打卡 / 挑战错题 / 练习积分全部保留。
 // 题库级统计（每题正确率 __q）与普通练习记录 perQ 不受影响。
 async function dashResetChUser(username, name, idx) {
   const label = name && name !== username ? `${name}（${username}）` : username
@@ -3217,14 +3219,16 @@ function renderDashChallengeBlock(rows) {
       for (let si = 0; si < stageCnt[d]; si++) if (seen[d + '-' + si]) n++
       checkin.push(n === 0 ? 0 : n === stageCnt[d] ? 2 : 1)
     }
-    // 测试分：Day1 / Day7 的水平测试（test 只上报一次）
-    const t1 = (r.chy || []).find(x => x.kind === 'test' && x.day === 1)
-    const t7 = (r.chy || []).find(x => x.kind === 'test' && x.day === 7)
+    // 测试分：Day1 / Day7 的水平测试（test 只上报一次）；v84：成绩被管理员重置的存根跳过 → 显示「—」
+    const t1 = (r.chy || []).find(x => x.kind === 'test' && x.day === 1 && !x.cleared)
+    const t7 = (r.chy || []).find(x => x.kind === 'test' && x.day === 7 && !x.cleared)
     const score = x => x && x.total ? Math.round(x.correct / x.total * 100) : null
     // v73 积分榜：每环节按首次完成计（day-si 去重取 at 最早一条，重练不刷速度分）；
     // v78：答对分按环节权重（第七天期末考试 3 倍），用时扣分不变
+    // v84：成绩已重置的考试存根不计分（重考后产生的新记录才计入）
     const firstByStage = {}
     ;(r.chy || []).forEach(x => {
+      if (x.cleared) return
       const k = x.day + '-' + x.si
       if (!firstByStage[k] || (x.at || 0) < (firstByStage[k].at || 0)) firstByStage[k] = x
     })

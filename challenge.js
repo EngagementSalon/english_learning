@@ -1,7 +1,8 @@
 // ====== 标帜餐厅七天英文挑战（v68 引入；v70 入口移入练习页 + Day1/7 双阶段；v71 难度递增+时间锁+防作弊+看板上报；
 //        v72 每日 30 题 + 测试每次随机 + 练习错题当天刷到全对 + 前一天错题次日额外复习 + 听音题醒目注解；
 //        v77 挑战整体需管理员手动开放（chOpen）：未开放/已结束时全部环节灰掉锁定；
-//        v79 练习题序改为人手一套：种子按登录用户名派生，每人随机序列不同（难度配比与逐日递增不变） ======
+//        v79 练习题序改为人手一套：种子按登录用户名派生，每人随机序列不同（难度配比与逐日递增不变）；
+//        v83 管理员可重置某学员挑战；v84 重置收窄为只清考试成绩（两场水平测试），练习进度/打卡/错题保留 ======
 // 题源：分类 12「标帜餐厅常见词汇」（684 题 = 456 listen + 228 single，v71 起无 voicematch）。
 // 练习序列（每人一套，v79）：按难度分桶（1/2/3）按天配比抽取（CHALLENGE_DIFF_PLAN），Day1 均值 1.0 → Day7 均值 2.2；
 //   Day1 巩固练习 10 题 → Day2-6 每日练习 30 题 → Day7 巩固练习 10 题，共 170 题；
@@ -205,32 +206,72 @@ function challengeLoad() {
     challengeState = { uid, days: {} }
     challengeSave() // 换号重置立即落盘，避免上一账号数据残留 localStorage
   }
-  // v83：管理员重置检测（云端标记比本地已处理的新 → 清空本地进度，回到 Day1）
+  // v83/v84：管理员重置检测（云端标记比本地已处理的新 → 按模式处理本地记录；考试成绩模式只清测试成绩）
   return chCheckRemoteReset()
 }
 
-// v83 管理员重置：云端 doc.chResets[本人] 存着最近一次重置时间戳（经 CloudSync._chResets 侧信道到达）。
-// 本地按用户记录「已处理到的重置时间戳」，云端更新则清空挑战进度（本地进度是解锁与计分的权威，
-// 只清云端会让本机仍显示已完成）。返回 true 表示本次刚发生重置（渲染层据此提示学员）。
+// v83 管理员重置：云端 doc.chResets[本人] 存着最近一次重置时间戳（经 CloudSync._chResets 侧信道到达），
+// doc.chResetModes[本人] 记录重置口径（v84：'exam'）。本地按用户记录「已处理到的重置时间戳」，
+// 云端更新则按模式处理本地记录（本地记录是解锁与计分的权威，只清云端会让本机仍显示已完成）：
+//   'exam' → 只删两场水平测试（Day1 摸底 / Day7 期末）的阶段记录，可重新参加考试；练习进度 / 打卡 / 错题保留
+//   其余（v83 旧数据无模式记录）→ 整表清空，回到 Day1
+// 返回 true 表示本次刚发生重置（渲染层据此提示学员）。
 let _chResetNotice = false
+let _chResetNoticeMode = ''   // v84：提示文案按模式区分（'exam' 考试成绩 / 'all' 整表）
 let _chResetNoticeAt = 0
 // 重置提示在 10 分钟内保持可见（渲染后不清除，避免被紧随其后的重渲染吞掉）
 function chResetNoticeActive() {
   return !!_chResetNoticeAt && (Date.now() - _chResetNoticeAt) < 10 * 60 * 1000
 }
+function chResetNoticeIsExam() {
+  return _chResetNoticeMode === 'exam'
+}
+// v84：只清考试成绩 —— 把本地记录中的测试阶段（kind==='test'）降级为「已重置存根」：
+// 清掉分数（done/correct/wrong → 可重新参加考试），保留完成时间 at 与题量 total，
+// 使当天「已完成」判定、进度条与天数链不受影响（挑战别的内容照旧）。
+// 返回处理掉的阶段数（0 = 该学员还没有考试成绩，无需打扰）。
+function chClearExamStageRecs() {
+  let n = 0
+  if (!challengeState || !challengeState.days) return 0
+  CHALLENGE_DAYS.forEach(d => {
+    const rec = challengeState.days[d.day]
+    if (!rec || !rec.stages) return
+    d.stages.forEach((s, si) => {
+      const r = rec.stages[si]
+      if (s.kind === 'test' && r && !r.cleared) {
+        rec.stages[si] = { cleared: true, at: r.at || Date.now(), total: r.total || 0 }
+        n++
+      }
+    })
+  })
+  if (n) challengeSave()
+  return n
+}
 function chCheckRemoteReset() {
   let at = 0
-  try { at = Number((CloudSync._chResets || {})[challengeUid()]) || 0 } catch (e) { return false }
+  let mode = 'all'
+  try {
+    const uid = challengeUid()
+    at = Number((CloudSync._chResets || {})[uid]) || 0
+    mode = ((CloudSync._chResetModes || {})[uid] === 'exam') ? 'exam' : 'all'
+  } catch (e) { return false }
   if (!at) return false
   const key = 'eq_ch_reset_seen_' + challengeUid()
   let seen = 0
   try { seen = Number(localStorage.getItem(key)) || 0 } catch (e) {}
   if (at <= seen) return false
   try { localStorage.setItem(key, String(at)) } catch (e) {}
-  challengeState = { uid: challengeUid(), days: {} }
-  challengeSave()
-  chs = null            // 丢弃可能残留的答题会话
+  if (mode === 'exam') {
+    if (!chClearExamStageRecs()) return false   // 无考试成绩可清 → 静默处理（标记已落盘，不再重复检查）
+    // 停留在测试结果页（成绩已作废）→ 丢弃该会话；答题中的会话不打断，交卷后按新成绩上报
+    if (chs && chs.kind === 'test' && chs.phase === 'result') chs = null
+  } else {
+    challengeState = { uid: challengeUid(), days: {} }
+    challengeSave()
+    chs = null            // 丢弃可能残留的答题会话
+  }
   _chResetNotice = true
+  _chResetNoticeMode = mode
   _chResetNoticeAt = Date.now()
   return true
 }
@@ -245,10 +286,21 @@ function chStageDone(day, si) {
   const r = chStageRec(day, si)
   return !!(r && r.done)
 }
-// 一天完成 = 当天全部阶段完成
+// v84：该阶段是否是「成绩已被管理员重置」的存根（完成过但分数已清空，可重新参加考试）
+function chStageCleared(day, si) {
+  const r = chStageRec(day, si)
+  return !!(r && r.cleared)
+}
+// v84：进度/解锁判定用——已完成 或 完成过但成绩被重置，都算「走到过这一步」，
+// 保证重置考试成绩不会影响当日打卡、进度条与次日解锁链
+function chStageCounted(day, si) {
+  const r = chStageRec(day, si)
+  return !!(r && (r.done || r.cleared))
+}
+// 一天完成 = 当天全部阶段完成（或被重置过）
 function chDayDone(day) {
   const cfg = CHALLENGE_DAYS.find(x => x.day === day)
-  return !!cfg && cfg.stages.every((_, si) => chStageDone(day, si))
+  return !!cfg && cfg.stages.every((_, si) => chStageCounted(day, si))
 }
 // 某天全部完成的时间（当天各阶段完成时间的最大值；未完成返回 0）
 function chDayLastDoneAt(day) {
@@ -257,7 +309,7 @@ function chDayLastDoneAt(day) {
   let t = 0
   cfg.stages.forEach((_, si) => {
     const r = chStageRec(day, si)
-    if (r && r.done && r.at) t = Math.max(t, r.at)
+    if (r && (r.done || r.cleared) && r.at) t = Math.max(t, r.at)
   })
   return t
 }
@@ -383,8 +435,9 @@ function isChAnswered(i) {
 // 学员总进度卡（v71）：7 天格子（✓ 完成 / 数字 可做 / 🔒 未解锁）+ 环节与题数总进度条（v72 分母 = CHALLENGE_TOTAL 210）
 function chProgressHtml() {
   const meta = challengeStageMeta()
-  const doneStages = meta.filter(m => chStageDone(m.day, m.si)).length
-  const doneQ = meta.reduce((s, m) => chStageDone(m.day, m.si) ? s + m.count : s, 0)
+  // v84：被重置成绩的测试阶段仍计入进度（chStageCounted），避免「只重置考试成绩」影响进度显示
+  const doneStages = meta.filter(m => chStageCounted(m.day, m.si)).length
+  const doneQ = meta.reduce((s, m) => chStageCounted(m.day, m.si) ? s + m.count : s, 0)
   const pct = Math.round(doneQ / CHALLENGE_TOTAL * 100)
   const cells = CHALLENGE_DAYS.map(d => {
     const done = chDayDone(d.day)
@@ -413,11 +466,13 @@ function chProgressHtml() {
 // ====== 积分榜前三（v74）======
 // 与管理员看板 renderDashChallengeBlock 同口径：每环节按首次完成计（day-si 去重取 at 最早的 chy，
 // 重练不刷分），积分 = Σ(答对×100×环节权重) − Σ用时秒；v78：第七天期末考试 3 倍权重，管理员不参加排名。
+// v84：被管理员重置成绩的测试记录（cleared 存根）不计分——重考后的新记录才计入。
 function chLbAggregate(rows) {
   // v78：管理员账号不参加排名（学员端前三同样剔除）
   const list = (rows || []).filter(r => r && r.role !== 'admin' && r.chy && r.chy.length).map(r => {
     const first = {}
     ;(r.chy || []).forEach(x => {
+      if (x && x.cleared) return   // v84：成绩已重置的考试记录不计分
       const k = x.day + '-' + x.si
       if (!first[k] || (x.at || 0) < (first[k].at || 0)) first[k] = x
     })
@@ -494,11 +549,12 @@ function renderChallenge() {
         <div style="font-size:12px;color:#6b7280">${chOpenEverOpened() ? t('chEndedHint') : t('chNotOpenHint')}</div>
       </div>`
     : ''
-  // v83：管理员重置本学员挑战后的一次性提示（10 分钟内保持可见）
+  // v83/v84：管理员重置本学员记录后的一次性提示（10 分钟内保持可见）；考试成绩模式文案不同
+  const chResetIsExam = chResetNoticeIsExam()
   const chResetBanner = chResetNoticeActive()
     ? `<div class="card" style="border:2px solid #6366f1;margin-bottom:16px;text-align:center;padding:18px">
-        <div style="font-size:15px;font-weight:800;margin-bottom:4px">🔄 ${t('chResetNotice')}</div>
-        <div style="font-size:12px;color:#6b7280">${t('chResetNoticeHint')}</div>
+        <div style="font-size:15px;font-weight:800;margin-bottom:4px">🔄 ${chResetIsExam ? t('chResetExamNotice') : t('chResetNotice')}</div>
+        <div style="font-size:12px;color:#6b7280">${chResetIsExam ? t('chResetExamNoticeHint') : t('chResetNoticeHint')}</div>
       </div>`
     : ''
   el.innerHTML = `
@@ -577,6 +633,7 @@ function chStageRowHtml(day, si, s) {
         <span class="${tagCls}" style="margin-right:6px">${tag}</span>
         <span style="font-size:13px;color:#6b7280">${t('questionsUnit', s.count)}</span>
         ${rec && !isTest ? `<span style="font-size:12px;color:#059669;margin-left:8px">✓ ${rec.correct}/${rec.total}</span>` : ''}
+        ${chStageCleared(day, si) ? `<span style="font-size:12px;color:#6366f1;margin-left:8px">🔁 ${t('chResetExamRetake')}</span>` : ''}
       </div>
       ${right}
     </div>`

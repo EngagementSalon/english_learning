@@ -105,8 +105,11 @@ const CloudSync = {
     this._chOpen = doc.chOpen === true
     this._chOpenAt = Number(doc.chOpenAt) || 0
     // v83 侧信道：七天挑战重置标记（doc 顶层 chResets = { 用户名: 时间戳 }）。
-    // 管理员重置某人挑战后，该学员端读到比本地已处理标记更新的值 → 清空本地挑战进度（回到 Day1）
+    // 管理员重置后，该学员端读到比本地已处理标记更新的值 → 按模式处理本地记录：
+    //   chResetModes[用户名] === 'exam'（v84 起唯一模式）→ 只清两场水平测试成绩，练习进度保留
+    //   无模式记录（v83 旧数据）→ 兼容为整表清空（回到 Day1）
     this._chResets = (doc.chResets && typeof doc.chResets === 'object') ? doc.chResets : {}
+    this._chResetModes = (doc.chResetModes && typeof doc.chResetModes === 'object') ? doc.chResetModes : {}
     try { localStorage.setItem('eq_cloud_cache', txt) } catch (e) { /* ignore */ }
     return doc
   },
@@ -261,14 +264,16 @@ const CloudSync = {
     return saved ? { ok: true } : { ok: false, reason: 'network' }
   },
 
-  // ---------- 重置某学员的七天挑战（管理员触发，v83） ----------
+  // ---------- 重置某学员的七天挑战考试成绩（管理员触发，v83 引入 / v84 收窄口径） ----------
+  // v84 起只重置「考试」：Day1 摸底 + Day7 期末考试（kind==='test' 的水平测试）成绩清零、可重新参加考试；
+  // 练习进度（Day1-7 巩固练习）、每日打卡、挑战错题、练习部分积分全部保留。
   // 两件事一起做，缺一不可：
-  //   ① doc 顶层 chResets[<用户名>] = 时间戳 → 该学员端读到更新值后清空本地挑战进度（回到 Day1）
-  //      （本地进度是解锁/计分的权威，只清云端会导致学员端仍显示已完成）
-  //   ② 推送 chreset 事件 → 云端聚合表清空该学员 chy（阶段进度 / 测试分 / 每日打卡）与 chQ（挑战错题），
+  //   ① doc 顶层 chResets[<用户名>] = 时间戳 + chResetModes[<用户名>] = 'exam'
+  //      → 该学员端读到更新标记后只删本地测试阶段记录（练习阶段记录是解锁权威，必须同步处理）
+  //   ② 推送 chreset 事件（d.mode='exam'）→ 云端聚合表过滤掉该学员 chy 中 kind==='test' 的记录，
   //      看板等所有读取路径都是 base + events 重放，于是自然生效；事件按时间顺序重放，
-  //      重置之后重新提交的 chy 会正常累计（不会误删新数据）。
-  // 不清：题库级全局聚合 __q 与普通练习明细 perQ（非挑战数据，与重置无关）。
+  //      重置之后重新考试提交的 chy 会正常累计（不会误删新成绩）。
+  // 不清：题库级全局聚合 __q、普通练习明细 perQ、挑战错题 chQ（非考试成绩数据）。
   async setChallengeReset(username, name) {
     const u = String(username || '')
     if (!u) return { ok: false, reason: 'nouser' }
@@ -279,14 +284,16 @@ const CloudSync = {
         const doc = await this._getDoc()
         doc.chResets = doc.chResets || {}
         doc.chResets[u] = at
+        doc.chResetModes = doc.chResetModes || {}
+        doc.chResetModes[u] = 'exam'
         await this._putDoc(doc)
         const check = await this._getDoc()
-        if (Number((check.chResets || {})[u]) === at) saved = true
+        if (Number((check.chResets || {})[u]) === at && (check.chResetModes || {})[u] === 'exam') saved = true
       } catch (e) { /* 网络波动等 → 重试 */ }
     }
     if (!saved) return { ok: false, reason: 'network' }
-    // 聚合表清零（事件进队列；推送失败也不影响，队列留待下次周期推送）
-    this.enqueue({ u, n: name || u, ty: 'chreset', ts: at, d: {} })
+    // 聚合表清考试成绩（事件进队列；推送失败也不影响，队列留待下次周期推送）
+    this.enqueue({ u, n: name || u, ty: 'chreset', ts: at, d: { mode: 'exam' } })
     try { await this.pushPending() } catch (e) { /* 保留在队列 */ }
     return { ok: true, at }
   },
@@ -416,11 +423,22 @@ const CloudSync = {
         })
         break
       case 'chreset':
-        // v83 管理员重置该学员的七天挑战：阶段进度 / 水平测试分 / 每日打卡（chy）与挑战错题（chQ）清零。
+        // 管理员重置该学员的挑战记录：v84 起默认只清「考试成绩」——把 chy 中的水平测试记录
+        //（kind==='test'：Day1 摸底 / Day7 期末）降级为「已重置存根」：保留 day/si/kind/at 供进度与每日打卡统计，
+        // 清零 correct/total/usedSec（看板两列成绩显示「—」，积分不再计入该场考试；重考后写入的新记录正常计分）。
+        // d.mode 缺省 / 'all'（v83 旧事件）→ 兼容为整表清空（chy 与挑战错题 chQ）。
         // 题库级全局聚合 __q 与普通练习明细 perQ 不受影响（非挑战数据）。
-        r.chy = []
-        r.chQ = {}
+        if (d.mode === 'exam') {
+          // 只降级「重置之前」的测试记录（x.at <= ev.ts）→ 事件重放幂等，重考产生的新成绩不会被重复清除
+          r.chy = (r.chy || []).map(x => (x && x.kind === 'test' && !x.cleared && (x.at || 0) <= ev.ts)
+            ? { day: x.day, si: x.si, kind: 'test', correct: 0, total: 0, usedSec: 0, at: x.at, cleared: true }
+            : x)
+        } else {
+          r.chy = []
+          r.chQ = {}
+        }
         r.chResetAt = ev.ts
+        r.chResetMode = d.mode === 'exam' ? 'exam' : 'all'
         break
       case 'perqfix':
         // v38 看字选音发音修复：无效错答从每题统计的分母中剔除（correct 不变——错答本就未计入）
