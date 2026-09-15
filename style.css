@@ -530,6 +530,12 @@ select { min-width: 120px; }
 .admin-table th { font-weight: 600; color: var(--text-secondary); font-size:13px; }
 .admin-table tr:hover { background: var(--bg); }
 .admin-actions { display:flex; gap:6px; }
+/* v86：七天挑战明细表列多 —— 单元格一律不换行（表格整体超宽时由外层 overflow-x 横向滚动），
+   避免中文姓名 / 部门 / 进度 / 按钮文字被窄列挤成一字一行的「竖排」 */
+.ch-detail th, .ch-detail td { white-space: nowrap; }
+.ch-detail th, .ch-detail td { padding: 10px 10px; }
+.ch-detail .ch-prog { font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.ch-detail .btn { white-space: nowrap; }
 .pagination {
   display: flex;
   justify-content: center;

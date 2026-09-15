@@ -208,7 +208,7 @@ function fullChy(cleared) {
   const i18nKeys = ['chResetExamNotice:', 'chResetExamNoticeHint:', 'chResetExamRetake:', 'dashChResetBtn:', 'dashChResetHint:']
   const bad = i18nKeys.filter(k => I18N.split(k).length - 1 !== 2)
   assert('i18n 新增/更新键 zh/en 成对', bad.length === 0, bad.join(','))
-  assert('管理端按钮文案为「重置考试成绩」', I18N.includes("dashChResetBtn: '重置考试成绩'") && I18N.includes("dashChResetBtn: 'Reset scores'"))
+  assert('管理端按钮文案为「重置成绩」（v86 缩短避免按钮竖排）', I18N.includes("dashChResetBtn: '重置成绩'") && I18N.includes("dashChResetBtn: 'Reset scores'"))
 
   console.log(testFailed ? '\n❌ 有断言失败' : '\n✅ v84 只重置考试成绩测试全部通过')
   process.exit(testFailed ? 1 : 0)

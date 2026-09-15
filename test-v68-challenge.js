@@ -448,7 +448,7 @@ const DAY = 86400000
   console.log('\n[7] i18n 双语键')
   {
     const i18nSrc = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8')
-    const keys = ['chTitle', 'chIntro', 'chPoolInfo', 'chTestTag', 'chPracticeTag', 'chDay', 'chLocked', 'chStageLocked', 'chTomorrow', 'chStart', 'chRetake', 'chOnceOnly', 'chQuitConfirm', 'chSubmitTest', 'chConfirmSubmit', 'chTestDone', 'chPracticeDone', 'chBackToChallenge', 'chReportTitle', 'chDelta', 'chReportHint', 'chDayDoneTag', 'chEntryHint', 'chProgressTitle', 'chProgressStages', 'chProgressQ', 'chReviewTag', 'chReviewHint', 'chReviewRound', 'chReviewNextRound', 'chReviewFinish', 'chExtraDone', 'dashChTitle', 'dashChJoin', 'dashChTotalQ', 'dashChAvg', 'dashChNone', 'dashChThProgress', 'dashChThQ', 'dashChThAcc', 'dashChThDay1', 'dashChThDay7', 'dashChHint', 'dashChWrongTitle', 'dashChWrongHint', 'dashChThWrong', 'chDashProgress']
+    const keys = ['chTitle', 'chIntro', 'chPoolInfo', 'chTestTag', 'chPracticeTag', 'chDay', 'chLocked', 'chStageLocked', 'chTomorrow', 'chStart', 'chRetake', 'chOnceOnly', 'chQuitConfirm', 'chSubmitTest', 'chConfirmSubmit', 'chTestDone', 'chPracticeDone', 'chBackToChallenge', 'chReportTitle', 'chDelta', 'chReportHint', 'chDayDoneTag', 'chEntryHint', 'chProgressTitle', 'chProgressStages', 'chProgressQ', 'chReviewTag', 'chReviewHint', 'chReviewRound', 'chReviewNextRound', 'chReviewFinish', 'chExtraDone', 'dashChTitle', 'dashChJoin', 'dashChTotalQ', 'dashChAvg', 'dashChNone', 'dashChThProgress', 'dashChThQAcc', 'dashChThDay1', 'dashChThDay7', 'dashChHint', 'dashChWrongTitle', 'dashChWrongHint', 'dashChThWrong', 'chDashProgress']
     const zhIdx = i18nSrc.indexOf('zh: {')
     const enIdx = i18nSrc.indexOf('en: {')
     const zhPart = i18nSrc.slice(zhIdx, enIdx)

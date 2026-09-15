@@ -3330,18 +3330,17 @@ function renderDashChallengeBlock(rows) {
         </table>
       </div>
       <div style="overflow-x:auto">
-        <table class="admin-table" style="font-size:13px">
+        <table class="admin-table ch-detail" style="font-size:13px">
           <thead><tr>
             <th>${t('thUsername')}</th><th>${t('thName')}</th><th>${t('thDept')}</th>
             <th>${t('dashChThProgress')}</th>
-            <th style="text-align:center">${t('dashChThQ')}</th>
-            <th style="text-align:center">${t('dashChThAcc')}</th>
+            <th style="text-align:center">${t('dashChThQAcc')}</th>
             <th style="text-align:center">${t('dashChThDay1')}</th>
             <th style="text-align:center">${t('dashChThDay7')}</th>
             <th colspan="7" style="text-align:center;border-left:2px solid #e5e7eb">📅 ${t('dashChThCheckin')}</th>
             <th style="text-align:center;border-left:2px solid #e5e7eb">${t('dashChThOps')}</th>
           </tr><tr>
-            <th colspan="8" style="border:none;background:none"></th>
+            <th colspan="7" style="border:none;background:none"></th>
             ${[1, 2, 3, 4, 5, 6, 7].map(d => `<th style="text-align:center;border-left:${d === 1 ? '2px solid #e5e7eb' : 'none'};font-weight:600">D${d}</th>`).join('')}
             <th style="border-left:2px solid #e5e7eb"></th>
           </tr></thead>
@@ -3350,14 +3349,13 @@ function renderDashChallengeBlock(rows) {
               <td>${escHtml(p.username)}</td>
               <td>${escHtml(p.name || '—')}</td>
               <td>${escHtml(p.dept || '—')}</td>
-              <td style="font-size:12px;color:#6b7280">${t('chDashProgress', p.maxDay, p.stagesDone)}</td>
-              <td style="text-align:center">${p.q}</td>
-              <td style="text-align:center"><span class="perq-rate ${p.acc >= 80 ? 'perq-good' : p.acc >= 60 ? 'perq-ok' : 'perq-bad'}">${p.acc}%</span></td>
+              <td class="ch-prog">${t('chDashProgress', p.maxDay, p.stagesDone)}</td>
+              <td style="text-align:center">${p.q} · <span class="perq-rate ${p.acc >= 80 ? 'perq-good' : p.acc >= 60 ? 'perq-ok' : 'perq-bad'}">${p.acc}%</span></td>
               <td style="text-align:center">${scoreCell(p.s1)}</td>
               <td style="text-align:center">${scoreCell(p.s7)}</td>
               ${(p.checkin || []).map((c, i) => `<td style="text-align:center;border-left:${i === 0 ? '2px solid #e5e7eb' : 'none'}">${checkinCell(c)}</td>`).join('')}
               <td style="text-align:center;border-left:2px solid #e5e7eb">
-                <button class="btn btn-ghost" id="dashChResetBtn_${pi}" style="padding:4px 10px;font-size:12px"
+                <button class="btn btn-ghost" id="dashChResetBtn_${pi}" style="padding:4px 10px;font-size:12px;white-space:nowrap"
                   data-u="${escAttr(p.username)}" data-n="${escAttr(p.name || '')}"
                   onclick="dashResetChUser(this, ${pi})">${t('dashChResetBtn')}</button>
               </td>
