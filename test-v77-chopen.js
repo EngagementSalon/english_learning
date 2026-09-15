@@ -96,7 +96,7 @@ function makeChSandbox(chOpen, chOpenAt) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'store.js'), 'utf-8'), sb)
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8'), sb)
   const appSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8')
-  vm.runInContext(['shuffleOptions', 'checkAnswer', 'escHtml'].map(n => extractFn(appSrc, n)).join('\n'), sb)
+  vm.runInContext(['shuffleOptions', 'checkAnswer', 'safeQType', 'escAttr', 'escHtml'].map(n => extractFn(appSrc, n)).join('\n'), sb)
   // renderChallengeQuiz 渲染依赖（el 可用 → 注入简版，同 test-v76）
   vm.runInContext(
     'const TYPE_LABELS = new Proxy({}, { get: (_, k) => k });' +

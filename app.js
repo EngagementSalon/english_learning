@@ -243,7 +243,35 @@ function autoplayListen(q) {
   if (q && q.type === 'listen' && listenVoiceMode() === 'local') setTimeout(() => speakEnglish(q.question), 350)
 }
 
-// voicematch（看字选音）选项行：作答中只显示 🔊/🌐 播放按钮（不暴露文字），提交/回顾后显示文字与对错
+// ====== v87：题型自洽兜底 ======
+// 需要选项的题型，若数据里选项不足 2 个（线下课导入的题常出现），按填空题渲染。
+// 否则学生看到的是一道「一个可点选项都没有」的题 —— 「有些题目选不了」的一类成因。
+// checkAnswer 与各渲染分支都走这里，保证「渲染成什么」与「怎么判分」一致。
+function safeQType(q) {
+  if (!q) return ''
+  const t = q.type
+  if (t === 'single' || t === 'judge' || t === 'pronounce' || t === 'multiple' || t === 'listen' || t === 'voicematch') {
+    const n = Array.isArray(q.options) ? q.options.length : 0
+    if (n < 2) return 'fill'
+  }
+  return t
+}
+
+// voicematch（看字选音）作答中是否隐藏选项文字：
+// 真·辨音题 = 题干是英文文字、且某个选项文字与题干一致（选出与题干读音相同的那一项）→ 隐藏文字，否则看字就能选。
+// 反之（题干是中文提问，或没有任何选项文字与题干相同）说明这道题实质是「看题干选词」的普通选择题被录成了 voicematch，
+// 必须显示选项文字，否则学生看不到任何可选内容 —— 线上反馈「有些题目选不了」的主要成因。
+function vmHideOptionText(q) {
+  const stem = String((q && q.question) || '').trim()
+  if (!stem) return false
+  if (/[\u4e00-\u9fff]/.test(stem)) return false      // 中文题干 = 看题选词，必须显示选项
+  const opts = Array.isArray(q && q.options) ? q.options : []
+  return opts.some(o => String(o == null ? '' : o).trim().toLowerCase() === stem.toLowerCase())
+}
+
+// voicematch（看字选音）选项行
+// v87：作答中出现明确的「选择此项」按钮。原先行内文字标签写的是「点击朗读」，但点它其实是选中该选项
+//（朗读要点 🔊），提示与行为不符，学生普遍反馈「这题选不了」。现在朗读归 🔊/🔉/🌐，选择归「选择此项」，整行仍可点。
 function vmOptRowHtml(q, ans, i, mode, pickFn) {
   const opt = q.options[i]
   const isCorrect = q.answer.includes(i)
@@ -254,17 +282,21 @@ function vmOptRowHtml(q, ans, i, mode, pickFn) {
   const play = `<button class="vm-play" type="button" data-w="${escAttr(opt)}" onclick="event.stopPropagation();speakEnglish(this.dataset.w)" title="${escAttr(t('listenPlay'))}">${audioIconSvg('up')}</button>`
   const online = `<button class="vm-online" type="button" data-w="${escAttr(opt)}" onclick="event.stopPropagation();speakLocalForce(this.dataset.w)" title="${escAttr(t('listenLocal'))}">${audioIconSvg('down')}</button><button class="vm-online" type="button" data-w="${escAttr(opt)}" onclick="event.stopPropagation();playListenOnline(this.dataset.w)" title="${escAttr(t('listenOnline'))}">${audioIconSvg('globe')}</button>`
   const onClick = mode === 'review' || !pickFn ? '' : `${pickFn}(${i})`
-  const inner = mode === 'review'
-    ? `${play}${online}<span class="vm-opt-text">${escHtml(opt)}</span>`
-    : `${play}${online}<span class="vm-opt-label">${t('listenPlay')}</span>`
+  const choose = (mode === 'review' || !pickFn) ? ''
+    : `<button class="vm-choose" type="button" onclick="event.stopPropagation();${pickFn}(${i})">${escHtml(t('vmChoose'))}</button>`
+  let inner
+  if (mode === 'review') inner = `${play}${online}<span class="vm-opt-text">${escHtml(opt)}</span>`
+  else if (vmHideOptionText(q)) inner = `${play}${online}${choose}`
+  else inner = `${play}${online}<span class="vm-opt-text">${escHtml(opt)}</span>${choose}`
   return `<div class="${cls}" ${onClick ? `onclick="${onClick}"` : ''}>
     <div class="option-badge">${badge}</div>
     <div class="option-text vm-opt">${inner}</div>
   </div>`
 }
-// voicematch 选项整段 HTML
+// voicematch 选项整段 HTML（作答提示按「是否隐藏文字」两态给不同话术）
 function vmOptionsHtml(q, ans, mode, pickFn) {
-  const hint = mode === 'review' ? '' : `<p class="form-hint vm-hint">${t('vmHint')}</p>`
+  const hint = mode === 'review' ? ''
+    : `<p class="form-hint vm-hint">${t(vmHideOptionText(q) ? 'vmHint' : 'vmHintText')}</p>`
   return hint + (q.options || []).map((_, i) => vmOptRowHtml(q, ans, i, mode, pickFn)).join('')
 }
 
@@ -613,6 +645,8 @@ async function buildPlacementQuestions() {
   const deptKey = Store.isAdmin() ? '' : Store.getSessionDeptKey()
   let qs = Store.getQuestionsWithLevel(deptKey).filter(q => ['single', 'judge', 'pronounce', 'listen', 'voicematch'].includes(q.type))
   qs = qs.filter(q => Number(q.category_id) === COURSE_BANK_CAT_ID)
+  // v87：剔除畸形题（如选项不足 2 个的单选题）—— 这类题在页面上没有可点的选项，学生只会反馈「选不了」
+  qs = qs.filter(q => safeQType(q) === q.type)
   const byLevel = { 1: [], 2: [], 3: [], 4: [] }
   qs.forEach(q => { if (byLevel[q.level]) byLevel[q.level].push(q) })
   const picked = []
@@ -654,7 +688,9 @@ function renderPlacementQuestion() {
   const q = st.questions[st.index]
   const ans = st.answers[st.index]
   const pct = Math.round(st.index / st.questions.length * 100)
-  const optionsHtml = q.type === 'voicematch'
+  // 题池已由 buildPlacementQuestions 过滤掉畸形题（safeQType !== q.type），这里只会是规范选择题型
+  const qt = safeQType(q)
+  const optionsHtml = qt === 'voicematch'
     ? vmOptionsHtml(q, ans, 'live', 'placementPick')
     : q.options.map((opt, i) => {
         const cls = 'option-item' + (ans === i ? ' selected' : '')
@@ -1000,13 +1036,19 @@ function startPractice() {
 function renderPracticeQuestion() {
   const q = practiceState.questions[practiceState.index]
   const el = document.getElementById('practiceQuiz')
-  const ans = practiceState.answers[practiceState.index] || (q.type === 'multiple' ? [] : q.type === 'fill' || q.type === 'translate' ? '' : -1)
+  const qt = safeQType(q)
+  // v87：原先写 `answers[i] || ...`，而选项 A 的索引是 0（falsy）→ 渲染时被当成「未作答」，
+  // 学生点了 A 选项却不高亮，看起来「这题选不了」。改为严格判空。
+  const rawAns = practiceState.answers[practiceState.index]
+  const ans = (rawAns === undefined || rawAns === null)
+    ? (qt === 'multiple' ? [] : qt === 'fill' || qt === 'translate' ? '' : -1)
+    : rawAns
   const submitted = practiceState.submitted
 
   let optionsHtml = ''
-  if (q.type === 'voicematch') {
+  if (qt === 'voicematch') {
     optionsHtml = vmOptionsHtml(q, ans, submitted ? 'review' : 'live', 'selectOption')
-  } else if (q.type === 'single' || q.type === 'judge' || q.type === 'pronounce' || q.type === 'listen') {
+  } else if (qt === 'single' || qt === 'judge' || qt === 'pronounce' || qt === 'listen') {
     optionsHtml = q.options.map((opt, i) => {
       let cls = 'option-item'
       if (submitted) {
@@ -1021,7 +1063,7 @@ function renderPracticeQuestion() {
         <div class="option-text">${opt}</div>
       </div>`
     }).join('')
-  } else if (q.type === 'multiple') {
+  } else if (qt === 'multiple') {
     optionsHtml = q.options.map((opt, i) => {
       let cls = 'option-item'
       const selected = ans.includes(i)
@@ -1037,7 +1079,7 @@ function renderPracticeQuestion() {
         <div class="option-text">${opt}</div>
       </div>`
     }).join('')
-  } else if (q.type === 'fill' || q.type === 'translate') {
+  } else if (qt === 'fill' || qt === 'translate') {
     let cls = 'input-answer'
     if (submitted) {
       cls += ans.toString().trim().toLowerCase() === q.options[0].toString().trim().toLowerCase() ? ' correct' : ' wrong'
@@ -1052,7 +1094,7 @@ function renderPracticeQuestion() {
     feedbackHtml = `<div class="feedback ${isCorrect ? 'correct' : 'wrong'}">
       <strong>${isCorrect ? t('correctFeedback') : t('wrongFeedback')}</strong>
       <div class="explanation">${q.explanation || t('noExplanation')}</div>
-      ${q.type !== 'fill' && q.type !== 'translate' ? `<div class="explanation">${t('correctAnswer')}：${q.answer.map(i => LETTERS[i]).join(', ')}</div>` : `<div class="explanation">${t('correctAnswer')}：${q.options[0]}</div>`}
+      ${qt !== 'fill' && qt !== 'translate' ? `<div class="explanation">${t('correctAnswer')}：${(Array.isArray(q.answer) ? q.answer : [q.answer]).map(i => LETTERS[i]).join(', ')}</div>` : `<div class="explanation">${t('correctAnswer')}：${q.options[0]}</div>`}
     </div>`
   }
 
@@ -1088,7 +1130,8 @@ function selectOption(i) {
 }
 function toggleOption(i) {
   const q = practiceState.questions[practiceState.index]
-  let ans = practiceState.answers[practiceState.index] || []
+  const cur = practiceState.answers[practiceState.index]
+  let ans = Array.isArray(cur) ? cur.slice() : []
   if (ans.includes(i)) ans = ans.filter(x => x !== i)
   else ans = [...ans, i]
   practiceState.answers[practiceState.index] = ans
@@ -1097,13 +1140,19 @@ function toggleOption(i) {
 function onTextInput(val) {
   practiceState.answers[practiceState.index] = val
 }
+// 判分口径与渲染口径共用 safeQType（v87）：选项不足 2 个的选择题按填空判分，
+// 避免「页面渲染成填空、判分却按选项索引比」的错位；同时容忍 answer 未写成数组的历史数据。
 function checkAnswer(q, ans) {
-  if (q.type === 'single' || q.type === 'judge' || q.type === 'pronounce' || q.type === 'listen' || q.type === 'voicematch') {
-    return q.answer.includes(ans)
-  } else if (q.type === 'multiple') {
-    return ans.length === q.answer.length && q.answer.every(i => ans.includes(i))
-  } else if (q.type === 'fill' || q.type === 'translate') {
-    return ans.toString().trim().toLowerCase() === q.options[0].toString().trim().toLowerCase()
+  const t = safeQType(q)
+  const ansArr = Array.isArray(q.answer) ? q.answer : [q.answer]
+  if (t === 'single' || t === 'judge' || t === 'pronounce' || t === 'listen' || t === 'voicematch') {
+    return ansArr.includes(ans)
+  } else if (t === 'multiple') {
+    const sel = Array.isArray(ans) ? ans : []
+    return sel.length === ansArr.length && ansArr.every(i => sel.includes(i))
+  } else if (t === 'fill' || t === 'translate') {
+    const target = (q.options && q.options[0] != null) ? q.options[0] : ''
+    return String(ans == null ? '' : ans).trim().toLowerCase() === String(target).trim().toLowerCase()
   }
   return false
 }
@@ -1289,11 +1338,12 @@ function renderExamQuestion() {
   const q = examState.questions[examState.currentIndex]
   const ans = examState.answers[examState.currentIndex]
   const el = document.getElementById('page-exam')
+  const qt = safeQType(q)
 
   let optionsHtml = ''
-  if (q.type === 'voicematch') {
+  if (qt === 'voicematch') {
     optionsHtml = vmOptionsHtml(q, ans, 'live', 'examSelect')
-  } else if (q.type === 'single' || q.type === 'judge' || q.type === 'pronounce' || q.type === 'listen') {
+  } else if (qt === 'single' || qt === 'judge' || qt === 'pronounce' || qt === 'listen') {
     optionsHtml = q.options.map((opt, i) => {
       let cls = 'option-item'
       if (ans === i) cls += ' selected'
@@ -1302,16 +1352,16 @@ function renderExamQuestion() {
         <div class="option-text">${opt}</div>
       </div>`
     }).join('')
-  } else if (q.type === 'multiple') {
+  } else if (qt === 'multiple') {
     optionsHtml = q.options.map((opt, i) => {
       let cls = 'option-item'
-      if (ans.includes(i)) cls += ' selected'
+      if (Array.isArray(ans) && ans.includes(i)) cls += ' selected'
       return `<div class="${cls}" onclick="examToggle(${i})">
         <div class="option-badge">${LETTERS[i]}</div>
         <div class="option-text">${opt}</div>
       </div>`
     }).join('')
-  } else if (q.type === 'fill' || q.type === 'translate') {
+  } else if (qt === 'fill' || qt === 'translate') {
     optionsHtml = `<input type="text" class="input-answer" placeholder="${t('answerPlaceholder')}" value="${ans}"
       oninput="examInput(this.value)" />`
   }

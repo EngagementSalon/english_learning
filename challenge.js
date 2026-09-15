@@ -739,10 +739,17 @@ function renderChallengeQuiz() {
   if (!submitted) autoplayListen(q)
 }
 
-// 三种单选题型（listen/single/voicematch）选项区（v72 参数化：练习/回顾轮共用）
+// 单选题型（listen/single/voicematch）+ 填空（v72 参数化：练习/回顾轮共用）
+// v87：题型判定走 safeQType —— 选项不足 2 个的畸形选择题按填空渲染，避免出现「没有可点选项」的题。
 function chOptionsHtml(q, submitted, ans, pickFn) {
-  if (q.type === 'voicematch') {
+  const qt = safeQType(q)
+  if (qt === 'voicematch') {
     return vmOptionsHtml(q, ans, submitted ? 'review' : 'live', pickFn)
+  }
+  if (qt === 'fill' || qt === 'translate') {
+    const val = (ans === undefined || ans === null || ans === -1) ? '' : String(ans)
+    return `<input type="text" class="input-answer" placeholder="${t('answerPlaceholder')}" value="${escAttr(val)}"
+      oninput="chTextInput(this.value)" ${submitted ? 'disabled' : ''} />`
   }
   return q.options.map((opt, i) => {
     let cls = 'option-item'
@@ -758,6 +765,12 @@ function chOptionsHtml(q, submitted, ans, pickFn) {
       <div class="option-text">${opt}</div>
     </div>`
   }).join('')
+}
+
+// v87：填空作答（题型自洽兜底后可能出现填空形态）
+function chTextInput(v) {
+  if (!chs || chs.phase !== 'quiz') return
+  chs.answers[chs.index] = v
 }
 
 function chPick(i) {

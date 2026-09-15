@@ -1081,10 +1081,19 @@ function courseBackStudent() {
   renderCoursePage()
 }
 
+// v87：判分口径与渲染口径统一走 safeQType（选项不足 2 个的畸形选择题按填空判分）+ answer 容错
 function courseCheckAnswer(q, ans) {
-  if (q.type === 'single' || q.type === 'judge' || q.type === 'pronounce' || q.type === 'listen' || q.type === 'voicematch') return q.answer.includes(ans)
-  if (q.type === 'multiple') return Array.isArray(ans) && ans.length === q.answer.length && q.answer.every(i => ans.includes(i))
-  if (q.type === 'fill' || q.type === 'translate') return String(ans).trim().toLowerCase() === String(q.options[0]).trim().toLowerCase()
+  const qt = safeQType(q)
+  const ansArr = Array.isArray(q.answer) ? q.answer : [q.answer]
+  if (qt === 'single' || qt === 'judge' || qt === 'pronounce' || qt === 'listen' || qt === 'voicematch') return ansArr.includes(ans)
+  if (qt === 'multiple') {
+    const sel = Array.isArray(ans) ? ans : []
+    return sel.length === ansArr.length && ansArr.every(i => sel.includes(i))
+  }
+  if (qt === 'fill' || qt === 'translate') {
+    const target = (q.options && q.options[0] != null) ? q.options[0] : ''
+    return String(ans == null ? '' : ans).trim().toLowerCase() === String(target).trim().toLowerCase()
+  }
   return false
 }
 
@@ -1249,7 +1258,9 @@ function courseRenderTake() {
   const el = document.getElementById('page-course')
   const qz = courseQuiz
   const q = qz.questions[qz.index]
-  const ans = qz.answers[qz.index] !== undefined ? qz.answers[qz.index] : (q.type === 'multiple' ? [] : (q.type === 'fill' || q.type === 'translate') ? '' : -1)
+  // v87：题型走 safeQType —— 选项不足 2 个的畸形选择题按填空渲染，避免出现「没有可点选项」的题
+  const qt = safeQType(q)
+  const ans = qz.answers[qz.index] !== undefined ? qz.answers[qz.index] : (qt === 'multiple' ? [] : (qt === 'fill' || qt === 'translate') ? '' : -1)
   // v53：回顾模式逐题即时反馈（即使源任务是测评，也走作业式逐题流程）
   const isExam = qz.type === 'exam' && !qz.reviewing
   const answered = a => a !== undefined && a !== -1 && !(Array.isArray(a) && !a.length) && !(typeof a === 'string' && !a.trim())
@@ -1259,10 +1270,10 @@ function courseRenderTake() {
   // 原先 (isExam || qz.submitted) 会让测评卷所有选项不绑 onclick、填空框 disabled，导致整卷无法作答。
   const locked = !!qz.submitted
   let optionsHtml = ''
-  if (q.type === 'voicematch') {
+  if (qt === 'voicematch') {
     const dis = locked ? '' : 'coursePick'
     optionsHtml = vmOptionsHtml(q, ans, showFeedback ? 'review' : 'live', dis)
-  } else if (q.type === 'single' || q.type === 'judge' || q.type === 'pronounce' || q.type === 'listen') {
+  } else if (qt === 'single' || qt === 'judge' || qt === 'pronounce' || qt === 'listen') {
     optionsHtml = q.options.map((opt, i) => {
       let cls = 'option-item'
       if (showFeedback) { if (q.answer.includes(i)) cls += ' correct'; else if (ans === i) cls += ' wrong' }
@@ -1272,7 +1283,7 @@ function courseRenderTake() {
       return `<div class="${cls}" ${dis ? `onclick="${dis}"` : ''}>
         <div class="option-badge">${badge}</div><div class="option-text">${opt}</div></div>`
     }).join('')
-  } else if (q.type === 'multiple') {
+  } else if (qt === 'multiple') {
     optionsHtml = q.options.map((opt, i) => {
       let cls = 'option-item'
       const sel = Array.isArray(ans) && ans.includes(i)

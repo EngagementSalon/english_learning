@@ -641,6 +641,7 @@ select { min-width: 120px; }
   .option-item { padding: 13px 12px; gap: 10px; }
   .option-text { font-size: 15px; }
   .option-badge { width: 26px; height: 26px; }
+  .vm-choose { padding: 6px 10px; font-size: 12px; }
   .quiz-footer { flex-wrap: wrap; gap: 10px; }
   .quiz-footer .btn { flex: 1; min-height: 44px; }
 
@@ -1033,6 +1034,14 @@ tr.row-draft td { background:#fefce8; }
 .vm-online:hover { background:var(--primary-dark); }
 .vm-opt-label { font-size:14px; color:var(--text-light); }
 .vm-opt-text { font-size:16px; font-weight:600; letter-spacing:.2px; word-break:break-word; }
+/* v87：作答中的「选择此项」按钮 —— 朗读归 🔊/🔉/🌐，选择归这个按钮（整行仍可点） */
+.vm-choose {
+  border:1px solid var(--primary); background:#fff; color:var(--primary-dark);
+  font-size:13px; font-weight:600; padding:6px 12px; border-radius:999px;
+  cursor:pointer; flex-shrink:0; margin-left:auto; transition:background .15s, color .15s;
+}
+.vm-choose:hover { background:var(--primary); color:#fff; }
+.option-item.selected .vm-choose { background:var(--primary); color:#fff; }
 
 /* ====== 考试防作弊警告遮罩 ====== */
 .anticheat-overlay {
