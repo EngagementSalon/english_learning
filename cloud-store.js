@@ -104,6 +104,9 @@ const CloudSync = {
     // 关闭时保留 chOpenAt → 学员端据「曾开放过」区分「未开放 / 已结束」两种锁定文案。
     this._chOpen = doc.chOpen === true
     this._chOpenAt = Number(doc.chOpenAt) || 0
+    // v83 侧信道：七天挑战重置标记（doc 顶层 chResets = { 用户名: 时间戳 }）。
+    // 管理员重置某人挑战后，该学员端读到比本地已处理标记更新的值 → 清空本地挑战进度（回到 Day1）
+    this._chResets = (doc.chResets && typeof doc.chResets === 'object') ? doc.chResets : {}
     try { localStorage.setItem('eq_cloud_cache', txt) } catch (e) { /* ignore */ }
     return doc
   },
@@ -258,6 +261,36 @@ const CloudSync = {
     return saved ? { ok: true } : { ok: false, reason: 'network' }
   },
 
+  // ---------- 重置某学员的七天挑战（管理员触发，v83） ----------
+  // 两件事一起做，缺一不可：
+  //   ① doc 顶层 chResets[<用户名>] = 时间戳 → 该学员端读到更新值后清空本地挑战进度（回到 Day1）
+  //      （本地进度是解锁/计分的权威，只清云端会导致学员端仍显示已完成）
+  //   ② 推送 chreset 事件 → 云端聚合表清空该学员 chy（阶段进度 / 测试分 / 每日打卡）与 chQ（挑战错题），
+  //      看板等所有读取路径都是 base + events 重放，于是自然生效；事件按时间顺序重放，
+  //      重置之后重新提交的 chy 会正常累计（不会误删新数据）。
+  // 不清：题库级全局聚合 __q 与普通练习明细 perQ（非挑战数据，与重置无关）。
+  async setChallengeReset(username, name) {
+    const u = String(username || '')
+    if (!u) return { ok: false, reason: 'nouser' }
+    const at = Date.now()
+    let saved = false
+    for (let attempt = 0; attempt < 4 && !saved; attempt++) {
+      try {
+        const doc = await this._getDoc()
+        doc.chResets = doc.chResets || {}
+        doc.chResets[u] = at
+        await this._putDoc(doc)
+        const check = await this._getDoc()
+        if (Number((check.chResets || {})[u]) === at) saved = true
+      } catch (e) { /* 网络波动等 → 重试 */ }
+    }
+    if (!saved) return { ok: false, reason: 'network' }
+    // 聚合表清零（事件进队列；推送失败也不影响，队列留待下次周期推送）
+    this.enqueue({ u, n: name || u, ty: 'chreset', ts: at, d: {} })
+    try { await this.pushPending() } catch (e) { /* 保留在队列 */ }
+    return { ok: true, at }
+  },
+
   // ---------- 聚合 ----------
   // 把一条事件应用到用户聚合表 map（可直接用于云端 base 或本地聚合）
   _apply(map, ev) {
@@ -381,6 +414,13 @@ const CloudSync = {
           correct: Number(d.correct) || 0, total: Number(d.total) || 0,
           usedSec: Number(d.usedSec) || 0, at: ev.ts,
         })
+        break
+      case 'chreset':
+        // v83 管理员重置该学员的七天挑战：阶段进度 / 水平测试分 / 每日打卡（chy）与挑战错题（chQ）清零。
+        // 题库级全局聚合 __q 与普通练习明细 perQ 不受影响（非挑战数据）。
+        r.chy = []
+        r.chQ = {}
+        r.chResetAt = ev.ts
         break
       case 'perqfix':
         // v38 看字选音发音修复：无效错答从每题统计的分母中剔除（correct 不变——错答本就未计入）

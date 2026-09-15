@@ -205,6 +205,34 @@ function challengeLoad() {
     challengeState = { uid, days: {} }
     challengeSave() // 换号重置立即落盘，避免上一账号数据残留 localStorage
   }
+  // v83：管理员重置检测（云端标记比本地已处理的新 → 清空本地进度，回到 Day1）
+  return chCheckRemoteReset()
+}
+
+// v83 管理员重置：云端 doc.chResets[本人] 存着最近一次重置时间戳（经 CloudSync._chResets 侧信道到达）。
+// 本地按用户记录「已处理到的重置时间戳」，云端更新则清空挑战进度（本地进度是解锁与计分的权威，
+// 只清云端会让本机仍显示已完成）。返回 true 表示本次刚发生重置（渲染层据此提示学员）。
+let _chResetNotice = false
+let _chResetNoticeAt = 0
+// 重置提示在 10 分钟内保持可见（渲染后不清除，避免被紧随其后的重渲染吞掉）
+function chResetNoticeActive() {
+  return !!_chResetNoticeAt && (Date.now() - _chResetNoticeAt) < 10 * 60 * 1000
+}
+function chCheckRemoteReset() {
+  let at = 0
+  try { at = Number((CloudSync._chResets || {})[challengeUid()]) || 0 } catch (e) { return false }
+  if (!at) return false
+  const key = 'eq_ch_reset_seen_' + challengeUid()
+  let seen = 0
+  try { seen = Number(localStorage.getItem(key)) || 0 } catch (e) {}
+  if (at <= seen) return false
+  try { localStorage.setItem(key, String(at)) } catch (e) {}
+  challengeState = { uid: challengeUid(), days: {} }
+  challengeSave()
+  chs = null            // 丢弃可能残留的答题会话
+  _chResetNotice = true
+  _chResetNoticeAt = Date.now()
+  return true
 }
 function challengeSave() {
   try { localStorage.setItem(CHALLENGE_KEY, JSON.stringify(challengeState)) } catch (e) {}
@@ -424,7 +452,12 @@ function chLbFill(top) {
 }
 async function chLoadLeaderboard() {
   const now = Date.now()
-  if (_chLbCache.top && now - _chLbCache.at < 60000) { chLbFill(_chLbCache.top); return }
+  if (_chLbCache.top && now - _chLbCache.at < 60000) {
+    chLbFill(_chLbCache.top)
+    // v83：缓存命中不代表重置侧信道旧（周期探测仍会刷新 _chResets）→ 仍检查一次
+    try { if (_chGateRendered !== null && chCheckRemoteReset()) renderChallenge() } catch (e) { /* ignore */ }
+    return
+  }
   let top = null
   try {
     if (typeof CloudSync !== 'undefined' && CloudSync.getDashboardData) {
@@ -434,11 +467,13 @@ async function chLoadLeaderboard() {
   if (top) _chLbCache = { at: now, top }
   chLbFill(_chLbCache.top)
   // v76/v77：积分榜拉取顺带刷新了开关侧信道（_getDoc）→ 管理员刚开/关挑战或考试时重渲染入口；
+  // v83：同一拉取也刷新了重置侧信道（_chResets）→ 刚被重置则清空本地进度并重渲染入口；
   // 仅概览页响应（答题中 renderChallenge 会走会话分支，不打断作答）
   try {
     if (typeof CloudSync !== 'undefined' && _chGateRendered !== null) {
       const cur = { open: chOpenLocked(), exam: chFinalExamLocked() }
-      if (cur.open !== _chGateRendered.open || cur.exam !== _chGateRendered.exam) renderChallenge()
+      if (cur.open !== _chGateRendered.open || cur.exam !== _chGateRendered.exam) { renderChallenge(); return }
+      if (chCheckRemoteReset()) renderChallenge()
     }
   } catch (e) { /* ignore */ }
 }
@@ -459,7 +494,15 @@ function renderChallenge() {
         <div style="font-size:12px;color:#6b7280">${chOpenEverOpened() ? t('chEndedHint') : t('chNotOpenHint')}</div>
       </div>`
     : ''
+  // v83：管理员重置本学员挑战后的一次性提示（10 分钟内保持可见）
+  const chResetBanner = chResetNoticeActive()
+    ? `<div class="card" style="border:2px solid #6366f1;margin-bottom:16px;text-align:center;padding:18px">
+        <div style="font-size:15px;font-weight:800;margin-bottom:4px">🔄 ${t('chResetNotice')}</div>
+        <div style="font-size:12px;color:#6b7280">${t('chResetNoticeHint')}</div>
+      </div>`
+    : ''
   el.innerHTML = `
+    ${chResetBanner}
     ${chClosedBanner}
     ${chProgressHtml()}
     <div class="card" style="border:2px solid #f59e0b;margin-bottom:16px">

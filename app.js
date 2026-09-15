@@ -3115,6 +3115,30 @@ async function dashToggleChOpen() {
   }
 }
 
+// ====== 管理员看板：重置某学员的七天挑战（v83） ======
+// 二次确认后调 CloudSync.setChallengeReset：① 云端该学员 chy/chQ 清零（看板进度、测试分、打卡、积分榜立即归零）
+// ② doc.chResets[用户名] 打时间戳 → 该学员端下次打开挑战页自动清空本地进度，从 Day1 重新开始。
+// 题库级统计（每题正确率 __q）与普通练习记录 perQ 不受影响。
+async function dashResetChUser(username, name, idx) {
+  const label = name && name !== username ? `${name}（${username}）` : username
+  if (!confirm(t('dashChResetConfirm', label))) return
+  const btn = document.getElementById('dashChResetBtn_' + idx)
+  if (btn) { btn.disabled = true; btn.textContent = t('dashChResetWorking') }
+  try {
+    const res = await CloudSync.setChallengeReset(username, name)
+    if (res && res.ok) {
+      alert(t('dashChResetOk', label))
+      renderDashboard()   // 重新拉取云端聚合（setChallengeReset 内已刷新缓存）→ 进度/打卡/积分全部归零
+    } else {
+      alert(t('dashChResetFail'))
+      if (btn) { btn.disabled = false; btn.textContent = t('dashChResetBtn') }
+    }
+  } catch (e) {
+    alert(t('dashChResetFail'))
+    if (btn) { btn.disabled = false; btn.textContent = t('dashChResetBtn') }
+  }
+}
+
 // ====== 管理员看板：期末考试开关（v76） ======
 // 七天挑战第 7 天期末考试为手动开放：存云端 doc.chExamOpen（cloud-store setChallengeExamOpen），
 // 学员端经 _getDoc 侧信道 _chExamOpen 读取；零参与时也要显示（管理员可提前开考）。
@@ -3300,12 +3324,14 @@ function renderDashChallengeBlock(rows) {
             <th style="text-align:center">${t('dashChThDay1')}</th>
             <th style="text-align:center">${t('dashChThDay7')}</th>
             <th colspan="7" style="text-align:center;border-left:2px solid #e5e7eb">📅 ${t('dashChThCheckin')}</th>
+            <th style="text-align:center;border-left:2px solid #e5e7eb">${t('dashChThOps')}</th>
           </tr><tr>
             <th colspan="8" style="border:none;background:none"></th>
             ${[1, 2, 3, 4, 5, 6, 7].map(d => `<th style="text-align:center;border-left:${d === 1 ? '2px solid #e5e7eb' : 'none'};font-weight:600">D${d}</th>`).join('')}
+            <th style="border-left:2px solid #e5e7eb"></th>
           </tr></thead>
           <tbody>
-            ${list.map(p => `<tr>
+            ${list.map((p, pi) => `<tr>
               <td>${escHtml(p.username)}</td>
               <td>${escHtml(p.name || '—')}</td>
               <td>${escHtml(p.dept || '—')}</td>
@@ -3315,11 +3341,16 @@ function renderDashChallengeBlock(rows) {
               <td style="text-align:center">${scoreCell(p.s1)}</td>
               <td style="text-align:center">${scoreCell(p.s7)}</td>
               ${(p.checkin || []).map((c, i) => `<td style="text-align:center;border-left:${i === 0 ? '2px solid #e5e7eb' : 'none'}">${checkinCell(c)}</td>`).join('')}
+              <td style="text-align:center;border-left:2px solid #e5e7eb">
+                <button class="btn btn-ghost" id="dashChResetBtn_${pi}" style="padding:4px 10px;font-size:12px"
+                  onclick="dashResetChUser(${JSON.stringify(p.username)}, ${JSON.stringify(p.name || '')}, ${pi})">${t('dashChResetBtn')}</button>
+              </td>
             </tr>`).join('')}
           </tbody>
         </table>
       </div>
       <p class="form-hint" style="margin:8px 0 0">${t('dashChCheckinLegend')} · ${t('dashChCheckinStatsLabel')}：${checkinStats.map((n, i) => `D${i + 1} ${n}`).join(' · ')}</p>
+      <p class="form-hint" style="margin:4px 0 0">♻️ ${t('dashChResetHint')}</p>
       <p class="form-hint" style="margin:4px 0 0">${t('dashChHint')}</p>
     </div>
     ${wrongList.length ? `
