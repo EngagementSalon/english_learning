@@ -40,6 +40,7 @@ function renderDash(rows) {
   vm.createContext(sb)
   vm.runInContext(I18N, sb)
   vm.runInContext(extractFn(APP, 'escHtml'), sb)
+  vm.runInContext(extractFn(APP, 'escAttr'), sb)   // v85：重置按钮 data-u/data-n 转义
   vm.runInContext(extractFn(APP, 'dashChStageWeight'), sb)
   vm.runInContext(extractFn(APP, 'renderDashChallengeBlock'), sb)
   vm.runInContext('const TYPE_LABELS = new Proxy({}, { get: (_, k) => k })', sb)

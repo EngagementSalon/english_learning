@@ -52,6 +52,7 @@ function makeSandbox() {
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8'), sb)
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'cloud-store.js'), 'utf-8'), sb)
   vm.runInContext(extractFn(appSrc, 'escHtml'), sb)
+  vm.runInContext(extractFn(appSrc, 'escAttr'), sb)   // v85：重置按钮 data-u/data-n 转义
   vm.runInContext(extractFn(appSrc, 'dashChStageWeight'), sb)
   vm.runInContext(extractFn(appSrc, 'renderDashChallengeBlock'), sb)
   vm.runInContext('const TYPE_LABELS = new Proxy({}, { get: (_, k) => k })', sb)

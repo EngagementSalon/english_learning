@@ -278,8 +278,9 @@ function makeChSandbox(chResets, localStore, chResetModes) {
   const i18nSrc = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8')
   const cloudSrc = fs.readFileSync(path.join(__dirname, 'cloud-store.js'), 'utf-8')
   assert('app.js 定义 dashResetChUser 并调用 setChallengeReset', appSrc.includes('async function dashResetChUser') && appSrc.includes('CloudSync.setChallengeReset(username, name)'))
-  assert('明细表含操作列与重置按钮（按行索引 id）', appSrc.includes('dashChThOps') && appSrc.includes('dashChResetBtn_${pi}') && appSrc.includes("dashResetChUser(${JSON.stringify(p.username)}"))
-  assert('重置按钮带二次确认（confirm）', /async function dashResetChUser[\s\S]{0,300}?confirm\(t\('dashChResetConfirm'/.test(appSrc))
+  assert('明细表含操作列与重置按钮（按行索引 id）', appSrc.includes('dashChThOps') && appSrc.includes('dashChResetBtn_${pi}') && appSrc.includes('data-u="${escAttr(p.username)}"'))
+  // v85：按钮改为从 data-* 取用户名后，函数前段多了解析代码 → 窗口放宽到 700 字符
+  assert('重置按钮带二次确认（confirm）', /async function dashResetChUser[\s\S]{0,700}?confirm\(t\('dashChResetConfirm'/.test(appSrc))
   assert('challenge.js 在 challengeLoad / chLoadLeaderboard 中检测重置', /function challengeLoad[\s\S]{0,900}?return chCheckRemoteReset\(\)/.test(chSrc) && chSrc.includes('if (chCheckRemoteReset()) renderChallenge()'))
   assert('cloud-store 侧信道与写后校验齐备', cloudSrc.includes('this._chResets = (doc.chResets') && cloudSrc.includes('this._chResetModes = (doc.chResetModes')
     && cloudSrc.includes("case 'chreset':") && cloudSrc.includes('check.chResets'))

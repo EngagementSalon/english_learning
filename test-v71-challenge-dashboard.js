@@ -43,9 +43,11 @@ function makeSandbox() {
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'store.js'), 'utf-8'), sb)
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8'), sb)
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'cloud-store.js'), 'utf-8'), sb)
-  // renderDashChallengeBlock 依赖：escHtml（提取真实实现）+ TYPE_LABELS 简版
+  // renderDashChallengeBlock 依赖：escHtml / escAttr（提取真实实现）+ TYPE_LABELS 简版
+  // v85：重置按钮改用 data-u/data-n 承载用户名 → 渲染需 escAttr
   const appSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8')
   vm.runInContext(extractFn(appSrc, 'escHtml'), sb)
+  vm.runInContext(extractFn(appSrc, 'escAttr'), sb)
   vm.runInContext(extractFn(appSrc, 'renderDashChallengeBlock'), sb)
   vm.runInContext(extractFn(appSrc, 'dashChStageWeight'), sb)   // v78：积分环节权重（第七天期末考试 3 倍）
   vm.runInContext('const TYPE_LABELS = new Proxy({}, { get: (_, k) => k })', sb)

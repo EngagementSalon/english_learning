@@ -3115,22 +3115,33 @@ async function dashToggleChOpen() {
   }
 }
 
-// ====== 管理员看板：重置某学员的挑战考试成绩（v83 引入，v84 收窄口径） ======
+// ====== 管理员看板：重置某学员的挑战考试成绩（v83 引入，v84 收窄口径，v85 修按钮接线） ======
 // 二次确认后调 CloudSync.setChallengeReset：① 云端过滤掉该学员 chy 中 kind==='test' 的记录
 //（Day1 摸底 / Day7 期末考试成绩清零，看板两列成绩与积分中的考试部分同步归零）
 // ② doc.chResets[用户名] 时间戳 + chResetModes[用户名]='exam' → 该学员端下次打开挑战页只清本地测试阶段记录
 //（可重新参加考试），练习进度 / 每日打卡 / 挑战错题 / 练习积分全部保留。
 // 题库级统计（每题正确率 __q）与普通练习记录 perQ 不受影响。
-async function dashResetChUser(username, name, idx) {
+//
+// ⚠️ v85 修复（v83/v84 按钮点了完全没反应）：按钮原来把参数写进内联属性，属性值本身用双引号
+//   包裹，而运行时 JSON.stringify 产出的字符串也自带双引号 → 渲染出的属性在第一个 " 处被
+//   HTML 解析器截断，onclick 实际只剩函数名加一个左括号 → 点击即 SyntaxError，静默失败
+//   （所以线上云端文档里连 chResets 字段都没写入）。凡是内联属性里塞带引号的字符串都会中招。
+//   现改为 data-u / data-n 承载用户名与姓名（escAttr 转义），onclick 只传 this 与行索引。
+//   兼容旧签名直调：dashResetChUser('alice', 'Alice', 0)。
+async function dashResetChUser(btnOrUser, nameOrIdx, legacyIdx) {
+  const fromBtn = !!(btnOrUser && typeof btnOrUser === 'object' && btnOrUser.dataset)
+  const username = fromBtn ? (btnOrUser.dataset.u || '') : String(btnOrUser || '')
+  const name = fromBtn ? (btnOrUser.dataset.n || '') : String(typeof nameOrIdx === 'string' ? nameOrIdx : '')
+  const btn = fromBtn ? btnOrUser : document.getElementById('dashChResetBtn_' + (legacyIdx != null ? legacyIdx : nameOrIdx))
+  if (!username) return
   const label = name && name !== username ? `${name}（${username}）` : username
   if (!confirm(t('dashChResetConfirm', label))) return
-  const btn = document.getElementById('dashChResetBtn_' + idx)
   if (btn) { btn.disabled = true; btn.textContent = t('dashChResetWorking') }
   try {
     const res = await CloudSync.setChallengeReset(username, name)
     if (res && res.ok) {
       alert(t('dashChResetOk', label))
-      renderDashboard()   // 重新拉取云端聚合（setChallengeReset 内已刷新缓存）→ 进度/打卡/积分全部归零
+      renderDashboard()   // 重新拉取云端聚合（setChallengeReset 内已刷新缓存）→ 两列成绩与积分中的考试部分归零
     } else {
       alert(t('dashChResetFail'))
       if (btn) { btn.disabled = false; btn.textContent = t('dashChResetBtn') }
@@ -3347,7 +3358,8 @@ function renderDashChallengeBlock(rows) {
               ${(p.checkin || []).map((c, i) => `<td style="text-align:center;border-left:${i === 0 ? '2px solid #e5e7eb' : 'none'}">${checkinCell(c)}</td>`).join('')}
               <td style="text-align:center;border-left:2px solid #e5e7eb">
                 <button class="btn btn-ghost" id="dashChResetBtn_${pi}" style="padding:4px 10px;font-size:12px"
-                  onclick="dashResetChUser(${JSON.stringify(p.username)}, ${JSON.stringify(p.name || '')}, ${pi})">${t('dashChResetBtn')}</button>
+                  data-u="${escAttr(p.username)}" data-n="${escAttr(p.name || '')}"
+                  onclick="dashResetChUser(this, ${pi})">${t('dashChResetBtn')}</button>
               </td>
             </tr>`).join('')}
           </tbody>
