@@ -2897,7 +2897,8 @@ function openImportModal(presetCat, presetDept) {
   const selDept = ADMIN_DEPT_TABS.indexOf(String(presetDept || '')) >= 0 ? String(presetDept) : adminTab
   const catOpts = cats.map(c => {
     const id = Number(c.id)
-    const label = id === CH_BANK_CAT ? (c.name + '（' + t('impChallengeTag') + '）') : c.name
+    // v96：挑战栏目不再拼接种子的老名字（「标帜餐厅常见词汇」让人误以为只有标帜一家有挑战题库）
+    const label = id === CH_BANK_CAT ? t('impChallengeTag') : c.name
     return `<option value="${id}" ${id === selCat ? 'selected' : ''}>${escHtml(label)}</option>`
   }).join('')
   const overlay = document.createElement('div')
@@ -2925,10 +2926,10 @@ function openImportModal(presetCat, presetDept) {
         </div>
         <div class="form-group">
           <label>${t('deptLabel')}</label>
-          <select id="importDept">
+          <select id="importDept" onchange="impSyncDeptHint()">
             ${ADMIN_DEPT_TABS.map(k => `<option value="${k}" ${selDept === k ? 'selected' : ''}>${escHtml(adminTabLabel(k))}</option>`).join('')}
           </select>
-          <p class="form-hint" style="margin:4px 0 0">${t('impDeptHint')}</p>
+          <p class="form-hint" id="impDeptHintEl" style="margin:4px 0 0">${t('impDeptHint')}</p>
         </div>
         <div class="form-group">
           <label>${t('impFileLabel')}</label>
@@ -2950,6 +2951,21 @@ function openImportModal(presetCat, presetDept) {
   `
   document.body.appendChild(overlay)
   renderImportPreview()
+  impSyncDeptHint()
+}
+
+// v96：部门下拉变化时同步「所属部门」提示 —— 栏目选「七天挑战题库」时明确告知
+// 题目将归入哪个部门的挑战题库（四个分部门共用一个栏目，归属由部门决定）。
+function impSyncDeptHint() {
+  const el = document.getElementById('impDeptHintEl')
+  if (!el) return
+  const dSel = document.getElementById('importDept')
+  const cSel = document.getElementById('importCat')
+  const dept = (dSel && dSel.value) || 'all'
+  const isChallengeBank = !!(cSel && Number(cSel.value) === 12)
+  el.textContent = isChallengeBank
+    ? (dept === 'all' ? t('impChDeptHintAll') : t('impChDeptHint', adminTabLabel(dept)))
+    : t('impDeptHint')
 }
 
 // Admin: Category management

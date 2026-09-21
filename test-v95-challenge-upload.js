@@ -87,7 +87,7 @@ run(`localStorage.setItem('eq_categories', JSON.stringify(BANK.categories))`)
   assert('弹窗含 importCat 下拉', modal.innerHTML.includes('id="importCat"'), '缺 importCat')
   assert('默认选中栏目 1', modal.innerHTML.includes('value="1" selected'), modal.innerHTML.slice(0, 200))
   assert('栏目 12 未被默认选中', !modal.innerHTML.includes('value="12" selected'), '不应默认选中挑战栏目')
-  assert('挑战栏目选项存在且带标注', modal.innerHTML.includes('（' + run(`t('impChallengeTag')`) + '）'), '缺标注')
+  assert('挑战栏目选项存在（标签不再拼接种子老名）', modal.innerHTML.includes(run(`t('impChallengeTag')`)), '缺标注')
   assert('栏目提示文案存在', modal.innerHTML.includes(run(`t('impCatHint')`)))
 
   console.log('\n2️⃣  导入弹窗：从挑战入口打开 → 默认选中「七天挑战题库」+ 部门预设')
@@ -236,8 +236,27 @@ run(`localStorage.setItem('eq_categories', JSON.stringify(BANK.categories))`)
   run('pushUploadedBankSoon()')   // CloudSync.setUploadedBank 存在 → 只排定时器；进程随即退出，不会真发
   assert('调用不抛错', true)
 
-  console.log('\n1️⃣1️⃣ i18n 中英成对')
-  const KEYS = ['impCatLabel', 'impCatHint', 'impChallengeTag', 'chUploadBtn', 'chUploadHint']
+  console.log('\n1️⃣1️⃣ impSyncDeptHint：部门提示随栏目/部门联动（v96）')
+  getEl('importCat').value = '12'
+  getEl('importDept').value = 'dining/yan'
+  run('impSyncDeptHint()')
+  assert('挑战栏目 + 艳中 → 提示指明归入艳中题库',
+    getEl('impDeptHintEl').textContent.includes(run(`adminTabLabel('dining/yan')`)),
+    getEl('impDeptHintEl').textContent)
+  getEl('importDept').value = 'all'
+  run('impSyncDeptHint()')
+  assert('挑战栏目 + 通用 → 提示说明全部门可抽',
+    getEl('impDeptHintEl').textContent === run(`t('impChDeptHintAll')`),
+    getEl('impDeptHintEl').textContent)
+  getEl('importCat').value = '1'
+  getEl('importDept').value = 'dining/yan'
+  run('impSyncDeptHint()')
+  assert('非挑战栏目 → 回到静态部门提示',
+    getEl('impDeptHintEl').textContent === run(`t('impDeptHint')`),
+    getEl('impDeptHintEl').textContent)
+
+  console.log('\n1️⃣2️⃣ i18n 中英成对')
+  const KEYS = ['impCatLabel', 'impCatHint', 'impChallengeTag', 'chUploadBtn', 'chUploadHint', 'impChDeptHint', 'impChDeptHintAll']
   const zhVals = JSON.parse(run(`JSON.stringify([${KEYS.map(k => `t('${k}')`).join(',')}])`))
   const enVals = JSON.parse(run(`(function(){ setLang('en');` +
     ` var r = [${KEYS.map(k => `t('${k}')`).join(',')}];` +
