@@ -510,6 +510,22 @@ function makeDeptSandbox() {
     vm.runInContext('var __doc3 = { events: [], chOpen: true, chOpenAt: 9 }', sb)
     assert('无营次 → legacy 兜底（第一期）',
       call(sb, '_roundCurrentForDept(__doc3,"dining/bar").id') === 'r1', String(call(sb, '_roundCurrentForDept(__doc3,"dining/bar").id')))
+    // v89：本部门完全没有适用营次 → 返回 null（不回落到别部门的期）
+    const doc5 = {
+      events: [],
+      chRounds: [
+        { id: 'r1', name: '标帜餐厅七天挑战第一期', depts: ['dining/sig'], open: true, at: 1 },
+      ],
+      chRoundCur: 'r1',
+    }
+    vm.runInContext('var __doc5 = ' + JSON.stringify(doc5), sb)
+    const cur5 = (slug) => call(sb, 'JSON.stringify(_roundCurrentForDept(__doc5,' + JSON.stringify(slug) + '))')
+    assert('标帜餐厅（本期适用）→ 拿到 r1', JSON.parse(cur5('dining/sig')).id === 'r1')
+    assert('艳中餐厅（无适用期）→ null（不再串到标帜的期）', cur5('dining/yan') === 'null', cur5('dining/yan'))
+    assert('酒吧团队（无适用期）→ null', cur5('dining/bar') === 'null', cur5('dining/bar'))
+    assert('客房送餐（无适用期）→ null', cur5('dining/ird') === 'null', cur5('dining/ird'))
+    assert('房务部（无适用期）→ null（跨大部门也不串）', cur5('rooms/fo') === 'null', cur5('rooms/fo'))
+    assert('管理员（slug 空）→ 仍跟随当前指针 r1（v88 行为不变）', JSON.parse(cur5('')).id === 'r1')
   }
 
   console.log('\n[8b] _getDoc 侧信道按 CloudSync._deptSlug 挑营次')
@@ -537,6 +553,35 @@ function makeDeptSandbox() {
     assert('管理员（无 deptSlug）→ 跟随当前指针 r1', got2.cur === 'r1', JSON.stringify(got2))
     assert('v88 存量营次（无 depts）对任何部门都适用',
       call(sb, 'roundDeptMatch({ id: "r9", name: "x" }, "dining/bar")') === true)
+    // v89：本部门无适用营次 → _chNoRound = true，且侧信道全部清空（学员端显示「本部门暂无开营」）
+    const doc2 = {
+      users: {}, events: [],
+      chRounds: [{ id: 'r1', name: '标帜餐厅七天挑战第一期', depts: ['dining/sig'], open: true, at: 1 }],
+      chRoundCur: 'r1',
+    }
+    const sb2 = makeCloudSandbox(JSON.parse(JSON.stringify(doc2)))
+    call(sb2, "CloudSync.setDeptSlug('dining/yan')")
+    const nr = JSON.parse(await call(sb2, `(async () => { await CloudSync._getDoc(); return JSON.stringify({
+      noRound: CloudSync._chNoRound, cur: CloudSync._chRoundCurId, name: CloudSync._chRoundCurName,
+      depts: CloudSync._chRoundCurDepts, open: CloudSync._chOpen, locked: CloudSync._chOpenLocked,
+    }) })()`))
+    assert('艳中餐厅学员 _getDoc → _chNoRound = true', nr.noRound === true, JSON.stringify(nr))
+    assert('无适用期时营次侧信道清空（cur/name/depts 皆空）',
+      nr.cur === '' && nr.name === '' && JSON.stringify(nr.depts) === '[]', JSON.stringify(nr))
+    assert('无适用期时挑战锁定（_chOpen=false, locked=true）', nr.open === false && nr.locked === true, JSON.stringify(nr))
+    // 对照：标帜餐厅学员同一份 doc → 正常拿到 r1
+    call(sb2, "CloudSync.setDeptSlug('dining/sig')")
+    const ok1 = JSON.parse(await call(sb2, `(async () => { await CloudSync._getDoc(); return JSON.stringify({
+      noRound: CloudSync._chNoRound, cur: CloudSync._chRoundCurId, open: CloudSync._chOpen, locked: CloudSync._chOpenLocked,
+    }) })()`))
+    assert('标帜餐厅学员同一 doc → 正常拿到 r1 且开放',
+      ok1.noRound === false && ok1.cur === 'r1' && ok1.open === true && ok1.locked === false, JSON.stringify(ok1))
+    // 对照：管理员（空 slug）→ 不受部门限制
+    call(sb2, "CloudSync.setDeptSlug('')")
+    const adm = JSON.parse(await call(sb2, `(async () => { await CloudSync._getDoc(); return JSON.stringify({
+      noRound: CloudSync._chNoRound, cur: CloudSync._chRoundCurId,
+    }) })()`))
+    assert('管理员同一 doc → 不置 noRound 且跟随指针 r1', adm.noRound === false && adm.cur === 'r1', JSON.stringify(adm))
   }
 
   // ================= ⑨ 营次 CRUD 带部门 =================

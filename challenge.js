@@ -488,6 +488,13 @@ function chRoundOpenState() {
     return { state: on ? 'open' : (at > 0 ? 'ended' : 'closed'), on, locked: !on, everOpen: on || at > 0 }
   } catch (e) { return { state: 'closed', on: false, locked: true, everOpen: false } }
 }
+// v89：本部门是否压根没有适用营次（云端侧信道 _chNoRound）→ 学员端显示「本部门暂无开营」
+function chNoRoundForDept() {
+  try {
+    if (typeof CloudSync === 'undefined') return false
+    return CloudSync._chNoRound === true
+  } catch (e) { return false }
+}
 // 当前营次名称（横幅显示，如「第一期」）；云端未拉取时兜底「第一期」
 function chRoundName() {
   try {
@@ -731,7 +738,12 @@ function renderChallenge() {
   let bannerTitle = ''
   let bannerHint = ''
   let bannerBorder = '#9ca3af'
-  if (st.state === 'upcoming') {
+  // v89：本部门无任何适用营次 → 专属文案（优先于其它三态，因为此时压根没有「期」可谈）
+  if (chNoRoundForDept()) {
+    bannerTitle = '📭 ' + t('chNoRoundForDept')
+    bannerHint = t('chNoRoundForDeptHint', chDeptName() || '')
+    bannerBorder = '#9ca3af'
+  } else if (st.state === 'upcoming') {
     bannerTitle = '⏳ ' + t('chRoundUpcoming', rName)
     bannerHint = t('chRoundUpcomingHint')
     bannerBorder = '#f59e0b'
@@ -752,10 +764,11 @@ function renderChallenge() {
     : ''
   // v82/v88 营次标识条：让学员随时知道自己在哪一期（多期并存时尤其重要）
   // v89：加部门标识 —— 各分部门题不同，学员需明确自己在哪个部门的挑战里
+  // v89：本部门无适用营次时不显示此条（没有「期」可标），只保留上面的「暂无开营」提示
   const chDeptTag = chDeptName()
     ? `<span style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:999px;padding:2px 8px">🏷️ ${escHtml(chDeptName())}</span>`
     : ''
-  const chRoundBar = `<div class="card" style="margin-bottom:16px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+  const chRoundBar = chNoRoundForDept() ? '' : `<div class="card" style="margin-bottom:16px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
       <div style="font-size:13px;font-weight:700">🎯 ${t('chRoundLabel')}：<span style="color:#2563eb">${escHtml(rName)}</span>${st.state === 'open' ? ` <span style="font-size:11px;color:#059669">● ${t('chRoundOpenTag')}</span>` : ''} ${chDeptTag}</div>
       ${rMeta ? `<div style="font-size:12px;color:#6b7280">${rMeta}</div>` : ''}
     </div>`

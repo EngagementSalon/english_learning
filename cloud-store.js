@@ -161,6 +161,7 @@ function roundDeptMatch(r, deptSlug) {
 //      管理员切到哪一期，学员端就跟随哪一期，含「已切换但未到开放时间」的 upcoming 态）。
 //   ② 当前指针不适用本部门（例如它是给别的分部门开的）时，退而取「本部门适用且已开放」的最新一期。
 //   ③ 都不满足 → 取本部门适用的最新一期（哪怕未开放，学员端会显示对应锁定文案）。
+//   ④ 本部门压根没有适用营次 → 返回 null（学员端显示「本部门暂无开营」，不再回落到别部门的期）。
 // deptSlug 为空（管理员/未登录/其他部门）→ ① 永远命中，行为与 v88 完全一致。
 function _roundCurrentForDept(doc, deptSlug) {
   const arr = _roundsNorm(doc)
@@ -173,7 +174,10 @@ function _roundCurrentForDept(doc, deptSlug) {
   for (let i = arr.length - 1; i >= 0; i--) {                    // ③
     if (roundDeptMatch(arr[i], deptSlug)) return arr[i]
   }
-  return cur
+  // ④ 无任何本部门适用营次。
+  //   未登录/管理员（deptSlug 空）不可能走到这里（① 必命中），故回落 cur 仅为防御性兜底。
+  //   有明确分部门却无适用期 → 返回 null，_getDoc 据此清空营次侧信道，学员端显示「暂无开营」。
+  return String(deptSlug || '') ? null : cur
 }
 const CLOUD_EVENTS_MAX = 1500            // 云端保留的最近事件数（更早的折叠进 base 聚合）
 const CLOUD_DURATION_CHUNK = 5 * 60      // 登录时长按 5 分钟分块上报（秒）
@@ -279,23 +283,32 @@ const CloudSync = {
     const cur = _roundCurrentForDept(doc, depSlug)
     this._chRounds = rounds
     this._chHasRounds = rounds.length > 0
-    this._chRoundCurId = cur.id
-    this._chRoundCurName = cur.name
-    this._chRoundCurDepts = Array.isArray(cur.depts) ? cur.depts : []
+    // v89：本部门无任何适用营次 → cur 为 null。此时清空全部营次侧信道 = 「本部门暂无开营」，
+    // 学员端挑战入口显示未开放（chOpenLocked 为 true），且不携带别部门的期次信息。
+    this._chNoRound = !cur
+    const curId = cur ? cur.id : ''
+    const curName = cur ? cur.name : ''
+    const curDepts = cur && Array.isArray(cur.depts) ? cur.depts : []
+    const curAt = cur ? (cur.at || 0) : 0
+    const curStartAt = cur ? cur.startAt : 0
+    const curEndAt = cur ? cur.endAt : 0
+    this._chRoundCurId = curId
+    this._chRoundCurName = curName
+    this._chRoundCurDepts = curDepts
     this._chRoundSeen = _roundsSeenIds()
     // v88：以下平台级侧信道统一取自「当前营次」——v76/v77/v83 的读取方（challenge.js 门禁、
     // 挑战重置检测、看板徽章）无需改动即自动跟随营次；自动排期在此结算为有效值。
-    const effOpen = roundOpenState(cur, Date.now())
-    const effExam = roundExamState(cur, Date.now(), effOpen)
+    const effOpen = cur ? roundOpenState(cur, Date.now()) : { state: 'closed', on: false, locked: true, everOpen: false }
+    const effExam = cur ? roundExamState(cur, Date.now(), effOpen) : { on: false, locked: true, everOpen: false }
     // v76 侧信道：七天挑战期末考试开关（默认缺省=关闭）
     this._chExamOpen = effExam.on
     // v77 侧信道：七天挑战整体开关（默认缺省=关闭）+ 最近一次开放时间。
     // 关闭时保留 chOpenAt → 学员端据「曾开放过」区分「未开放 / 已结束」两种锁定文案。
     this._chOpen = effOpen.on
-    this._chOpenAt = cur.at || 0
+    this._chOpenAt = curAt
     this._chOpenLocked = effOpen.locked
-    this._chStartAt = cur.startAt
-    this._chEndAt = cur.endAt
+    this._chStartAt = curStartAt
+    this._chEndAt = curEndAt
     // v83 侧信道：七天挑战重置标记（按营次存于 doc.chRoundLevels[营次]；无营次容器时回落到 doc 顶层，
     // 即 v87 的布局 —— 顶层字段永远是「第一期」的家）。
     // 管理员重置后，该学员端读到比本地已处理标记更新的值 → 按模式处理本地记录：
@@ -303,7 +316,7 @@ const CloudSync = {
     //   无模式记录（v83 旧数据）→ 兼容为整表清空（回到 Day1）
     // 注意：这里不做营次开放判定 —— 重置标记终须到达学员端，才能保证其本地存档同步清理；
     //   挑战是否可进入另由 _chOpenLocked 拦截，两者互不干扰。
-    const lv = _roundLevels(doc, cur.id)
+    const lv = _roundLevels(doc, curId)
     this._chResets = lv.chResets
     this._chResetModes = lv.chResetModes
     try { localStorage.setItem('eq_cloud_cache', txt) } catch (e) { /* ignore */ }
