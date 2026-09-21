@@ -49,8 +49,15 @@ const CHALLENGE_DIFF_PLAN = [
 const CHALLENGE_TEST_PLAN = [10, 7, 3]
 
 // v89：当前学员所属分部门（'dining/bar' 等 slug）；管理员/其他部门返回 ''（=不限部门，看全库）
+// v97：管理员跟随练习页「题目部门」切片 —— 切艳中即以艳中视角看挑战（标题/题库/营次/进度整体切换），
+//      切「全部部门」= 全库视角（与旧行为一致）。非管理员仍按本人 session 部门，切片对其无效。
 function chDeptKey() {
   try {
+    if (typeof Store !== 'undefined' && Store.isAdmin && Store.isAdmin()
+        && typeof PRACTICE_DEPT_TABS !== 'undefined' && typeof practiceDept !== 'undefined'
+        && PRACTICE_DEPT_TABS.indexOf(practiceDept) >= 0) {
+      return practiceDept
+    }
     if (typeof sessionDeptSlug === 'function') return sessionDeptSlug()
   } catch (e) {}
   return ''
@@ -84,9 +91,10 @@ function chBankIdSet() {
 }
 
 // v89：挑战标题 —— 有分部门时用「<部门>七天英文挑战」，否则回退通用标题
+// v97：「all」（通用视角）也没有部门名 → 回落通用标题（避免出现「all七天英文挑战」）
 function chDeptName() {
   const k = chDeptKey()
-  if (!k) return ''
+  if (!k || k === 'all') return ''
   try { return (typeof deptSlugName === 'function' && deptSlugName(k)) || '' } catch (e) { return '' }
 }
 function chTitleText() {
@@ -112,9 +120,33 @@ function chRoundSlug(id) {
   const s = String(id || '第一期').trim()
   return s === 'r1' ? '第一期' : s
 }
+// v97：按当前视角部门（chDeptKey()）实时解析「本部门当前营次」记录。
+// 云端侧信道 _chRoundCurId/_chRoundCurName 是 _getDoc 拉取时按登录部门（CloudSync._deptSlug）算好的缓存；
+// 管理员切换练习部门切片后 chDeptKey() 立即变化，若仍读侧信道会出现「标题已切艳中、营次还停在别队」的错位。
+// 此处用与云端 _roundCurrentForDept 完全相同的四级口径在本地重算，学员端结果与侧信道一致（同一套函数、同一部门）。
+function chRoundRecForDept() {
+  try {
+    if (typeof CloudSync === 'undefined' || !Array.isArray(CloudSync._chRounds) || !CloudSync._chRounds.length) return null
+    if (typeof roundDeptMatch !== 'function' || typeof roundOpenState !== 'function') return null
+    const k = chDeptKey()
+    const arr = CloudSync._chRounds
+    const cur = arr.find(r => r && r.id === CloudSync._chRoundCurId)
+    if (cur && roundDeptMatch(cur, k)) return cur                                                        // ① 指针适用本部门
+    for (let i = arr.length - 1; i >= 0; i--) {                                                          // ② 本部门已开放
+      if (roundDeptMatch(arr[i], k) && roundOpenState(arr[i], Date.now()).on) return arr[i]
+    }
+    for (let i = arr.length - 1; i >= 0; i--) {                                                          // ③ 本部门最新一期
+      if (roundDeptMatch(arr[i], k)) return arr[i]
+    }
+    return k ? null : cur                                                                                // ④ 无适用营次
+  } catch (e) { return null }
+}
 // 学员端当前营次 id（'' 表示云端未拉取到营次信息 → 视同第一期）
+// v97：优先取按视角部门实时解析的营次（管理员切片联动），无营次数据时回落云端侧信道
 function chCurrentRound() {
   try {
+    const rec = chRoundRecForDept()
+    if (rec && rec.id) return String(rec.id)
     const id = (typeof CloudSync !== 'undefined' && CloudSync._chRoundCurId)
     return id ? String(id) : '第一期'
   } catch (e) { return '第一期' }
@@ -462,6 +494,12 @@ function chStageUnlocked(day, si) {
 function chOpenLocked() {
   try {
     if (typeof CloudSync === 'undefined') return true
+    // v97：按视角部门实时结算排期锁（管理员切片联动）；无营次数据时回退侧信道/手动开关口径
+    if (typeof roundOpenState === 'function' && Array.isArray(CloudSync._chRounds) && CloudSync._chRounds.length) {
+      const rec = chRoundRecForDept()
+      if (rec) return roundOpenState(rec, Date.now()).locked
+      if (chDeptKey()) return true
+    }
     // 侧信道带 _chOpenLocked 时以它为准（排期结算结果）；否则回退 v87 的手动开关口径
     if (typeof CloudSync._chOpenLocked === 'boolean') return CloudSync._chOpenLocked
     return CloudSync._chOpen !== true
@@ -475,29 +513,38 @@ function chOpenEverOpened() {
     return st.everOpen || (Number(CloudSync._chOpenAt) || 0) > 0
   } catch (e) { return false }
 }
-// 当前营次的排期态：优先用云端侧信道结算结果，缺失时按本地兜底（无排期信息 → 手动值）
+// 当前营次的排期态：优先按视角部门实时解析（v97 管理员切片联动），缺失时按本地兜底（无排期信息 → 手动值）
 function chRoundOpenState() {
   try {
     if (typeof CloudSync === 'undefined') return { state: 'closed', on: false, locked: true, everOpen: false }
     if (typeof roundOpenState === 'function' && Array.isArray(CloudSync._chRounds)) {
-      const rec = CloudSync._chRounds.find(r => r.id === CloudSync._chRoundCurId)
+      const rec = chRoundRecForDept()
       if (rec) return roundOpenState(rec, Date.now())
+      if (chDeptKey() && CloudSync._chRounds.length) return { state: 'closed', on: false, locked: true, everOpen: false }
     }
     const at = Number(CloudSync._chOpenAt) || 0
     const on = CloudSync._chOpen === true
     return { state: on ? 'open' : (at > 0 ? 'ended' : 'closed'), on, locked: !on, everOpen: on || at > 0 }
   } catch (e) { return { state: 'closed', on: false, locked: true, everOpen: false } }
 }
-// v89：本部门是否压根没有适用营次（云端侧信道 _chNoRound）→ 学员端显示「本部门暂无开营」
+// v89：本部门是否压根没有适用营次 → 显示「本部门暂无开营」
+// v97：本地实时判定（管理员切片立即生效）；无营次数据时回退云端侧信道 _chNoRound
 function chNoRoundForDept() {
   try {
     if (typeof CloudSync === 'undefined') return false
+    if (typeof roundDeptMatch === 'function' && Array.isArray(CloudSync._chRounds) && CloudSync._chRounds.length) {
+      const k = chDeptKey()
+      if (k) return !chRoundRecForDept()
+      return false      // 全库视角（管理员「全部部门」/无部门）指针必命中，不存在「无营次」
+    }
     return CloudSync._chNoRound === true
   } catch (e) { return false }
 }
-// 当前营次名称（横幅显示，如「第一期」）；云端未拉取时兜底「第一期」
+// 当前营次名称（横幅显示，如「第一期」）；优先按视角部门实时解析，云端未拉取时兜底「第一期」
 function chRoundName() {
   try {
+    const rec = chRoundRecForDept()
+    if (rec && rec.name) return String(rec.name)
     if (typeof CloudSync !== 'undefined' && CloudSync._chRoundCurName) return String(CloudSync._chRoundCurName)
   } catch (e) {}
   return '第一期'
@@ -505,13 +552,18 @@ function chRoundName() {
 // 当前营次是否有起止时间（横幅提示用）
 function chRoundHasSchedule() {
   try {
-    if (typeof CloudSync === 'undefined' || !Array.isArray(CloudSync._chRounds)) return false
-    const rec = CloudSync._chRounds.find(r => r.id === CloudSync._chRoundCurId)
-    return !!(rec && ((Number(rec.startAt) || 0) > 0 || (Number(rec.endAt) || 0) > 0))
+    const rec = chRoundRecForDept()
+    if (rec) return !!((Number(rec.startAt) || 0) > 0 || (Number(rec.endAt) || 0) > 0)
+    if (typeof CloudSync !== 'undefined' && Array.isArray(CloudSync._chRounds)) {
+      const r = CloudSync._chRounds.find(x => x && x.id === CloudSync._chRoundCurId)
+      return !!(r && ((Number(r.startAt) || 0) > 0 || (Number(r.endAt) || 0) > 0))
+    }
+    return false
   } catch (e) { return false }
 }
 // v76 期末考试门禁：仅 Day7 的水平测试需当前营次开放考试（营次 examOpen 或排期命中）；
 // Day1 摸底测试不受影响；已完成的期末考试仍显示成绩。云端不可达/未拉取时视为未开放。
+// v97：营次记录按视角部门实时解析（管理员切片联动）
 function chIsFinalExam(day, si) {
   return day === 7 && challengeKindOf(day, si) === 'test'
 }
@@ -520,8 +572,9 @@ function chFinalExamLocked() {
   try {
     if (typeof CloudSync === 'undefined') return true
     if (typeof roundExamState === 'function' && Array.isArray(CloudSync._chRounds)) {
-      const rec = CloudSync._chRounds.find(r => r.id === CloudSync._chRoundCurId)
+      const rec = chRoundRecForDept()
       if (rec) return roundExamState(rec, Date.now()).locked
+      if (chDeptKey() && CloudSync._chRounds.length) return true
     }
     return CloudSync._chExamOpen !== true
   } catch (e) { return true }
@@ -812,7 +865,8 @@ function renderChallenge() {
 function chRoundMetaText() {
   try {
     if (typeof CloudSync === 'undefined' || !Array.isArray(CloudSync._chRounds)) return ''
-    const rec = CloudSync._chRounds.find(r => r.id === CloudSync._chRoundCurId)
+    // v97：按视角部门实时解析（管理员切片联动）
+    const rec = chRoundRecForDept()
     if (!rec) return ''
     const s = Number(rec.startAt) || 0
     const e = Number(rec.endAt) || 0

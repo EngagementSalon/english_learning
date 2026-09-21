@@ -353,6 +353,9 @@ const call = (sb, expr) => vm.runInContext(expr, sb)
     vm.runInContext(`const CHALLENGE_SEED = 20260915; let CloudSync;`, seedSb)
     vm.runInContext(extractFn(CH, 'challengeUid'), seedSb)
     vm.runInContext(extractFn(CH, 'chRoundSlug'), seedSb)
+    // v97：chCurrentRound 新增依赖 chRoundRecForDept（→ chDeptKey），注入清单同步
+    vm.runInContext(extractFn(CH, 'chDeptKey'), seedSb)
+    vm.runInContext(extractFn(CH, 'chRoundRecForDept'), seedSb)
     vm.runInContext(extractFn(CH, 'chCurrentRound'), seedSb)
     vm.runInContext(extractFn(CH, 'chUserSeed'), seedSb)
     // 无云端营次 → chCurrentRound 回落 '第一期' → 种子就是 v87 的 FNV-1a(username) + SEED
@@ -373,6 +376,8 @@ const call = (sb, expr) => vm.runInContext(expr, sb)
     vm.runInContext(`const CHALLENGE_SEED = 20260915; let CloudSync = { _chRoundCurId: '第二期' };`, seedSb2)
     vm.runInContext(extractFn(CH, 'challengeUid'), seedSb2)
     vm.runInContext(extractFn(CH, 'chRoundSlug'), seedSb2)
+    vm.runInContext(extractFn(CH, 'chDeptKey'), seedSb2)
+    vm.runInContext(extractFn(CH, 'chRoundRecForDept'), seedSb2)
     vm.runInContext(extractFn(CH, 'chCurrentRound'), seedSb2)
     vm.runInContext(extractFn(CH, 'chUserSeed'), seedSb2)
     const sSecond = call(seedSb2, `chUserSeed()`)
@@ -389,13 +394,18 @@ const call = (sb, expr) => vm.runInContext(expr, sb)
     vm.runInContext(`const CHALLENGE_SEED = 20260915; let CloudSync;`, seedSb3)
     vm.runInContext(extractFn(CH, 'challengeUid'), seedSb3)
     vm.runInContext(extractFn(CH, 'chRoundSlug'), seedSb3)
+    vm.runInContext(extractFn(CH, 'chDeptKey'), seedSb3)
+    vm.runInContext(extractFn(CH, 'chRoundRecForDept'), seedSb3)
     vm.runInContext(extractFn(CH, 'chCurrentRound'), seedSb3)
     vm.runInContext(extractFn(CH, 'chUserSeed'), seedSb3)
     assert('不同学员种子不同（每人专属题序）', call(seedSb3, `chUserSeed()`) !== sFirst, '')
 
     // 门禁三态文案
     assert('chOpenLocked 优先取侧信道 _chOpenLocked', /_chOpenLocked/.test(extractFn(CH, 'chOpenLocked')))
-    assert('chRoundOpenState 从 _chRounds + _chRoundCurId 结算', /_chRounds/.test(extractFn(CH, 'chRoundOpenState')) && /_chRoundCurId/.test(extractFn(CH, 'chRoundOpenState')))
+    // v97：结算入口改为按视角部门实时解析（chRoundRecForDept），底层仍从 _chRounds + _chRoundCurId 结算
+    assert('chRoundOpenState 从 _chRounds + _chRoundCurId 结算（v97 经 chRoundRecForDept）',
+      /_chRounds/.test(extractFn(CH, 'chRoundOpenState')) && /chRoundRecForDept/.test(extractFn(CH, 'chRoundOpenState')) &&
+      /_chRounds/.test(extractFn(CH, 'chRoundRecForDept')) && /_chRoundCurId/.test(extractFn(CH, 'chRoundRecForDept')))
     assert('upcoming 时 chOpenEverOpened 恒 false（文案为「未开放」而非「已结束」）', /upcoming/.test(extractFn(CH, 'chOpenEverOpened')))
     assert('chFinalExamLocked 按营次 roundExamState 结算', /roundExamState|examOpen/.test(extractFn(CH, 'chFinalExamLocked')))
     assert('chReset 标记键含营次（各期只处理一次自己的重置）', /eq_ch_reset_seen_.*rnd|'eq_ch_reset_seen_' \+ uid \+ '_' \+ rnd/.test(CH))

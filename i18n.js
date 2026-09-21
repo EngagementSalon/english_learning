@@ -46,7 +46,7 @@ const I18N = {
     },
     // v92：管理员练习页部门切片
     practiceDeptLabel: '题目部门',
-    practiceDeptAdminHint: '管理员可切换部门，按该部门视角抽题练习。',
+    practiceDeptAdminHint: '管理员可切换部门：练习抽题与七天挑战（标题、题库、营次、进度）都会按该部门视角显示。',
     practiceDeptCount: (n) => `${n} 题可练`,
     roundDeptLabel: '适用部门', roundDeptAll: '全部部门',
     idxDining: '饮食部', idxRooms: '房务部', idxOther: '其他部门', idxAll: '全部',
@@ -79,7 +79,7 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     // 线下课 / 班级 / 作业 / 测评
     navCourse: '📖 线下课',
     // 标帜餐厅七天英文挑战（v68）
-    chTitle: '标帜餐厅七天英文挑战',
+    chTitle: '七天英文挑战',
     chIntro: '第 1 天：水平测试 20 题（每次随机，仅一次）→ 巩固练习 10 题；第 2-6 天：每日练习 30 题；第 7 天：巩固练习 10 题 → 水平测试 20 题（每次随机，仅一次）。全部选自「标帜餐厅常见词汇」题库，每天只能解锁新的一天，难度逐日递增；练习错题要当天刷到全对，前一天的错题还会在第二天额外复习。',
     chPoolInfo: (n) => `题库共 ${n} 题 · 每日 30 题（共 210 题）· 难度逐日递增 · 错题次日复习 · 每人题目随机不同 · 考题出自本人已刷题目`,
     chEntryHint: (d) => `已完成 ${d}/7 天 · 每日 30 题 · 点击进入`,
@@ -803,7 +803,7 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     },
     // v92：practice-page department switch (admin only)
     practiceDeptLabel: 'Question Dept',
-    practiceDeptAdminHint: 'As admin you can switch departments to practise that department\u2019s view.',
+    practiceDeptAdminHint: 'As admin, switching the dept changes both practice questions and the challenge view (title, bank, round, progress).',
     practiceDeptCount: (n) => `${n} questions`,
     roundDeptLabel: 'Applies to', roundDeptAll: 'All Departments',
     idxDining: 'F&B', idxRooms: 'Rooms', idxOther: 'Other', idxAll: 'All',
@@ -835,7 +835,7 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     // Courses / classes / homework / assessments
     navCourse: '📖 Courses',
     // Signature Restaurant 7-Day Challenge (v68)
-    chTitle: 'Signature Restaurant 7-Day Challenge',
+    chTitle: '7-Day English Challenge',
     chIntro: 'Day 1: a 20-question placement test (randomized each attempt, one attempt) followed by 10 consolidation questions; Days 2-6: 30 daily practice questions; Day 7: 10 consolidation questions followed by the 20-question placement test (randomized each attempt, one attempt). All drawn from the "Signature Restaurant Vocabulary" bank — only one new day unlocks per day and difficulty rises daily; you must retry every missed question until all correct the same day, and yesterday\'s wrong questions come back as extra review the next day.',
     chPoolInfo: (n) => `Bank of ${n} questions · 30 per day (210 total) · difficulty rises daily · wrong answers reviewed next day · questions vary per person · exam questions come from your practiced set`,
     chEntryHint: (d) => `${d}/7 days done · 30 questions per day · tap to open`,
