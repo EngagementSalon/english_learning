@@ -36,6 +36,12 @@ function makeSandbox(pre) {
   }
   vm.createContext(sb)
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'bank-data.js'), 'utf-8'), sb)
+  // v89：DEPT_SUB_SLUGS 定义在 app.js，但 store.getQuestionsByDept 的大部门前缀分支依赖它。
+  // 不注入会让大部门 key（'dining'）走兜底分支 → 四分队题全丢（假失败）。
+  vm.runInContext(`const DEPT_SUB_SLUGS = {
+  dining: { '标帜餐厅': 'sig', '艳中餐厅': 'yan', '酒吧团队': 'bar', '客房送餐': 'ird' },
+  rooms: { '迎宾前台': 'fo', '礼宾部': 'concierge', '随时随需': 'ww', '客房造型': 'styling', '健身及水疗中心': 'spa' },
+}`, sb)
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'store.js'), 'utf-8'), sb)
   return sb
 }
@@ -57,7 +63,11 @@ function makeSandbox(pre) {
       JSON.stringify(['listen', 'single', 'voicematch'].map(ty => ty + ':' + q12.filter(q => q.type === ty).length)))
     const ids = q12.map(q => q.id)
     assert('id 区间 8001-8684 且唯一', Math.min(...ids) === 8001 && Math.max(...ids) === 8684 && new Set(ids).size === 684)
-    assert('dept 全部 dining（餐饮部题库下）', q12.every(q => q.dept === 'dining'))
+    assert('dept 全部为饮食部分部门 slug（v89 起）', q12.every(q => ['dining/sig', 'dining/yan', 'dining/bar', 'dining/ird'].indexOf(q.dept) >= 0),
+      JSON.stringify([...new Set(q12.map(q => q.dept))]))
+    assert('dept 无遗留大部门值 dining/rooms/all', q12.every(q => ['dining', 'rooms', 'all', ''].indexOf(q.dept) < 0))
+    assert('标帜餐厅(dining/sig) 是分类12 主体', q12.filter(q => q.dept === 'dining/sig').length > q12.length * 0.7,
+      `sig=${q12.filter(q => q.dept === 'dining/sig').length}/${q12.length}`)
     assert('全部 4 选项 + answer [0] + 无重复选项', q12.every(q => q.options.length === 4 && JSON.stringify(q.answer) === '[0]' && new Set(q.options).size === 4))
     assert('全部题干英文、选项中文（v71 后无英文选项题）', q12.every(q => /^[\x00-\x7F]/.test(q.question) && q.options.every(o => /[\u4e00-\u9fff]/.test(o))),
       '存在题干非英文或选项非中文的题')
@@ -78,8 +88,14 @@ function makeSandbox(pre) {
     const cats = Store.getCategories()
     assert('分类下拉含 id=12', cats.some(c => Number(c.id) === 12 && c.name === '标帜餐厅常见词汇'), JSON.stringify(cats.map(c => c.id)))
     assert('localStorage 未被种子污染', (JSON.parse(sb.localStorage.getItem('eq_questions')) || []).length === 0)
+    // v89：分类12 已按四分队打标。大部门 key 'dining' 走前缀匹配 → 应拿到全部分类12 题。
     const cat12q = Store.queryQuestions({ category_id: 12, dept: 'dining' })
-    assert('饮食部学员按分类 12 抽到 684 题', cat12q.total === 684, `got ${cat12q.total}`)
+    assert('饮食部（大部门）按分类 12 拿到全部 684 题', cat12q.total === 684, `got ${cat12q.total}`)
+    // 分部门 slug 只拿自己那部分
+    const sigQ = Store.queryQuestions({ category_id: 12, dept: 'dining/sig' })
+    const sigN = seeds.filter(q => q.dept === 'dining/sig').length
+    assert('标帜餐厅按分类 12 只拿本分队题', sigQ.total === sigN, `got ${sigQ.total} 期望 ${sigN}`)
+    assert('标帜餐厅分类12 题数 < 全量（确已分流）', sigN < 684, `sig=${sigN}`)
     const roomsQ = Store.queryQuestions({ category_id: 12, dept: 'rooms' })
     assert('房务部学员按分类 12 抽到 0 题', roomsQ.total === 0, `got ${roomsQ.total}`)
     // 练习页传字符串分类 id（startPractice 场景）

@@ -34,6 +34,12 @@ const sandbox = {
 vm.createContext(sandbox)
 
 vm.runInContext(fs.readFileSync(path.join(__dirname, 'bank-data.js'), 'utf-8'), sandbox)
+// v89：DEPT_SUB_SLUGS 定义在 app.js，但 store.getQuestionsByDept 的大部门分支依赖它。
+// 不在沙箱注入会让大部门 key 走兜底分支，四分队题全部丢失（假失败）。
+vm.runInContext(`const DEPT_SUB_SLUGS = {
+  dining: { '标帜餐厅': 'sig', '艳中餐厅': 'yan', '酒吧团队': 'bar', '客房送餐': 'ird' },
+  rooms: { '迎宾前台': 'fo', '礼宾部': 'concierge', '随时随需': 'ww', '客房造型': 'styling', '健身及水疗中心': 'spa' },
+}`, sandbox)
 vm.runInContext(fs.readFileSync(path.join(__dirname, 'store.js'), 'utf-8'), sandbox)
 
 const Store = vm.runInContext('Store', sandbox)
@@ -46,7 +52,11 @@ Store.init()
   console.log('\n🧪 分类进度按部门 + 管理页精确过滤测试')
 
   const allQs = Store.getQuestions()
-  const diningQs = allQs.filter(q => q.dept === 'dining')
+  // v89：题目已细到分部门 slug（dining/sig 等）。diningQs = 饮食部「大部门口径」全集（四分队），
+  // sigQs = 标帜餐厅专属。凡涉及精确 dept 的断言用 slug，涉及学员/统计口径的用大部门前缀。
+  const isDining = q => { const d = q.dept || ''; return d === 'dining' || d.indexOf('dining/') === 0 }
+  const diningQs = allQs.filter(isDining)
+  const sigQs = allQs.filter(q => q.dept === 'dining/sig')
   const roomsQs = allQs.filter(q => q.dept === 'rooms')
   const allDeptQs = allQs.filter(q => q.dept === 'all')
 
@@ -61,7 +71,7 @@ Store.init()
   const cat1Dining = sDining.categoryStats.find(c => c.id === 1)
   assert('getStats(dining) 分类1 = dining 分类1 题数', cat1Dining.totalQuestions === diningQs.filter(q => q.category_id === 1).length, `got ${cat1Dining.totalQuestions}`)
   const cat12Dining = sDining.categoryStats.find(c => c.id === 12)
-  assert('getStats(dining) 分类12 = dining 分类12 题数（标帜餐厅词汇全 dining）', cat12Dining && cat12Dining.totalQuestions === diningQs.filter(q => q.category_id === 12).length,
+  assert('getStats(dining) 分类12 = dining 分类12 题数（标帜餐厅词汇主体入库）', cat12Dining && cat12Dining.totalQuestions === diningQs.filter(q => q.category_id === 12).length,
     `got ${cat12Dining && cat12Dining.totalQuestions} 期望 ${diningQs.filter(q => q.category_id === 12).length}`)
 
   const sRooms = Store.getStats('rooms')
@@ -99,16 +109,20 @@ Store.init()
 
   // 3. queryQuestions deptExact（管理页 tab 用）
   console.log('\n3️⃣  queryQuestions deptExact')
-  const { total: tDining } = Store.queryQuestions({ deptExact: 'dining' })
-  assert('deptExact=dining 只含 dining 题', tDining === diningQs.length, `got ${tDining}`)
+  // v89：管理页 tab 已细到 slug，deptExact 传 slug 精确匹配
+  const { total: tSig } = Store.queryQuestions({ deptExact: 'dining/sig' })
+  assert('deptExact=dining/sig 只含标帜餐厅题', tSig === sigQs.length, `got ${tSig}`)
   const { total: tRooms } = Store.queryQuestions({ deptExact: 'rooms' })
   assert('deptExact=rooms 只含 rooms 题', tRooms === roomsQs.length, `got ${tRooms}`)
   const { total: tAll } = Store.queryQuestions({ deptExact: 'all' })
   assert('deptExact=all 只含 all 题', tAll === allDeptQs.length, `got ${tAll}`)
-  const { list: lDining } = Store.queryQuestions({ deptExact: 'dining', category_id: 1 })
-  assert('deptExact=dining + 分类1 组合过滤', lDining.every(q => q.dept === 'dining' && q.category_id === 1))
-  const { total: tDiningPaged } = Store.queryQuestions({ deptExact: 'dining', page: 1, pageSize: 10 })
-  assert('deptExact=dining 分页生效', tDiningPaged === diningQs.length)
+  const { list: lSig } = Store.queryQuestions({ deptExact: 'dining/sig', category_id: 1 })
+  assert('deptExact=dining/sig + 分类1 组合过滤', lSig.every(q => q.dept === 'dining/sig' && q.category_id === 1))
+  const { total: tSigPaged } = Store.queryQuestions({ deptExact: 'dining/sig', page: 1, pageSize: 10 })
+  assert('deptExact=dining/sig 分页生效', tSigPaged === sigQs.length)
+  // 大部门 key 不该被当作精确值命中（已无 dept='dining' 的题）
+  const { total: tLegacyDining } = Store.queryQuestions({ deptExact: 'dining' })
+  assert('deptExact=dining（旧大部门值）已无题', tLegacyDining === 0, `got ${tLegacyDining}`)
 
   // 4. 旧逻辑回归：dept 学员语义不受影响
   console.log('\n4️⃣  回归：学员语义 dept 筛选')

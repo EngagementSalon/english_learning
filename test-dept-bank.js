@@ -35,6 +35,12 @@ vm.createContext(sandbox)
 
 // 加载 bank-data.js → BANK
 vm.runInContext(fs.readFileSync(path.join(__dirname, 'bank-data.js'), 'utf-8'), sandbox)
+// v89：DEPT_SUB_SLUGS 定义在 app.js，但 store.getQuestionsByDept 的大部门分支依赖它。
+// 必须在本沙箱注入，否则大部门 key 会走兜底分支，四分队题全部丢失（假失败）。
+vm.runInContext(`const DEPT_SUB_SLUGS = {
+  dining: { '标帜餐厅': 'sig', '艳中餐厅': 'yan', '酒吧团队': 'bar', '客房送餐': 'ird' },
+  rooms: { '迎宾前台': 'fo', '礼宾部': 'concierge', '随时随需': 'ww', '客房造型': 'styling', '健身及水疗中心': 'spa' },
+}`, sandbox)
 // 加载 store.js → Store
 vm.runInContext(fs.readFileSync(path.join(__dirname, 'store.js'), 'utf-8'), sandbox)
 
@@ -49,7 +55,7 @@ Store.init()
 ;(async () => {
   console.log('\n🧪 部门题库筛选测试')
 
-  // 1. 验证 BANK 版本 = 8
+  // 1. 验证 BANK 版本 = 9
   console.log('\n1️⃣  题库版本')
   const bankVer = BANK.version
   assert('BANK.version = 9', bankVer === 9, `got ${bankVer}`)
@@ -60,24 +66,44 @@ Store.init()
   assert('总题数 > 500', allQs.length > 500, `got ${allQs.length}`)
   const withDept = allQs.filter(q => q.dept)
   assert('所有题目有 dept', withDept.length === allQs.length, `${withDept.length}/${allQs.length}`)
-  
-  const diningQs = allQs.filter(q => q.dept === 'dining')
-  const roomsQs = allQs.filter(q => q.dept === 'rooms')
-  const allDeptQs = allQs.filter(q => q.dept === 'all')
-  assert('饮食部题目 > 0', diningQs.length > 0, `got ${diningQs.length}`)
+
+  // v89：题目已细到分部门 slug（dining/sig 等），大部门口径按前缀判断
+  const isDining = q => {
+    const d = q.dept || ''
+    return d === 'dining' || d.indexOf('dining/') === 0
+  }
+  const diningQs = allQs.filter(isDining)
+  const roomsQs = allQs.filter(q => q.dept === 'rooms' || (q.dept || '').indexOf('rooms/') === 0)
+  const allDeptQs = allQs.filter(q => !q.dept || q.dept === 'all')
+  const sigQs = allQs.filter(q => q.dept === 'dining/sig')
+  assert('饮食部题目 > 0（含四分队 slug）', diningQs.length > 0, `got ${diningQs.length}`)
   assert('房务部题目 = 0（暂时为空）', roomsQs.length === 0, `got ${roomsQs.length}`)
   assert('通用题目 > 0', allDeptQs.length > 0, `got ${allDeptQs.length}`)
+  assert('标帜餐厅(sig) 有专属题', sigQs.length > 0, `got ${sigQs.length}`)
+  assert('无遗留 dept=\'dining\' 大部门题（已细到 slug）', allQs.filter(q => q.dept === 'dining').length === 0)
+  assert('题目 dept 全部是已知 slug 或 all',
+    allQs.every(q => ['all', 'dining/sig', 'dining/yan', 'dining/bar', 'dining/ird', 'rooms'].indexOf(q.dept) >= 0),
+    JSON.stringify([...new Set(allQs.map(q => q.dept))]))
 
-  // 3. 部门筛选：dining 应看到 dining + all
+  // 3. 部门筛选：大部门 key 'dining' 应看到四分队 + 通用
   console.log('\n3️⃣  部门筛选')
   const diningView = Store.getQuestionsByDept('dining')
-  assert('饮食部看到 dining+all', diningView.length === diningQs.length + allDeptQs.length, `got ${diningView.length}`)
-  assert('饮食部看不到 rooms', diningView.every(q => q.dept !== 'rooms'))
+  assert('饮食部大部门 key 看到四分队+通用', diningView.length === diningQs.length + allDeptQs.length, `got ${diningView.length} 期望 ${diningQs.length + allDeptQs.length}`)
+  assert('饮食部看不到 rooms', diningView.every(q => (q.dept || '').indexOf('rooms') < 0))
+
+  // 3b. 分部门 slug 只看自己 + 大部门自身 + 通用
+  const sigView = Store.getQuestionsByDept('dining/sig')
+  assert('标帜餐厅 slug 看不到艳中题', sigView.every(q => q.dept !== 'dining/yan'))
+  assert('标帜餐厅 slug 看不到酒吧题', sigView.every(q => q.dept !== 'dining/bar'))
+  assert('标帜餐厅 slug = sig + 通用', sigView.length === sigQs.length + allDeptQs.length, `got ${sigView.length}`)
+  const yanView = Store.getQuestionsByDept('dining/yan')
+  assert('艳中餐厅 slug 有题', yanView.length > allDeptQs.length, `got ${yanView.length}`)
+  assert('艳中 slug 看不到标帜题', yanView.every(q => q.dept !== 'dining/sig'))
 
   // 4. 房务部筛选
   const roomsView = Store.getQuestionsByDept('rooms')
   assert('房务部看到 rooms+all', roomsView.length === roomsQs.length + allDeptQs.length, `got ${roomsView.length}`)
-  assert('房务部看不到 dining', roomsView.every(q => q.dept !== 'dining'))
+  assert('房务部看不到 dining 任何分队', roomsView.every(q => (q.dept || '').indexOf('dining') < 0))
 
   // 5. 其他部门看到全部
   const otherView = Store.getQuestionsByDept('other')

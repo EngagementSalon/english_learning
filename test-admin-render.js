@@ -62,31 +62,42 @@ const Store = vm.runInContext('Store', sandbox)
 if (!Store) { console.error('Store missing!'); process.exit(1) }
 
 ;(async () => {
-  console.log('\n🧪 管理页三 Tab + 看板分类区块渲染测试')
+  console.log('\n🧪 管理页题库 Tab（v89 六 tab: 餐饮四分队+房务部+通用） + 看板分类区块渲染测试')
 
   const allQs = Store.getQuestions()
-  const diningN = allQs.filter(q => q.dept === 'dining').length
-  const roomsN = allQs.filter(q => q.dept === 'rooms').length
-  const allN = allQs.filter(q => q.dept === 'all').length
-  console.log(`  题库分布: dining=${diningN} rooms=${roomsN} all=${allN}`)
+  // v89：题库 tab 已细到分部门 slug，计数按 adminDeptSetOf 的集合口径
+  const tabs = vm.runInContext('ADMIN_DEPT_TABS', sandbox)
+  const setOf = tab => vm.runInContext(`JSON.stringify(adminDeptSetOf(${JSON.stringify(tab)}))`, sandbox)
+  const countOf = tab => {
+    const set = JSON.parse(setOf(tab))
+    return allQs.filter(q => set.indexOf(q.dept || 'all') >= 0).length
+  }
+  const counts = {}
+  tabs.forEach(k => { counts[k] = countOf(k) })
+  console.log('  tab 列表:', JSON.stringify(tabs))
+  console.log('  各 tab 计数:', JSON.stringify(counts))
 
   // 管理员身份
   Store.getSession = () => ({ role: 'admin', dept: '' })
   Store.getUser = () => ({ name: 'admin', dept: '' })
 
-  // 1. renderAdmin → 4 个 tab + 正确计数
+  // 1. renderAdmin → 6 个 tab + 正确计数 + 默认落点
   console.log('\n1️⃣  renderAdmin 渲染')
   vm.runInContext('renderAdmin()', sandbox)
   const shell = getEl('page-admin').innerHTML
-  assert('包含 饮食部题库 tab', shell.includes('bankDining') || shell.includes('饮食部题库'))
-  assert('包含 房务部题库 tab', shell.includes('bankRooms') || shell.includes('房务部题库'))
-  assert('包含 通用题库 tab', shell.includes('bankGeneral') || shell.includes('通用题库'))
+  assert('tab 数量为 6', tabs.length === 6, `got ${tabs.length}`)
+  assert('默认 tab 落在 dining/sig（标帜餐厅）', vm.runInContext('adminTab', sandbox) === 'dining/sig', vm.runInContext('adminTab', sandbox))
+  tabs.forEach(k => {
+    const label = vm.runInContext(`adminTabLabel(${JSON.stringify(k)})`, sandbox)
+    assert(`含 tab「${label}」(${k})`, shell.includes(`switchAdminTab('${k}')`))
+  })
   assert('不包含 培训题库 tab（已并入饮食部）', !shell.includes('trainingBank') && !shell.includes('培训题库'))
-  assert('饮食部 tab 计数正确', shell.includes(`>${diningN}<`), `期望 ${diningN}`)
-  assert('房务部 tab 计数正确', shell.includes(`>${roomsN}<`), `期望 ${roomsN}`)
-  assert('通用 tab 计数正确', shell.includes(`>${allN}<`), `期望 ${allN}`)
+  tabs.forEach(k => {
+    assert(`tab ${k} 计数正确 (${counts[k]})`, shell.includes(`>${counts[k]}<`), `期望 ${counts[k]}`)
+  })
+  assert('各 tab 计数之和 > 0（题库非空）', Object.values(counts).some(n => n > 0))
 
-  // 2. 默认 tab 列表（dining）：只有 dining 题，且没有部门下拉
+  // 2. 默认 tab 列表（dining/sig）：只有本分部门题
   const body = getEl('adminTabBody').innerHTML
   assert('默认 tab 列表有题目', body.includes('<tr>'))
   assert('列表不含部门下拉', !body.includes('adminFilterDept'))
@@ -94,24 +105,34 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   const rowCount = (body.match(/<tr>/g) || []).length - 1 // 减去表头
   assert('默认展示 10 条', rowCount <= 10, `got ${rowCount}`)
 
-  // 3. 切换到房务部 tab
+  // 3. 切换到房务部 tab（v89 题库为空 → 显示暂无题目）
   console.log('\n2️⃣  切换 tab')
   vm.runInContext("switchAdminTab('rooms')", sandbox)
   const roomsBody = getEl('adminTabBody').innerHTML
   assert('房务部空题库显示暂无题目', roomsBody.includes('noQuestions') || roomsBody.includes('暂无题目'))
   const roomsShell = getEl('page-admin').innerHTML
-  assert('房务部 tab 高亮', roomsShell.includes("admin-tab active") )
+  assert('房务部 tab 高亮', roomsShell.includes("admin-tab active"))
+
+  // 3b. 逐个切换餐饮四分队 tab 均可渲染（不抛错）
+  ;['dining/yan', 'dining/bar', 'dining/ird'].forEach(k => {
+    vm.runInContext(`switchAdminTab(${JSON.stringify(k)})`, sandbox)
+    const h = getEl('adminTabBody').innerHTML
+    assert(`切到 ${k} 渲染不抛错且有内容`, h.length > 0, `len=${h.length}`)
+  })
 
   // 4. 切换到通用 tab
   vm.runInContext("switchAdminTab('all')", sandbox)
   const allBody = getEl('adminTabBody').innerHTML
   assert('通用 tab 有题目', allBody.includes('<tr>'))
 
-  // 5. 切回饮食部 + 搜索/分类筛选函数可用
-  vm.runInContext("switchAdminTab('dining')", sandbox)
+  // 5. 切回标帜餐厅 + 分类筛选函数可用（v89 后 tab 值是 slug，不再有 'dining' 大部门 tab）
+  vm.runInContext("switchAdminTab('dining/sig')", sandbox)
   vm.runInContext("adminFilterCat('1')", sandbox)
   const catBody = getEl('adminTabBody').innerHTML
-  assert('饮食部+分类1 筛选渲染', catBody.includes('<tr>'))
+  assert('标帜餐厅+分类1 筛选渲染', catBody.includes('<tr>'))
+  // 无 tab 状态残留（历史 bug：adminStates['dining'] 为 undefined 导致赋值抛错）
+  assert('adminStates 无遗留 dining 键', vm.runInContext("!adminStates['dining']", sandbox))
+  assert('adminStates 覆盖全部 tab', vm.runInContext('Object.keys(adminStates).length', sandbox) === tabs.length)
 
   // 6. 看板分类区块
   console.log('\n3️⃣  看板分类进度区块')
@@ -134,7 +155,7 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   const cat1Dining = Store.getStats('dining').categoryStats.find(c => c.id === 1).totalQuestions
   const cat12Dining = Store.getStats('dining').categoryStats.find(c => c.id === 12).totalQuestions
   assert('饮食部口径分类1题数正确', diningHtml.includes(`>${cat1Dining}${' '}`) || diningHtml.includes(`>${cat1Dining}<`), `期望 ${cat1Dining}`)
-  assert('饮食部口径分类12题数正确（标帜餐厅词汇全 dining）', diningHtml.includes(`>${cat12Dining}${' '}`) || diningHtml.includes(`>${cat12Dining}<`), `期望 ${cat12Dining}`)
+  assert('饮食部口径分类12题数正确（标帜餐厅词汇主体入库）', diningHtml.includes(`>${cat12Dining}${' '}`) || diningHtml.includes(`>${cat12Dining}<`), `期望 ${cat12Dining}`)
 
   console.log('\n' + (testFailed ? '❌ 部分测试失败' : '✅ 所有测试通过'))
   process.exit(testFailed ? 1 : 0)
