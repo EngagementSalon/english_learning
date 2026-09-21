@@ -3743,11 +3743,50 @@ function dashChStageWeight(day, kind) {
   if (typeof chLbStageWeight === 'function') return chLbStageWeight(day, kind)   // 优先复用 challenge.js 同口径实现
   return (Number(day) === 7 && kind === 'test') ? 3 : 1
 }
+// v94：营次是否「属于」管理员所选部门（看板营次筛选用）。
+// ⚠️ 不要复用 cloud-store 的 roundDeptMatch —— 那是**学员方向**（给定学员的 slug，判断某营次是否适用他）：
+//   roundDeptMatch(r, 'dining') 在 r.depts=['dining/sig'] 时返回 false，
+//   因为 r.depts 里没有字面量 'dining'。而管理员看板的语义是**筛选方向**：
+//   选了「饮食部」应当看到所有饮食部子部门的营次。两者方向相反，必须分开实现。
+// 规则：sel 为空 / 'all' → 全通过；营次未限定部门（depts 空）→ 全通过；
+//       营次 depts 含 sel → 通过；sel 是大部门 → 其任一子部门 slug 命中即通过；
+//       sel 是分部门 → 要求 depts 精确含该 slug（或含其大部门）。
+function dashRoundUnderDept(r, sel) {
+  const k = String(sel == null ? '' : sel)
+  if (!k || k === 'all') return true
+  const list = (r && Array.isArray(r.depts)) ? r.depts.filter(x => x) : []
+  if (!list.length) return true                    // 未限定部门 → 全部部门适用
+  if (list.indexOf(k) >= 0) return true
+  const major = k.split('/')[0]
+  const isSub = k.indexOf('/') >= 0
+  if (!isSub) {
+    // sel 是大部门（'dining'）→ 营次挂在任一子部门也算属于它
+    const hasSub = typeof DEPT_SUB_SLUGS !== 'undefined' && DEPT_SUB_SLUGS[major]
+    if (hasSub) {
+      const subs = Object.keys(DEPT_SUB_SLUGS[major]).map(s => major + '/' + DEPT_SUB_SLUGS[major][s])
+      if (list.some(d => subs.indexOf(d) >= 0)) return true
+    }
+  } else {
+    // ⚠️ sel 是分部门（'dining/sig'）→ 只比本 slug，**绝不能**展开同门兄弟
+    //    （否则选标帜餐厅会把艳中/酒吧的营次也列出来——正是 v94 要修的 bug）。
+    //    仅当营次挂的是其大部门整包时才算属于它。
+    if (list.indexOf(major) >= 0) return true
+  }
+  return false
+}
 function renderDashChallengeBlock(rows) {
   const el = document.getElementById('dashChallengeBlock')
   if (!el) return
-  // v88 营次筛选：'' = 当前营次；否则为指定营次 id。老的 chy 记录无 rd 字段 → 视同第一期（rd=''）。
-  const want = dashRoundView || dashRoundCurId()
+  // v94：营次列表必须按所选部门过滤——选了「标帜餐厅」就不该再看到「艳中餐厅第一期」。
+  // 用 dashRoundUnderDept（筛选方向，见该函数注释），不要用学员方向的 roundDeptMatch。
+  const rdAll = dashRoundList()
+  // 「全部」时不缩减；选定部门时只留属于该部门的营次（depts 为空 = 全部部门适用，仍保留）
+  const rdList = rdAll.filter(r => dashRoundUnderDept(r, dashChDept))
+  // v94：原 want 可能指向被筛掉的营次（如选标帜餐厅却停在「艳中餐厅第一期」）→ 回落到本部门当前营次
+  const wantRaw = dashRoundView || dashRoundCurId()
+  const want = (dashChDept === 'all' || rdList.some(r => r.id === wantRaw))
+    ? wantRaw
+    : ((rdList.length ? rdList[rdList.length - 1].id : '') || wantRaw)
   const wantSlug = dashRoundSlug(want)
   // 记录营次归一：'' / 'r1' / undefined 均视同第一期（v87 及更早的记录不带 rd 字段）
   const recSlug = x => dashRoundSlug((x && x.rd) || '')
@@ -3772,9 +3811,10 @@ function renderDashChallengeBlock(rows) {
       <span style="font-size:12px;color:#6b7280">${t('dashChDeptFilterLabel')}：</span>
       ${deptBarOptions.map(k => `<button class="btn btn-sm ${dashChDept === k ? 'btn-primary' : 'btn-ghost'}" style="padding:3px 10px;font-size:12px" onclick="dashChSetDept('${escAttr(k)}')">${escHtml(deptLabelOf(k))}</button>`).join('')}
     </div>`
-  const rdList = dashRoundList()
+  // 营次名（rdList 已按部门过滤，见函数开头 v94 段）
   const rdName = (rdList.find(r => r.id === want) || {}).name || (want === 'r1' ? '第一期' : want)
   // v88 营次筛选按钮组（多期并存时才有意义；单期时只显示提示行）
+  // v94：rdList 已按 dashChDept 过滤 → 切到某部门后只列该部门的营次
   const filterBar = rdList.length > 1
     ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
         <span style="font-size:12px;color:#6b7280">${t('dashRoundFilterLabel')}：</span>
