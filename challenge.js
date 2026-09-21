@@ -799,6 +799,10 @@ function renderChallenge() {
       <p class="form-hint" style="margin-bottom:8px">${t('chIntro')}</p>
       <p style="font-size:12px;color:#9ca3af;margin-bottom:12px">${t('chPoolInfo', bankN)}</p>
       ${chBankShort() ? `<div class="feedback" style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:12px;margin-bottom:10px">⚠️ ${t('chBankShortWarn', bankN, CHALLENGE_MIN_BANK)}</div>` : ''}
+      ${Store.isAdmin() ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <button class="btn btn-primary btn-sm" onclick="openImportModal(12,'${escAttr(chDeptKey() || 'all')}')">📤 ${t('chUploadBtn')}</button>
+        <span class="form-hint" style="margin:0">${t('chUploadHint')}</span>
+      </div>` : ''}
       <div>${rows}</div>
     </div>
   `

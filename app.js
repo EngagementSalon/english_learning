@@ -2474,6 +2474,8 @@ function saveEdit(id) {
   } else {
     Store.addQuestion(data)
   }
+  // v95：新增必入上传库（'u' 前缀）；编辑上传题同样 → 推送云端
+  if (!id || String(id).charAt(0) === 'u') pushUploadedBankSoon()
   document.getElementById('editModal').remove()
   renderAdminList()
 }
@@ -2481,6 +2483,7 @@ function saveEdit(id) {
 function adminDelete(id) {
   if (!confirm(t('confirmDeleteQuestion'))) return
   Store.deleteQuestion(id)
+  pushUploadedBankSoon()   // v95：删的是上传题时同步云端；删派生题时推送无害（全量替换）
   renderAdminList()
 }
 
@@ -2834,15 +2837,32 @@ function confirmImportRows() {
   // v89：上传时选定归属部门（分部门 slug / 大部门 / all），学员只看到本部门题
   const el2 = document.getElementById('importDept')
   const dept = (el2 && el2.value) || 'all'
-  const items = picked.map(r => ({ category_id: 1, dept: dept, type: r.q.type, difficulty: r.q.difficulty || r.est, question: r.q.question, options: r.q.options, answer: r.q.answer, explanation: r.q.explanation }))
+  // v95：栏目可选 —— cat 12 = 七天挑战抽题池（chBankQuestions 只收该栏目）
+  const elCat = document.getElementById('importCat')
+  const catId = Number(elCat && elCat.value) || 1
+  const items = picked.map(r => ({ category_id: catId, dept: dept, type: r.q.type, difficulty: r.q.difficulty || r.est, question: r.q.question, options: r.q.options, answer: r.q.answer, explanation: r.q.explanation }))
   const result = Store.batchImport(items)
   const el = document.getElementById('importResult')
-  if (el) el.innerHTML = `<div class="feedback correct"><strong>✅ ${t('impDoneTitle')}</strong><div class="explanation">${t('impDoneDetail', result.success, result.skipped || 0)} · ${t('deptLabel')}：${escHtml(adminTabLabel(dept))}</div></div>`
+  if (el) el.innerHTML = `<div class="feedback correct"><strong>✅ ${t('impDoneTitle')}</strong><div class="explanation">${t('impDoneDetail', result.success, result.skipped || 0)} · ${t('deptLabel')}：${escHtml(adminTabLabel(dept))} · ${t('impCatLabel')}：${escHtml(Store.getCategoryName(catId))}</div></div>`
+  // v95：上传库已变化 → 推送云端（学员端/其他设备下次拉取即见）
+  if (result.success > 0) pushUploadedBankSoon()
   setTimeout(() => {
     document.getElementById('importModal') && document.getElementById('importModal').remove()
     adminTab = dept   // 切到刚上传的题库 tab 直接展示
     renderAdminShell(); renderAdminList()
   }, 1600)
+}
+
+// v95：上传库（eq_uploaded）变化后推送云端 doc.upq。800ms 合并连续写入（批量导入只推一次）。
+// 学员端与其他管理设备经 CloudSync._getDoc 拉取路径自动吸收（Store.absorbCloudUploaded）。
+let _upqPushTimer = null
+function pushUploadedBankSoon() {
+  if (typeof CloudSync === 'undefined' || !CloudSync.setUploadedBank) return
+  if (_upqPushTimer) clearTimeout(_upqPushTimer)
+  _upqPushTimer = setTimeout(() => {
+    _upqPushTimer = null
+    try { CloudSync.setUploadedBank(Store._getUploaded()) } catch (e) { /* 静默：下次操作再推 */ }
+  }, 800)
 }
 function importReadFile(file, done) {
   const finish = done || (text => impParseAndPreview(text))
@@ -2866,7 +2886,20 @@ function importReadFile(file, done) {
 }
 
 // Admin: Import modal（v52：模板下载 + 文件/粘贴 + 预览确认）
-function openImportModal() {
+// v95：新增「题目栏目」下拉 —— 批量导入此前硬编码 category_id:1，而七天挑战抽题池只收
+// category 12（chBankQuestions），导致上传的题永远进不了挑战。现可选栏目；从挑战页/
+// 营次面板入口打开时默认选中「七天挑战题库」(cat 12)。presetCat/presetDept 均可省略。
+function openImportModal(presetCat, presetDept) {
+  const CH_BANK_CAT = 12
+  const cats = (typeof Store !== 'undefined' && Store.getCategories ? Store.getCategories() : [])
+    .slice().sort((a, b) => Number(a.id) - Number(b.id))
+  const selCat = Number(presetCat) || 1
+  const selDept = ADMIN_DEPT_TABS.indexOf(String(presetDept || '')) >= 0 ? String(presetDept) : adminTab
+  const catOpts = cats.map(c => {
+    const id = Number(c.id)
+    const label = id === CH_BANK_CAT ? (c.name + '（' + t('impChallengeTag') + '）') : c.name
+    return `<option value="${id}" ${id === selCat ? 'selected' : ''}>${escHtml(label)}</option>`
+  }).join('')
   const overlay = document.createElement('div')
   overlay.className = 'modal-overlay'
   overlay.style.display = 'flex'
@@ -2886,9 +2919,14 @@ function openImportModal() {
           <p class="form-hint" style="margin:6px 0 0">${t('impFileHint')}</p>
         </div>
         <div class="form-group">
+          <label>${t('impCatLabel')}</label>
+          <select id="importCat">${catOpts}</select>
+          <p class="form-hint" style="margin:4px 0 0">${t('impCatHint')}</p>
+        </div>
+        <div class="form-group">
           <label>${t('deptLabel')}</label>
           <select id="importDept">
-            ${ADMIN_DEPT_TABS.map(k => `<option value="${k}" ${adminTab === k ? 'selected' : ''}>${escHtml(adminTabLabel(k))}</option>`).join('')}
+            ${ADMIN_DEPT_TABS.map(k => `<option value="${k}" ${selDept === k ? 'selected' : ''}>${escHtml(adminTabLabel(k))}</option>`).join('')}
           </select>
           <p class="form-hint" style="margin:4px 0 0">${t('impDeptHint')}</p>
         </div>
@@ -3529,7 +3567,10 @@ function dashRoundsPanelHtml() {
     <div class="card" style="margin-top:16px">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:6px">
         <h3 style="margin:0;font-size:16px">📆 ${t('dashRoundTitle')}</h3>
-        <button class="btn btn-primary btn-sm" id="dashRoundAddBtn" onclick="dashToggleRoundForm()">${t('dashRoundAddBtn')}</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" onclick="openImportModal(12,'${escAttr(dashChDept)}')" title="${escAttr(t('chUploadHint'))}">📤 ${t('chUploadBtn')}</button>
+          <button class="btn btn-primary btn-sm" id="dashRoundAddBtn" onclick="dashToggleRoundForm()">${t('dashRoundAddBtn')}</button>
+        </div>
       </div>
       <p class="form-hint" style="margin-bottom:12px">${t('dashRoundHint')}</p>
       <div id="dashRoundForm" style="display:none;border:1px dashed #c7d2fe;background:#f8faff;border-radius:10px;padding:14px;margin-bottom:14px">

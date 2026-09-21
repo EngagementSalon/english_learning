@@ -28,6 +28,40 @@ const CLOUD_SYNC_URL = 'https://textdb.dev/api/data/eq-quiz-sync-8bbbde30cfb569c
 //   在窗口内（或无时间限制）→ 以手动开关 open 为准。
 const ROUND_LEVEL_FIELDS = ['chOpen', 'chOpenAt', 'chExamOpen', 'chExamAt', 'chResets', 'chResetModes']
 
+// ====== v95：管理员上传题库的云端同步（doc.upq + doc.upqAt）======
+// 管理员在「批量导入 / 手动新增」写入的题只存在本机 localStorage（eq_uploaded），
+// 学员端永远看不到 —— v95 起整库随同步文档走：
+//   推送（管理员设备）：setUploadedBank(本地全量) → 读-改-写 doc.upq（压缩格式）+ upqAt 时间戳
+//   吸收（所有设备）：_getDoc 每次拉取后 Store.absorbCloudUploaded(unpack(doc.upq), upqAt)
+// 压缩格式（省容量：同步文档 1MB 上限）：{i:id, d:dept, c:category_id, t:type, f:difficulty,
+//   q:question, o:options, a:answer, e:explanation}
+function _upqPack(list) {
+  return (Array.isArray(list) ? list : []).filter(q => q && q.id != null).map(q => ({
+    i: String(q.id),
+    d: q.dept || 'all',
+    c: Number(q.category_id) || 1,
+    t: q.type || 'single',
+    f: Number(q.difficulty) || 1,
+    q: String(q.question || ''),
+    o: Array.isArray(q.options) ? q.options : [],
+    a: Array.isArray(q.answer) ? q.answer : [],
+    e: String(q.explanation || '')
+  }))
+}
+function _upqUnpack(arr) {
+  return (Array.isArray(arr) ? arr : []).filter(x => x && x.i != null).map(x => ({
+    id: String(x.i),
+    dept: x.d || 'all',
+    category_id: Number(x.c) || 1,
+    type: x.t || 'single',
+    difficulty: Number(x.f) || 1,
+    question: String(x.q || ''),
+    options: Array.isArray(x.o) ? x.o : [],
+    answer: Array.isArray(x.a) ? x.a : [],
+    explanation: String(x.e || '')
+  }))
+}
+
 // 归一化营次数组（脏数据兜底；无营次时返回空数组，由读取路径兜底成「默认期」）
 function _roundsNorm(doc) {
   const arr = Array.isArray(doc && doc.chRounds) ? doc.chRounds : []
@@ -274,6 +308,11 @@ const CloudSync = {
     const txt = await r.text()
     const doc = JSON.parse(txt)
     if (!doc || typeof doc !== 'object' || !Array.isArray(doc.events)) throw new Error('bad cloud doc')
+    // v95：管理员上传题库吸收（doc.upq）。所有拉取路径都经此处 → 学员端/其他管理设备
+    // 都能拿到最新上传题；幂等由 Store.absorbCloudUploaded 内部的 upqAt 判断保证。
+    if (doc.upq && typeof Store !== 'undefined' && typeof Store.absorbCloudUploaded === 'function') {
+      try { Store.absorbCloudUploaded(_upqUnpack(doc.upq), doc.upqAt) } catch (e) { /* 吸收失败不阻断拉取 */ }
+    }
     // v88 侧信道：七天挑战「营次」。所有拉取路径（周期探测 / fetchSyncSummary / getDashboardData /
     // 开关写后校验）都经此处，学员端/管理端读 CloudSync._chRounds / _chRoundCurId 即得最新状态。
     const rounds = _roundsNorm(doc)
@@ -387,6 +426,29 @@ const CloudSync = {
   // dataUrl 为空字符串 → 删除云端 Logo（恢复默认）。
   _logoGuardTimer: null,
   _logoGuardDelay: 5000,   // 守护首次延迟（ms）；测试可改小
+  // ---------- v95：管理员上传题库推送（doc.upq） ----------
+  // 本地全量上传库 → 云端。读-改-写 + 写后校验重试（同 setCloudLogo 模式）；
+  // 合并语义：本地为权威（正在编辑的设备），但保留远端独有的题（其他管理设备上传的），
+  // 避免两台管理设备互相清掉对方的题。成功返回 { ok:true }；网络失败返回 { ok:false }。
+  async setUploadedBank(localList) {
+    const local = Array.isArray(localList) ? localList : []
+    let saved = false
+    for (let attempt = 0; attempt < 4 && !saved; attempt++) {
+      try {
+        const doc = await this._getDoc()
+        const remote = _upqUnpack(doc.upq)
+        const have = new Set(local.map(q => String(q.id)))
+        const merged = local.concat(remote.filter(q => !have.has(String(q.id))))
+        doc.upq = _upqPack(merged)
+        doc.upqAt = Date.now()
+        await this._putDoc(doc)
+        const check = await this._getDoc()
+        if (check && Number(check.upqAt) === doc.upqAt) saved = true
+      } catch (e) { /* 网络波动 → 重试 */ }
+    }
+    return saved ? { ok: true } : { ok: false, reason: 'network' }
+  },
+
   async setCloudLogo(dataUrl) {
     const val = String(dataUrl || '')
     let saved = false

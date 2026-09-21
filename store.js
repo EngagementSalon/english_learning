@@ -1169,6 +1169,33 @@ const Store = {
   _setUploaded(list) {
     localStorage.setItem(STORAGE_KEYS.UPLOADED, JSON.stringify(list))
   },
+  // v95：云端上传库吸收。云端同步文档的 upq 字段（管理员上传的题目，见 CloudSync.setUploadedBank）
+  // 在每次拉取时经此处并入本地上传库：本设备没有的云端题补进来；上一轮来自云端、这轮云端已
+  // 删除的题（管理员在别处删除后推送）从本地移除；本地自建的题永不被动删除。
+  // 幂等：按 upqAt 时间戳判断，只有更新才执行（拉取路径 _getDoc 每次 poll 都会走到）。
+  _cloudUpqAt: 0,
+  absorbCloudUploaded(list, at) {
+    const ts = Number(at) || 1
+    if (ts <= this._cloudUpqAt) return false
+    this._cloudUpqAt = ts
+    const cloud = (Array.isArray(list) ? list : []).filter(q => q && q.id != null && String(q.id) !== '')
+    const SEEN = 'eq_uploaded_cloudids'
+    let prevIds = []
+    try { prevIds = JSON.parse(localStorage.getItem(SEEN) || '[]') } catch (e) { prevIds = [] }
+    const prev = new Set(prevIds.map(String))
+    const cur = new Set(cloud.map(q => String(q.id)))
+    const local = this._getUploaded()
+    // 云端来源的题：这轮不在云端列表里 → 删（管理员已在别处删除）；本地自建的不受影响
+    const next = local.filter(q => !prev.has(String(q.id)) || cur.has(String(q.id)))
+    // 云端有、本地没有 → 追加（同 id 冲突以本地为准：本地可能是刚编辑过的新版）
+    const have = new Set(next.map(q => String(q.id)))
+    cloud.forEach(q => {
+      if (!have.has(String(q.id))) { next.push(q); have.add(String(q.id)) }
+    })
+    this._setUploaded(next)
+    try { localStorage.setItem(SEEN, JSON.stringify([...cur])) } catch (e) { /* 容量满等 → 忽略 */ }
+    return true
+  },
   getQuestions() {
     const derived = JSON.parse(localStorage.getItem(STORAGE_KEYS.QUESTIONS) || '[]')
     const uploaded = this._getUploaded()
