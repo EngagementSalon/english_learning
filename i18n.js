@@ -44,6 +44,10 @@ const I18N = {
     chDeptNames: {
       '标帜餐厅': '标帜餐厅', '艳中餐厅': '艳中餐厅', '酒吧团队': '酒吧团队', '客房送餐': '客房送餐'
     },
+    // v92：管理员练习页部门切片
+    practiceDeptLabel: '题目部门',
+    practiceDeptAdminHint: '管理员可切换部门，按该部门视角抽题练习。',
+    practiceDeptCount: (n) => `${n} 题可练`,
     roundDeptLabel: '适用部门', roundDeptAll: '全部部门',
     idxDining: '饮食部', idxRooms: '房务部', idxOther: '其他部门', idxAll: '全部',
     legacyTag: '历史',
@@ -790,6 +794,10 @@ const I18N = {
       '标帜餐厅': 'Signatures Restaurant', '艳中餐厅': 'Yan Chinese Restaurant',
       '酒吧团队': 'Bar Team', '客房送餐': 'In-Room Dining'
     },
+    // v92：practice-page department switch (admin only)
+    practiceDeptLabel: 'Question Dept',
+    practiceDeptAdminHint: 'As admin you can switch departments to practise that department\u2019s view.',
+    practiceDeptCount: (n) => `${n} questions`,
     roundDeptLabel: 'Applies to', roundDeptAll: 'All Departments',
     idxDining: 'F&B', idxRooms: 'Rooms', idxOther: 'Other', idxAll: 'All',
     legacyTag: 'legacy',

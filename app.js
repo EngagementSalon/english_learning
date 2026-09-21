@@ -1079,6 +1079,54 @@ function renderHome() {
 
 // ====== Practice Page ======
 let practiceState = { questions: [], index: 0, answers: [], submitted: false, correctCount: 0 }
+// v92：管理员练习页部门切片 —— 可切到任一部门/分队视角抽题。
+//   ''      = 全部题目（管理员默认，等同 v91 行为）
+//   'dining'/'rooms' = 该大部门（含其所有分队 + 通用）
+//   'dining/bar' 等分队 slug = 该分队 + 大部门自身 + 通用
+//   'all'   = 仅通用题
+// 非管理员不使用本变量（恒走 Store.getSessionDeptKey()），切片 UI 也不渲染。
+const PRACTICE_DEPT_TABS = ['', 'dining', 'dining/sig', 'dining/yan', 'dining/bar', 'dining/ird', 'rooms', 'all']
+let practiceDept = ''
+// 切片项显示名
+function practiceDeptTabLabel(k) {
+  if (k === '') return t('deptAll')
+  if (k === 'all') return t('deptGeneral')
+  const tree = deptTree()
+  if (k === 'dining') return tree.dining.name
+  if (k === 'rooms') return tree.rooms.name
+  return deptSlugName(k) || k
+}
+// 该部门视角下可练习题数（不叠加分类/难度/等级筛选，作为切换时的即时反馈）
+function practiceDeptCount(k) {
+  try {
+    return k ? Store.getQuestionsByDept(k).length : Store.getQuestions().length
+  } catch (e) { return 0 }
+}
+// 管理员练习页部门切片（仅管理员渲染）
+function practiceDeptSwitchHtml() {
+  if (!Store.isAdmin()) return ''
+  if (typeof DEPT_SUB_SLUGS === 'undefined') return ''
+  const btns = PRACTICE_DEPT_TABS.map(k => {
+    const on = practiceDept === k
+    const n = practiceDeptCount(k)
+    const cls = on ? 'btn-primary' : 'btn-ghost'
+    // 空题库的分队切片淡显（仍可点，避免误以为功能失效）
+    const dim = n === 0 ? ';opacity:.55' : ''
+    return `<button class="btn btn-sm ${cls}" style="white-space:nowrap${dim}" onclick="setPracticeDept('${k}')">${escHtml(practiceDeptTabLabel(k))}<span style="font-size:11px;opacity:.75"> ${n}</span></button>`
+  }).join('')
+  return `
+    <div class="filter-row" style="margin-top:10px;padding-top:10px;border-top:1px dashed #e5e7eb">
+      <div class="filter-group" style="flex:1;min-width:0">
+        <label>🏷️ ${t('practiceDeptLabel')}</label>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">${btns}</div>
+        <p class="form-hint" style="margin:4px 0 0">${t('practiceDeptAdminHint')}</p>
+      </div>
+    </div>`
+}
+function setPracticeDept(val) {
+  practiceDept = PRACTICE_DEPT_TABS.indexOf(val) >= 0 ? val : ''
+  renderPractice()
+}
 
 function renderPractice() {
   const el = document.getElementById('page-practice')
@@ -1131,6 +1179,7 @@ function renderPractice() {
           <button class="btn btn-primary" onclick="startPractice()">${t('startPracticeBtn')}</button>
         </div>
       </div>
+      ${practiceDeptSwitchHtml()}
     </div>
     <div id="practiceQuiz"></div>
     ${challengeEntryHtml()}
@@ -1171,7 +1220,8 @@ function startPractice() {
   const diff = document.getElementById('pDifficulty').value
   const lvl = document.getElementById('pLevel').value
   let count = Number(document.getElementById('pCount').value)
-  const deptKey = Store.isAdmin() ? '' : Store.getSessionDeptKey()
+  // v92：管理员改用切片所选部门（'' = 全部）；非管理员仍按本人所属部门
+  const deptKey = Store.isAdmin() ? (practiceDept || '') : Store.getSessionDeptKey()
   let { list } = Store.queryQuestions({
     category_id: cat !== '0' ? cat : undefined,
     difficulty: diff !== '0' ? diff : undefined,
