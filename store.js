@@ -746,7 +746,21 @@ const Store = {
     return { ok: true, old, dept: nd }
   },
   getSession() {
-    return JSON.parse(localStorage.getItem(STORAGE_KEYS.SESSION) || 'null')
+    const s = JSON.parse(localStorage.getItem(STORAGE_KEYS.SESSION) || 'null')
+    // v89：会话部门随部门四分队调整自动归一（WOOBAR/WETBAR/LIQUID → 酒吧团队）
+    if (s && s.dept && typeof normDept === 'function') {
+      const hit = normDept(s.dept)
+      if (hit && hit.value !== s.dept) {
+        s.dept = hit.value
+        try { localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(s)) } catch (e) {}
+      }
+    }
+    return s
+  },
+  // 当前登录学员的完整部门值（原始字符串，未归一）
+  getSessionDept() {
+    const s = this.getSession()
+    return (s && s.dept) || ''
   },
   logout() {
     // —— 退出前累计本次会话时长 ——
@@ -757,6 +771,10 @@ const Store = {
       CloudSync.pushPending()
     }
     localStorage.removeItem(STORAGE_KEYS.SESSION)
+    // v89：退出后不再按部门挑营次（避免下一个登录者错拿上一人的部门）
+    try {
+      if (typeof CloudSync !== 'undefined' && typeof CloudSync.setDeptSlug === 'function') CloudSync.setDeptSlug('')
+    } catch (e) { /* ignore */ }
   },
   isLoggedIn() {
     return !!this.getSession()
@@ -1090,6 +1108,22 @@ const Store = {
   },
   setUser(user) {
     localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user))
+    // v89：把分部门同步给 CloudSync，供 _getDoc 挑选「本部门适用的营次」。
+    // 这里是登录/切部门/资料回填的唯一收口 —— 只要部门变了，下一次拉云端即按新部门结算。
+    this.syncDeptSlug()
+  },
+  // v89：按当前会话/资料把分部门 slug 推给 CloudSync（app 启动、登录、切部门后调用）
+  syncDeptSlug() {
+    try {
+      if (typeof CloudSync === 'undefined' || typeof CloudSync.setDeptSlug !== 'function') return ''
+      const s = this.getSession()
+      const u = JSON.parse(localStorage.getItem(STORAGE_KEYS.USER) || 'null')
+      const dept = (s && s.dept) || (u && u.dept) || ''
+      const hit = (typeof normDept === 'function') ? normDept(dept) : null
+      const key = hit ? hit.key : ''
+      CloudSync.setDeptSlug(key)
+      return key
+    } catch (e) { return '' }
   },
 
   // Categories
@@ -1155,15 +1189,34 @@ const Store = {
     }
     return qs
   },
-  // 按部门筛选题目：dining 看 dining+all，rooms 看 rooms+all，其他/空 看 all（含全部）
-  // 实际调用方传 deptKey（'dining'|'rooms'|'other'|''|undefined）
+  // 按部门筛选题目（v89 支持分部门粒度）
+  // dept 取值：'dining/bar' 等分部门 slug → 该分部门题 + 饮食部题 + 通用题
+  //           'dining' / 'rooms' 大部门 key → 该大部门题 + 通用题
+  //           '' / 'other' / undefined → 全部
+  //           'all' → 仅通用题（题库管理用）
   getQuestionsByDept(deptKey) {
     const qs = this.getQuestions()
-    if (!deptKey || deptKey === 'other') return qs  // 其他部门/管理员看全部
-    return qs.filter(q => !q.dept || q.dept === 'all' || q.dept === deptKey)
+    const k = String(deptKey || '')
+    if (!k || k === 'other') return qs  // 其他部门/管理员看全部
+    if (k === 'all') return qs.filter(q => !q.dept || q.dept === 'all')
+    // v89：分部门 slug（'dining/bar'）
+    if (k.indexOf('/') >= 0) {
+      const major = k.split('/')[0]
+      return qs.filter(q => !q.dept || q.dept === 'all' || q.dept === k || q.dept === major)
+    }
+    // 大部门 key：大部门自身 + 其所有分部门 + 通用
+    if (typeof DEPT_SUB_SLUGS !== 'undefined' && DEPT_SUB_SLUGS[k]) {
+      const subs = Object.keys(DEPT_SUB_SLUGS[k]).map(s => k + '/' + DEPT_SUB_SLUGS[k][s])
+      return qs.filter(q => !q.dept || q.dept === 'all' || q.dept === k || subs.indexOf(q.dept) >= 0)
+    }
+    return qs.filter(q => !q.dept || q.dept === 'all' || q.dept === k)
   },
-  // 从 session 获取当前用户的大部门 key
+  // 从 session 获取当前用户的大部门 key（dining / rooms / other）
   getSessionDeptKey() {
+    if (typeof normDept === 'function') {
+      const hit = normDept(this.getSessionDept())
+      return hit ? hit.majorKey : 'other'
+    }
     const s = this.getSession()
     if (!s || !s.dept) return 'other'
     // dept 格式：'饮食部·标帜餐厅' → 取大部门名
@@ -1180,6 +1233,14 @@ const Store = {
       if (tree[k] && tree[k].name === majorName) return k
     }
     return 'other'
+  },
+  // v89：从 session 获取分部门 slug（'dining/bar'）；无分部门/管理员返回大部门 key
+  getSessionSubDeptKey() {
+    if (typeof normDept === 'function') {
+      const hit = normDept(this.getSessionDept())
+      return hit ? hit.key : ''
+    }
+    return ''
   },
   getQuestion(id) {
     const sid = String(id)

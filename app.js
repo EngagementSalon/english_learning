@@ -411,6 +411,134 @@ const DEPT_GROUPS = {
   deptModal: ['deptEditMajor', 'deptEditSub', 'deptEditOther'],
 }
 function deptTree() { return t('deptTree') }
+// ====== v89：部门归一（四分队制）======
+// 目标规范名（按大部门）——用于把历史自由文本/旧分部门名映射到现行四分队
+const DEPT_CANON = {
+  dining: ['标帜餐厅', '艳中餐厅', '酒吧团队', '客房送餐'],
+  rooms: ['迎宾前台', '礼宾部', '随时随需', '客房造型', '健身及水疗中心'],
+}
+// 反向索引：分部门名（含别名，中英双写、去空格小写）→ { majorKey, majorName, subName }
+function _deptSubIndex() {
+  const tree = deptTree()
+  const idx = {}
+  const put = (raw, majorKey, sub) => {
+    const k = String(raw == null ? '' : raw).trim()
+    if (!k) return
+    if (!idx[k]) idx[k] = { majorKey: majorKey, majorName: tree[majorKey].name, subName: sub }
+  }
+  DEPT_MAJOR_KEYS.forEach(mk => {
+    if (mk === 'other') return
+    const subs = (tree[mk] && tree[mk].subs) || []
+    const canon = DEPT_CANON[mk] || []
+    subs.forEach((s, i) => {
+      // 中英文子部门名一一对应（en 与 zh 的 subs 顺序一致）
+      put(s, mk, s)
+      const c = canon[i]
+      if (c) put(c, mk, s)
+    })
+  })
+  // 显式别名表（i18n）——覆盖 WOOBAR/WETBAR/LIQUID → 酒吧团队 等
+  const alias = t('deptSubAlias') || {}
+  Object.keys(alias).forEach(a => put(a, 'dining', alias[a]))
+  return idx
+}
+// 归一单个分部门名 → { majorKey, majorName, subName }，无法识别返回 null
+function normDeptSub(subName) {
+  const raw = String(subName == null ? '' : subName).trim()
+  if (!raw) return null
+  const idx = _deptSubIndex()
+  if (idx[raw]) return idx[raw]
+  const lc = raw.toLowerCase().replace(/\s+/g, '')
+  for (const k in idx) {
+    if (k.toLowerCase().replace(/\s+/g, '') === lc) return idx[k]
+  }
+  // 包含式兜底（"客房送餐部" ⊃ "客房送餐"；"WOOBAR 吧台" ⊃ "WOOBAR"）
+  for (const k in idx) {
+    const kk = k.toLowerCase().replace(/\s+/g, '')
+    if (kk.length >= 2 && (lc.indexOf(kk) >= 0 || kk.indexOf(lc) >= 0)) return idx[k]
+  }
+  return null
+}
+// 归一完整部门值（'饮食部·标帜餐厅' / 'WOOBAR' / '酒吧团队'）→
+// { majorKey, majorName, subName, key(分部门 slug), value('大部门·分部门') }；无法识别返回 null
+function normDept(value) {
+  const s = String(value == null ? '' : value).trim()
+  if (!s) return null
+  const i = s.indexOf('·')
+  const majorRaw = i >= 0 ? s.slice(0, i).trim() : ''
+  const subRaw = i >= 0 ? s.slice(i + 1).trim() : s
+  const hit = normDeptSub(subRaw)
+  if (!hit) return null
+  const tree = deptTree()
+  // 大部门与分部门冲突（如 '房务部·酒吧团队'）以分部门归属为准
+  if (majorRaw) {
+    const mk = DEPT_MAJOR_KEYS.find(k => tree[k].name === majorRaw)
+    if (mk && mk !== 'other' && mk !== hit.majorKey) return null
+  }
+  return {
+    majorKey: hit.majorKey,
+    majorName: tree[hit.majorKey].name,
+    subName: hit.subName,
+    key: deptSlug(hit.majorKey, hit.subName),
+    value: tree[hit.majorKey].name + '·' + hit.subName
+  }
+}
+// 分部门 slug（题库 dept 字段 / 营次适用范围共用；与中英文无关，切语言不丢数据）
+const DEPT_SUB_SLUGS = {
+  dining: { '标帜餐厅': 'sig', '艳中餐厅': 'yan', '酒吧团队': 'bar', '客房送餐': 'ird' },
+  rooms: { '迎宾前台': 'fo', '礼宾部': 'concierge', '随时随需': 'ww', '客房造型': 'styling', '健身及水疗中心': 'spa' },
+}
+const DEPT_SUB_BY_SLUG = (() => {
+  const out = {}
+  Object.keys(DEPT_SUB_SLUGS).forEach(mk => {
+    Object.keys(DEPT_SUB_SLUGS[mk]).forEach(sub => { out[mk + '/' + DEPT_SUB_SLUGS[mk][sub]] = sub })
+  })
+  return out
+})()
+function deptSlug(majorKey, subName) {
+  const m = DEPT_SUB_SLUGS[majorKey]
+  if (!m) return ''
+  const raw = String(subName == null ? '' : subName).trim()
+  if (m[raw]) return majorKey + '/' + m[raw]
+  // 别名 / 英文名先归一，再查中文 slug 表
+  const hit = normDeptSub(raw)
+  if (hit) {
+    const hm = DEPT_SUB_SLUGS[hit.majorKey]
+    if (hm && hm[hit.subName]) return hit.majorKey + '/' + hm[hit.subName]
+  }
+  // 兜底：按「规范名顺序 / 大部门子部门顺序」的同位对齐（跨语言时名字可能是另一语言）
+  const order = Object.keys(m)
+  const canon = DEPT_CANON[majorKey] || []
+  let ci = canon.indexOf(raw)
+  if (ci < 0) ci = (((deptTree()[majorKey] || {}).subs) || []).indexOf(raw)
+  if (ci >= 0 && order[ci]) return majorKey + '/' + m[order[ci]]
+  return ''
+}
+// slug → 本地化显示名（'dining/bar' → '酒吧团队' / 'Bar Team'）
+function deptSlugName(slug) {
+  const s = String(slug || '')
+  const i = s.indexOf('/')
+  if (i < 0) return s
+  const mk = s.slice(0, i)
+  const sub = DEPT_SUB_BY_SLUG[s]
+  if (!sub) return s
+  const names = t('chDeptNames') || {}
+  if (names[sub]) return names[sub]
+  const tree = deptTree()
+  const arr = (tree[mk] && tree[mk].subs) || []
+  const ci = (DEPT_CANON[mk] || []).indexOf(sub)
+  return ci >= 0 && arr[ci] ? arr[ci] : sub
+}
+// 当前登录学员的分部门 slug（'dining/bar'）；管理员/其他部门返回 ''
+function sessionDeptSlug() {
+  const hit = normDept(Store.getSessionDept())
+  return hit ? hit.key : ''
+}
+// 部门分组 key（indexedDB 统计用）：dining / rooms / other
+function deptGroupKey(value) {
+  const hit = normDept(value)
+  return hit ? hit.majorKey : 'other'
+}
 
 // 构建一组级联控件（清空已有选择）
 function buildDeptCascade(g) {
@@ -470,15 +598,37 @@ function setDeptCascade(g, value) {
   const majorName = idx >= 0 ? value.slice(0, idx) : value
   const sub = idx >= 0 ? value.slice(idx + 1) : ''
   const key = DEPT_MAJOR_KEYS.find(k => tree[k].name === majorName)
-  if (key && key !== 'other' && tree[key].subs.indexOf(sub) >= 0) {
-    majorSel.value = key
-    majorSel.onchange()
-    subSel.value = sub
-  } else {
-    majorSel.value = 'other'
-    majorSel.onchange()
-    otherIn.value = value
+  // v89：分部门名先归一（旧名 WOOBAR/WETBAR/LIQUID/客房送餐部 等自动落到四分队）
+  if (key && key !== 'other') {
+    const subs = tree[key].subs
+    let target = subs.indexOf(sub) >= 0 ? sub : ''
+    if (!target) {
+      const hit = normDeptSub(sub)
+      const canon = DEPT_CANON[key] || []
+      const ci = canon.indexOf(sub)
+      if (ci >= 0 && subs[ci]) target = subs[ci]
+      else if (hit && hit.majorKey === key && subs.indexOf(hit.subName) >= 0) target = hit.subName
+    }
+    if (target) {
+      majorSel.value = key
+      majorSel.onchange()
+      subSel.value = target
+      return
+    }
   }
+  // v89：仅填了分部门（无大部门）时也尝试按分部门归一
+  if (!sub && !key) {
+    const hit = normDeptSub(majorName)
+    if (hit && hit.majorKey !== 'other' && tree[hit.majorKey].subs.indexOf(hit.subName) >= 0) {
+      majorSel.value = hit.majorKey
+      majorSel.onchange()
+      subSel.value = hit.subName
+      return
+    }
+  }
+  majorSel.value = 'other'
+  majorSel.onchange()
+  otherIn.value = value
 }
 
 // 语言切换后重建所有级联控件（保留已选值）
@@ -989,12 +1139,15 @@ function renderPractice() {
 
 // 七天挑战入口卡片（v70：入口移入练习页下方，不再是独立导航项；v77 未开放/已结束时提示锁定态）
 // v88：多期营次 —— 显示当前营次名；锁定态分「未开始 / 未开放 / 已结束」三种文案。
+// v89：标题按学员所属分部门（各部门题不同、各自上传）
 function challengeEntryHtml() {
   challengeLoad()
   const doneDays = CHALLENGE_DAYS.filter(d => chDayDone(d.day)).length
   const locked = typeof chOpenLocked === 'function' && chOpenLocked()
   const st = typeof chRoundOpenState === 'function' ? chRoundOpenState() : { state: 'closed' }
   const rName = typeof chRoundName === 'function' ? chRoundName() : '第一期'
+  const title = typeof chTitleText === 'function' ? chTitleText() : t('chTitle')
+  const deptName = typeof chDeptName === 'function' ? chDeptName() : ''
   const lockHint = locked
     ? `<p class="form-hint" style="margin:4px 0 0;color:#9ca3af">${st.state === 'upcoming' ? '⏳ ' + t('chRoundUpcoming', rName) : st.state === 'ended' ? '🏁 ' + t('chEnded') : '🔒 ' + t('chNotOpen')}</p>`
     : ''
@@ -1003,7 +1156,8 @@ function challengeEntryHtml() {
       <div style="display:flex;align-items:center;gap:12px">
         <div style="font-size:32px">🏅</div>
         <div style="flex:1;min-width:0">
-          <h3 style="margin:0 0 4px">${t('chTitle')} <span style="font-size:12px;font-weight:600;color:#2563eb">· ${escHtml(rName)}</span></h3>
+          <h3 style="margin:0 0 4px">${escHtml(title)} <span style="font-size:12px;font-weight:600;color:#2563eb">· ${escHtml(rName)}</span></h3>
+          ${deptName ? `<p class="form-hint" style="margin:0 0 2px"><span style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:999px;padding:1px 8px">🏷️ ${escHtml(deptName)}</span></p>` : ''}
           <p class="form-hint" style="margin:0">${t('chEntryHint', doneDays)}</p>
           ${lockHint}
         </div>
@@ -1656,31 +1810,70 @@ function formatTime(ts) {
 }
 
 // ====== Admin Page ======
-// 三个部门题库 tab 各自独立的筛选状态（dining | rooms | all）
-let adminStates = {
-  dining: { page: 1, pageSize: 10, keyword: '', category: 0, difficulty: 0 },
-  rooms: { page: 1, pageSize: 10, keyword: '', category: 0, difficulty: 0 },
-  all: { page: 1, pageSize: 10, keyword: '', category: 0, difficulty: 0 }
+// v89：题库 tab 各自独立的筛选状态（饮食部四分队 slug + 房务部 + 通用）
+const ADMIN_DEPT_TABS = ['dining/sig', 'dining/yan', 'dining/bar', 'dining/ird', 'rooms', 'all']
+let adminStates = (() => {
+  const m = {}
+  ADMIN_DEPT_TABS.forEach(k => { m[k] = { page: 1, pageSize: 10, keyword: '', category: 0, difficulty: 0 } })
+  return m
+})()
+let adminTab = 'dining/sig' // 分部门 slug | 大部门 key | 'all'
+// tab → 该 tab 下「精确 dept」集合（保存题目/统计用；'all' 含无 dept 字段的历史题）
+function adminDeptSetOf(tab) {
+  const k = ADMIN_DEPT_TABS.indexOf(tab) >= 0 ? tab : 'all'
+  if (k === 'all') return ['all', '']
+  if (k.indexOf('/') >= 0) return [k]
+  // 大部门 tab（房务部）：大部门自身 + 其所有分部门 slug
+  const hasSub = typeof DEPT_SUB_SLUGS !== 'undefined' && DEPT_SUB_SLUGS[k]
+  const extra = hasSub ? Object.keys(DEPT_SUB_SLUGS[k]).map(s => k + '/' + DEPT_SUB_SLUGS[k][s]) : []
+  return [k].concat(extra)
 }
-let adminTab = 'dining' // dining | rooms | all
-const adminDeptOf = tab => (tab === 'dining' || tab === 'rooms' || tab === 'all') ? tab : 'all'
+const ADMIN_DEPT_TAB_LABELS = {
+  'dining/sig': 'sig', 'dining/yan': 'yan', 'dining/bar': 'bar', 'dining/ird': 'ird',
+}
+function adminTabLabel(tab) {
+  const sub = ADMIN_DEPT_TAB_LABELS[tab]
+  if (sub) return (t('chDeptNames') || {})[DEPT_SUB_BY_SLUG[tab] || ''] || tab
+  if (tab === 'rooms') return t('bankRooms')
+  return t('bankGeneral')
+}
+// v89：题目归属部门下拉（四分队 + 房务部 + 通用）；兼容历史 dept='dining'/''
+function adminDeptOptionsHtml(curDept) {
+  const tree = deptTree()
+  const cur = String(curDept == null ? '' : curDept)
+  const norm = cur === '' ? 'all' : cur
+  const out = []
+  ADMIN_DEPT_TABS.forEach(k => {
+    out.push(`<option value="${k}" ${norm === k ? 'selected' : ''}>${escHtml(adminTabLabel(k))}</option>`)
+  })
+  // 历史值：大部门 key（dining）/ 旧分部门 slug 不在 tab 列表里 → 显示为遗留项避免误改
+  if (ADMIN_DEPT_TABS.indexOf(norm) < 0) {
+    const name = norm === 'dining' ? tree.dining.name : (deptSlugName(norm) || norm)
+    out.push(`<option value="${escAttr(norm)}" selected>${escHtml(name)}（${t('legacyTag')}）</option>`)
+  }
+  return out.join('')
+}
 
 function renderAdmin() {
   Object.keys(adminStates).forEach(k => { adminStates[k] = { page: 1, pageSize: 10, keyword: '', category: 0, difficulty: 0 } })
-  adminTab = 'dining'
+  adminTab = 'dining/sig'
   renderAdminShell()
   renderAdminList()
 }
 
 function renderAdminShell() {
   const allQs = Store.getQuestions()
-  const count = d => allQs.filter(q => q.dept === d).length
+  const count = tab => {
+    const set = adminDeptSetOf(tab)
+    return allQs.filter(q => set.indexOf(q.dept || 'all') >= 0).length
+  }
+  const tabHtml = ADMIN_DEPT_TABS.map(k =>
+    `<button class="admin-tab ${adminTab === k ? 'active' : ''}" onclick="switchAdminTab('${k}')">${adminTabLabel(k)} <span class="tab-count">${count(k)}</span></button>`
+  ).join('')
   const el = document.getElementById('page-admin')
   el.innerHTML = `
     <div class="admin-tabs">
-      <button class="admin-tab ${adminTab === 'dining' ? 'active' : ''}" onclick="switchAdminTab('dining')">${t('bankDining')} <span class="tab-count">${count('dining')}</span></button>
-      <button class="admin-tab ${adminTab === 'rooms' ? 'active' : ''}" onclick="switchAdminTab('rooms')">${t('bankRooms')} <span class="tab-count">${count('rooms')}</span></button>
-      <button class="admin-tab ${adminTab === 'all' ? 'active' : ''}" onclick="switchAdminTab('all')">${t('bankGeneral')} <span class="tab-count">${count('all')}</span></button>
+      ${tabHtml}
     </div>
     <div id="adminTabBody"></div>
   `
@@ -1695,15 +1888,20 @@ function switchAdminTab(tab) {
 function renderAdminList() {
   const st = adminStates[adminTab] || adminStates.all
   const categories = Store.getCategories()
-  const { list, total } = Store.queryQuestions({
+  // v89：按 tab 的 dept 集合精确筛选（支持分部门 slug）
+  const deptSet = adminDeptSetOf(adminTab)
+  const { list } = Store.queryQuestions({
     category_id: st.category || undefined,
     difficulty: st.difficulty || undefined,
-    deptExact: adminDeptOf(adminTab),
     keyword: st.keyword || undefined,
-    page: st.page,
-    pageSize: st.pageSize
+    page: 1,
+    pageSize: 100000
   })
+  const filtered = list.filter(q => deptSet.indexOf(q.dept || 'all') >= 0)
+  const total = filtered.length
   const totalPages = Math.ceil(total / st.pageSize)
+  const start = (st.page - 1) * st.pageSize
+  const pagedList = filtered.slice(start, start + st.pageSize)
 
   const deptLabels = { dining: t('deptDining'), rooms: t('deptRooms'), all: t('deptGeneral') }
 
@@ -1726,7 +1924,7 @@ function renderAdminList() {
       <button class="btn btn-ghost" onclick="openCategoryModal()">${t('categoryManage')}</button>
     </div>
     <div class="card" style="padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch">
-      ${list.length === 0 ? `<div style="padding:40px;text-align:center;color:#9ca3af;">${t('noQuestions')}</div>` : `
+      ${pagedList.length === 0 ? `<div style="padding:40px;text-align:center;color:#9ca3af;">${t('noQuestions')}</div>` : `
       <table class="admin-table">
         <thead>
           <tr>
@@ -1739,10 +1937,10 @@ function renderAdminList() {
           </tr>
         </thead>
         <tbody>
-          ${list.map(q => `<tr>
+          ${pagedList.map(q => `<tr>
             <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${q.question}</td>
             <td>${Store.getCategoryName(q.category_id)}</td>
-            <td><span class="tag ${q.dept === 'rooms' ? 'tag-diff-3' : q.dept === 'dining' ? 'tag-diff-1' : 'tag-diff-2'}">${deptLabels[q.dept] || t('deptGeneral')}</span></td>
+            <td><span class="tag ${q.dept === 'all' || !q.dept ? 'tag-diff-2' : q.dept.indexOf('rooms') === 0 ? 'tag-diff-3' : 'tag-diff-1'}">${deptLabels[q.dept] || deptSlugName(q.dept) || t('deptGeneral')}</span></td>
             <td><span class="tag tag-type">${TYPE_LABELS[q.type]}</span></td>
             <td><span class="tag tag-diff-${q.difficulty}">${DIFFICULTY_LABELS[q.difficulty]}</span></td>
             <td>
@@ -2014,9 +2212,7 @@ function openEditModal(id) {
           <div class="form-col form-group">
             <label>${t('deptLabel')}</label>
             <select id="editDept">
-              <option value="dining" ${data.dept==='dining'?'selected':''}>${t('deptDining')}</option>
-              <option value="rooms" ${data.dept==='rooms'?'selected':''}>${t('deptRooms')}</option>
-              <option value="all" ${(data.dept==='all'||!data.dept)?'selected':''}>${t('deptGeneral')}</option>
+              ${adminDeptOptionsHtml(data.dept)}
             </select>
           </div>
         </div>
@@ -2585,13 +2781,16 @@ function impParseAndPreview(text) {
 function confirmImportRows() {
   const picked = impRowsSelected()
   if (!picked.length) { alert(t('impNoneSelected')); return }
-  const items = picked.map(r => ({ category_id: 1, dept: 'all', type: r.q.type, difficulty: r.q.difficulty || r.est, question: r.q.question, options: r.q.options, answer: r.q.answer, explanation: r.q.explanation }))
+  // v89：上传时选定归属部门（分部门 slug / 大部门 / all），学员只看到本部门题
+  const el2 = document.getElementById('importDept')
+  const dept = (el2 && el2.value) || 'all'
+  const items = picked.map(r => ({ category_id: 1, dept: dept, type: r.q.type, difficulty: r.q.difficulty || r.est, question: r.q.question, options: r.q.options, answer: r.q.answer, explanation: r.q.explanation }))
   const result = Store.batchImport(items)
   const el = document.getElementById('importResult')
-  if (el) el.innerHTML = `<div class="feedback correct"><strong>✅ ${t('impDoneTitle')}</strong><div class="explanation">${t('impDoneDetail', result.success, result.skipped || 0)}</div></div>`
+  if (el) el.innerHTML = `<div class="feedback correct"><strong>✅ ${t('impDoneTitle')}</strong><div class="explanation">${t('impDoneDetail', result.success, result.skipped || 0)} · ${t('deptLabel')}：${escHtml(adminTabLabel(dept))}</div></div>`
   setTimeout(() => {
     document.getElementById('importModal') && document.getElementById('importModal').remove()
-    adminTab = 'all'   // 上传题 dept=all → 落到「通用」题库，切过去展示
+    adminTab = dept   // 切到刚上传的题库 tab 直接展示
     renderAdminShell(); renderAdminList()
   }, 1600)
 }
@@ -2635,6 +2834,13 @@ function openImportModal() {
             <button class="btn btn-primary btn-sm" onclick="downloadImportTemplate()">⬇️ ${t('dlTemplate')}</button>
           </div>
           <p class="form-hint" style="margin:6px 0 0">${t('impFileHint')}</p>
+        </div>
+        <div class="form-group">
+          <label>${t('deptLabel')}</label>
+          <select id="importDept">
+            ${ADMIN_DEPT_TABS.map(k => `<option value="${k}" ${adminTab === k ? 'selected' : ''}>${escHtml(adminTabLabel(k))}</option>`).join('')}
+          </select>
+          <p class="form-hint" style="margin:4px 0 0">${t('impDeptHint')}</p>
         </div>
         <div class="form-group">
           <label>${t('impFileLabel')}</label>
@@ -3214,9 +3420,41 @@ function dashRoundSlug(id) {
   const s = String(id == null ? '' : id).trim()
   return (!s || s === 'r1') ? '第一期' : s
 }
+// v89：营次适用部门（空数组 = 全部部门，兼容 v88 存量营次）→ 本地化显示文本
+function dashRoundDeptText(r) {
+  const list = (r && Array.isArray(r.depts)) ? r.depts.filter(x => x) : []
+  if (!list.length) return `<span style="color:#9ca3af">${t('roundDeptAll')}</span>`
+  return list.map(d => {
+    const name = (typeof deptSlugName === 'function' && deptSlugName(d)) || d
+    return `<span style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:999px;padding:1px 7px;white-space:nowrap;display:inline-block">${escHtml(name)}</span>`
+  }).join(' ')
+}
+// 部门多选清单（营次新建/编辑共用）：饮食部四分队 + 房务部各分队 + 大部门整包
+function dashDeptOptionsHtml(selected) {
+  const sel = Array.isArray(selected) ? selected : []
+  const out = []
+  const tree = deptTree()
+  if (typeof DEPT_SUB_SLUGS === 'undefined') return ''
+  DEPT_MAJOR_KEYS.forEach(mk => {
+    if (mk === 'other') return
+    const subs = DEPT_SUB_SLUGS[mk] || {}
+    const names = t('chDeptNames') || {}
+    Object.keys(subs).forEach(sub => {
+      const slug = mk + '/' + subs[sub]
+      const label = names[sub] || sub
+      out.push(`<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;margin:0 12px 6px 0;cursor:pointer">
+        <input type="checkbox" class="dashRoundDept" value="${escAttr(slug)}" ${sel.indexOf(slug) >= 0 ? 'checked' : ''}>
+        <span>${escHtml(label)}</span>
+      </label>`)
+    })
+  })
+  return out.join('')
+}
 // 看板营次面板：营次列表（状态 / 排期 / 查看 / 设为当前 / 删除）+ 新建表单
 // 说明：v88 起不再提供「关闭挑战」作为常驻操作——本期结束后新建下一期即可；
 //   若需临时关闭当前期，展开该营次的排期设置把「自动关闭时间」设为过去即可（下次重绘生效）。
+// v89：营次带「适用部门」——一个营次可只对本部门开放（如酒吧团队单独一期）；
+//   不勾选任何部门 = 全部部门适用（v88 行为）。
 function dashRoundsPanelHtml() {
   const list = dashRoundList()
   const curId = dashRoundCurId()
@@ -3228,6 +3466,7 @@ function dashRoundsPanelHtml() {
     return `<tr${viewed ? ' style="background:#eff6ff"' : ''}>
       <td style="white-space:nowrap">${escHtml(r.name)}${isCur ? ` <span style="font-size:11px;font-weight:800;color:#2563eb;background:#dbeafe;border-radius:10px;padding:2px 8px">${t('dashRoundCurrent')}</span>` : ''}</td>
       <td style="white-space:nowrap">${dashRoundStateTag(st)}</td>
+      <td>${dashRoundDeptText(r)}</td>
       <td style="white-space:nowrap;font-size:12px;color:#6b7280">${dashRoundWindowText(r)}</td>
       <td style="white-space:nowrap;text-align:center">
         ${viewed ? '' : `<button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:12px;margin-right:4px" data-rid="${escAttr(r.id)}" onclick="dashViewRound(this)">${t('dashRoundView')}</button>`}
@@ -3251,6 +3490,11 @@ function dashRoundsPanelHtml() {
           <input id="dashRoundEnd" type="datetime-local" class="input-answer" style="flex:1;min-width:180px" title="${escAttr(t('dashRoundEndPh'))}" />
         </div>
         <p class="form-hint" style="margin:0 0 10px">⏰ ${t('dashRoundScheduleHint')}</p>
+        <div style="border-top:1px dashed #c7d2fe;padding-top:10px;margin-bottom:10px">
+          <div style="font-weight:700;font-size:13px;margin-bottom:6px">🏷️ ${t('roundDeptLabel')}</div>
+          <div>${dashDeptOptionsHtml([])}</div>
+          <p class="form-hint" style="margin:0">${t('dashRoundDeptHint')}</p>
+        </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-primary btn-sm" id="dashRoundCreateBtn" onclick="dashCreateRound()">${t('dashRoundCreate')}</button>
           <button class="btn btn-ghost btn-sm" onclick="dashToggleRoundForm()">${t('dashRoundCancel')}</button>
@@ -3262,6 +3506,7 @@ function dashRoundsPanelHtml() {
           <thead><tr>
             <th>${t('dashRoundNameLabel')}</th>
             <th>${t('dashRoundStatusLabel')}</th>
+            <th>${t('roundDeptLabel')}</th>
             <th>${t('dashRoundWindowLabel')}</th>
             <th style="text-align:center">${t('dashRoundOpsLabel')}</th>
           </tr></thead>
@@ -3269,6 +3514,12 @@ function dashRoundsPanelHtml() {
         </table>
       </div>` : `<div style="padding:18px;text-align:center;color:#9ca3af;font-size:13px">${t('dashRoundEmpty')}</div>`}
     </div>`
+}
+// 收集新建表单里勾选的适用部门（空 = 全部部门）
+function dashPickedDepts() {
+  const out = []
+  document.querySelectorAll('.dashRoundDept').forEach(cb => { if (cb.checked) out.push(cb.value) })
+  return out
 }
 function dashToggleRoundForm() {
   const el = document.getElementById('dashRoundForm')
@@ -3289,11 +3540,13 @@ async function dashCreateRound() {
   const name = (nameEl && nameEl.value || '').trim()
   const startAt = dashParseLocalDT(startEl && startEl.value)
   const endAt = dashParseLocalDT(endEl && endEl.value)
+  // v89：适用部门（不勾 = 全部部门）
+  const depts = dashPickedDepts()
   if (startAt && endAt && endAt <= startAt) { alert(t('dashRoundCreateFail')); return }
   const btn = document.getElementById('dashRoundCreateBtn')
   if (btn) btn.disabled = true
   try {
-    const res = await CloudSync.addChallengeRound({ name, startAt, endAt })
+    const res = await CloudSync.addChallengeRound({ name, startAt, endAt, depts })
     if (res && res.ok) {
       alert(t('dashRoundCreated', name || ('第 ' + ((dashRoundList().length) + 1) + ' 期')))
       dashRoundView = res.id
@@ -3348,6 +3601,12 @@ function dashViewRound(el) {
   if (p) p.innerHTML = dashRoundsPanelHtml()
 }
 let dashRoundView = ''   // '' = 当前营次；否则为指定营次 id（看板统计筛选）
+// v89：看板挑战统计的部门筛选（'all' = 全部部门；否则大部门 key / 分部门 slug）
+let dashChDept = 'all'
+function dashChSetDept(k) {
+  dashChDept = String(k || 'all')
+  renderDashChallengeBlock(_perQLastRows || [])
+}
 
 // ====== 管理员看板：重置某学员的挑战考试成绩（v83 引入，v84 收窄口径，v85 修按钮接线） ======
 // 二次确认后调 CloudSync.setChallengeReset：① 云端过滤掉该学员 chy 中 kind==='test' 的记录
@@ -3443,7 +3702,26 @@ function renderDashChallengeBlock(rows) {
   // 记录营次归一：'' / 'r1' / undefined 均视同第一期（v87 及更早的记录不带 rd 字段）
   const recSlug = x => dashRoundSlug((x && x.rd) || '')
   const chyOf = r => (r && r.chy ? r.chy.filter(x => recSlug(x) === wantSlug) : [])
-  const parts = (rows || []).filter(r => r && chyOf(r).length)
+  // v89 部门筛选：'all' = 全部部门；否则按大部门 key / 分部门 slug 过滤学员
+  const deptFilter = r => {
+    if (dashChDept === 'all') return true
+    const hit = (typeof normDept === 'function') ? normDept(r && r.dept) : null
+    if (!hit) return false
+    if (dashChDept.indexOf('/') >= 0) return hit.key === dashChDept
+    return hit.majorKey === dashChDept
+  }
+  const parts = (rows || []).filter(r => r && chyOf(r).length && deptFilter(r))
+  // v89 部门筛选按钮组（饮食部四分队 + 房务部 + 全部）：各部门题不同 → 需要分开看
+  const deptBarOptions = ['all'].concat(
+    (typeof ADMIN_DEPT_TABS !== 'undefined' ? ADMIN_DEPT_TABS : []).filter(k => k !== 'all')
+  )
+  const deptLabelOf = k => k === 'all'
+    ? t('roundDeptAll')
+    : ((typeof adminTabLabel === 'function' && adminTabLabel(k)) || k)
+  const deptBar = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+      <span style="font-size:12px;color:#6b7280">${t('dashChDeptFilterLabel')}：</span>
+      ${deptBarOptions.map(k => `<button class="btn btn-sm ${dashChDept === k ? 'btn-primary' : 'btn-ghost'}" style="padding:3px 10px;font-size:12px" onclick="dashChSetDept('${escAttr(k)}')">${escHtml(deptLabelOf(k))}</button>`).join('')}
+    </div>`
   const rdList = dashRoundList()
   const rdName = (rdList.find(r => r.id === want) || {}).name || (want === 'r1' ? '第一期' : want)
   // v88 营次筛选按钮组（多期并存时才有意义；单期时只显示提示行）
@@ -3454,7 +3732,7 @@ function renderDashChallengeBlock(rows) {
       </div>`
     : ''
   if (!parts.length) {
-    el.innerHTML = `<div class="card" style="margin-top:16px">${filterBar}<div style="padding:24px;text-align:center;color:#9ca3af">🏅 ${t('dashChNone')}</div>
+    el.innerHTML = `<div class="card" style="margin-top:16px">${filterBar}${deptBar}<div style="padding:24px;text-align:center;color:#9ca3af">🏅 ${t('dashChNone')}</div>
       <p class="form-hint" style="text-align:center;margin:0">${t('dashRoundStatHint', rdName)}</p></div>`
     return
   }
@@ -3551,6 +3829,7 @@ function renderDashChallengeBlock(rows) {
     <div class="card" style="margin-top:16px">
       <h3 style="margin-bottom:8px">🏅 ${t('dashChTitle')} · <span style="color:#2563eb">${escHtml(rdName)}</span></h3>
       ${filterBar}
+      ${deptBar}
       <div class="dashboard-summary" style="margin-bottom:12px">
         <div class="dash-stat"><div class="dash-val">${list.length}</div><div class="dash-lbl">${t('dashChJoin')}</div></div>
         <div class="dash-stat"><div class="dash-val">${totalQ}</div><div class="dash-lbl">${t('dashChTotalQ')}</div></div>
@@ -3968,6 +4247,9 @@ function updateCloudStatus(s) {
 // ====== Init ======
 function init() {
   Store.init()
+  // v89：先把当前登录者的分部门同步给 CloudSync —— 必须在任何 _getDoc 之前，
+  // 否则首屏会按「不限部门」挑营次，多部门并存时学员可能看到别的部门的期次。
+  Store.syncDeptSlug()
   Store.recalcPlacementLevels() // 一次性：用新逻辑重算已有定级
   ensureCourseBankSynced()      // v43：后台派生线下课题库（不阻塞首屏；离线时静默沿用本地）
   renderStaticText() // 按 i18n 语言渲染登录页/导航静态文本

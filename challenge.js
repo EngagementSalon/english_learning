@@ -48,6 +48,52 @@ const CHALLENGE_DIFF_PLAN = [
 // 水平测试分层随机配比：难度1×10 + 难度2×7 + 难度3×3 = 20 题（保证测试覆盖全部难度）
 const CHALLENGE_TEST_PLAN = [10, 7, 3]
 
+// v89：当前学员所属分部门（'dining/bar' 等 slug）；管理员/其他部门返回 ''（=不限部门，看全库）
+function chDeptKey() {
+  try {
+    if (typeof sessionDeptSlug === 'function') return sessionDeptSlug()
+  } catch (e) {}
+  return ''
+}
+// v89：挑战题库 = 分类 12 中「本部门 + 通用」的题（未登录/其他部门 → 全库，兼容旧行为）
+// 兼容 v89 前的历史题：只有 'dining'（大部门）或空 dept 的题，对饮食部四分队全部可见。
+function chBankQuestions() {
+  const all = Store.getQuestions().filter(q => Number(q.category_id) === 12)
+  const k = chDeptKey()
+  if (!k) return all
+  const major = k.split('/')[0]
+  return all.filter(q => {
+    const d = q.dept || ''
+    if (!d || d === 'all') return true
+    if (d === k || d === major) return true        // 本分部门题 / 本大部门整包题
+    // 学员本身就是大部门 key（如 'dining'）→ 该大部门下所有分部门的题都可见
+    if (k.indexOf('/') < 0 && d.indexOf(major + '/') === 0) return true
+    return false                                   // 其他部门（含同大部门其他分部门）的题不给
+  })
+}
+// v89：本部门题库题目数（入口页文案用）
+function chBankCount() { return chBankQuestions().length }
+// v89：本部门题库是否够跑完七天（Day7 需 170 练习 + 20 测试；不足时入口页提示管理员补题）
+const CHALLENGE_MIN_BANK = 190
+function chBankShort() { const n = chBankCount(); return n > 0 && n < CHALLENGE_MIN_BANK }
+// v89：题目 id 集合（本地进度里的 qid 需按当前部门题库过滤，避免跨部门串题）
+function chBankIdSet() {
+  const set = new Set()
+  chBankQuestions().forEach(q => set.add(String(q.id)))
+  return set
+}
+
+// v89：挑战标题 —— 有分部门时用「<部门>七天英文挑战」，否则回退通用标题
+function chDeptName() {
+  const k = chDeptKey()
+  if (!k) return ''
+  try { return (typeof deptSlugName === 'function' && deptSlugName(k)) || '' } catch (e) { return '' }
+}
+function chTitleText() {
+  const d = chDeptName()
+  return d ? t('chTitleDept', d) : t('chTitle')
+}
+
 // mulberry32 伪随机（v79：种子按登录用户名派生 → 每人一套专属序列，同账号可复现）
 function challengeRng(seed) {
   let s = seed >>> 0
@@ -130,11 +176,12 @@ function chUserSeed() {
   return (CHALLENGE_SEED + (h >>> 0) + (h2 >>> 0)) >>> 0
 }
 
-// 练习序列：分类 12 全部题（id 去重防御）→ 按难度分桶（桶内按用户名派生种子洗牌）→ 按档配比抽取 170 题。
+// 练习序列：本部门题库（id 去重防御）→ 按难度分桶（桶内按用户名派生种子洗牌）→ 按档配比抽取 170 题。
 // 返回数组即练习序列：Day1 巩固练习 10 题在前，依次到 Day7 巩固练习 10 题在后（测试题不占序列，见下）。
 // 难度逐日递增：Day1 均值 1.0 → Day7 均值 2.2；题库总量不足配比时自动顺延到下一个难度桶。
+// v89：题源收窄为 chBankQuestions()（本部门 + 通用），七天挑战不再跨部门串题。
 function challengePool() {
-  const all = Store.getQuestions().filter(q => Number(q.category_id) === 12)
+  const all = chBankQuestions()
   const seen = new Set()
   const uniq = []
   for (const q of all) {
@@ -206,8 +253,9 @@ function challengeStratifiedDraw(source, total) {
   return out.map(shuffleOptions)
 }
 // 全库随机抽题（v80 前 test 唯一题源；现保留给 Day1 摸底——尚无已刷题时回退使用）
+// v89：题源收窄为本部门题库
 function challengeRandomQuestions(total) {
-  return challengeStratifiedDraw(Store.getQuestions().filter(q => Number(q.category_id) === 12), total)
+  return challengeStratifiedDraw(chBankQuestions(), total)
 }
 // v80：考试题目出自本人已刷过的练习题——题源 = 个人练习序列中「已完成练习阶段」覆盖的前缀
 //（线性解锁 → 已完成阶段恰为个人序列的前缀），从中分层随机抽 20 题；
@@ -223,9 +271,11 @@ function challengeTestQuestions() {
 }
 // 前一天所有环节的错题（v72）：汇总 stages[].wrong（qid 去重）→ 取回题目 → 选项重洗。
 // 旧进度记录无 wrong 字段时返回空数组（兼容 v71 及更早的已完成阶段）。
+// v89：只取本部门题库内的题——学员换部门后，旧部门错题不再复现。
 function chPrevDayWrongQuestions(prevDay) {
   const cfg = CHALLENGE_DAYS.find(x => x.day === prevDay)
   if (!cfg) return []
+  const bankIds = chBankIdSet()
   const seen = new Set()
   const out = []
   cfg.stages.forEach((_, si) => {
@@ -234,6 +284,7 @@ function chPrevDayWrongQuestions(prevDay) {
     ws.forEach(qid => {
       const k = String(qid)
       if (seen.has(k)) return
+      if (bankIds.size && !bankIds.has(k)) return   // 已不属于本部门题库 → 跳过
       seen.add(k)
       const q = Store.getQuestion(Number(k)) || Store.getQuestion(k)
       if (q) out.push(shuffleOptions(q))
@@ -670,7 +721,8 @@ function renderChallenge() {
   // v77：记录本次渲染的门禁态（挑战开关 + 考试开关），拉取后变化则重渲染入口
   // v88：营次切换也会改变门禁与进度 → 一并纳入比较
   _chGateRendered = { open: chOpenLocked(), exam: chFinalExamLocked(), round: chCurrentRound() }
-  const bankN = Store.getQuestions().filter(q => Number(q.category_id) === 12).length
+  // v89：题源/标题按本部门题库（各分部门一套题、各自上传）
+  const bankN = chBankCount()
   const rows = CHALLENGE_DAYS.map(d => chDayBlockHtml(d)).join('')
   // v77 挑战未开放/已结束横幅（进度/积分榜/报告仍可查看）；v88 三态 + 营次名与起止时间
   const st = chRoundOpenState()
@@ -699,8 +751,12 @@ function renderChallenge() {
       </div>`
     : ''
   // v82/v88 营次标识条：让学员随时知道自己在哪一期（多期并存时尤其重要）
+  // v89：加部门标识 —— 各分部门题不同，学员需明确自己在哪个部门的挑战里
+  const chDeptTag = chDeptName()
+    ? `<span style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:999px;padding:2px 8px">🏷️ ${escHtml(chDeptName())}</span>`
+    : ''
   const chRoundBar = `<div class="card" style="margin-bottom:16px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
-      <div style="font-size:13px;font-weight:700">🎯 ${t('chRoundLabel')}：<span style="color:#2563eb">${escHtml(rName)}</span>${st.state === 'open' ? ` <span style="font-size:11px;color:#059669">● ${t('chRoundOpenTag')}</span>` : ''}</div>
+      <div style="font-size:13px;font-weight:700">🎯 ${t('chRoundLabel')}：<span style="color:#2563eb">${escHtml(rName)}</span>${st.state === 'open' ? ` <span style="font-size:11px;color:#059669">● ${t('chRoundOpenTag')}</span>` : ''} ${chDeptTag}</div>
       ${rMeta ? `<div style="font-size:12px;color:#6b7280">${rMeta}</div>` : ''}
     </div>`
   // v83/v84：管理员重置本学员记录后的一次性提示（10 分钟内保持可见）；考试成绩模式文案不同
@@ -726,9 +782,10 @@ function renderChallenge() {
     </div>
     ${chReportHtml()}
     <div class="card">
-      <h3>${t('chTitle')}</h3>
+      <h3>${escHtml(chTitleText())}</h3>
       <p class="form-hint" style="margin-bottom:8px">${t('chIntro')}</p>
       <p style="font-size:12px;color:#9ca3af;margin-bottom:12px">${t('chPoolInfo', bankN)}</p>
+      ${chBankShort() ? `<div class="feedback" style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:12px;margin-bottom:10px">⚠️ ${t('chBankShortWarn', bankN, CHALLENGE_MIN_BANK)}</div>` : ''}
       <div>${rows}</div>
     </div>
   `

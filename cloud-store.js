@@ -39,6 +39,8 @@ function _roundsNorm(doc) {
     out.push({
       id,
       name: String(r.name || ('第 ' + (i + 1) + ' 期')),
+      // v89：适用部门（空数组 = 全部部门；元素为分部门 slug 如 'dining/bar'）
+      depts: Array.isArray(r.depts) ? r.depts.filter(x => typeof x === 'string' && x) : [],
       open: r.open === true,
       examOpen: r.examOpen === true,
       examStartAt: Number(r.examStartAt) || 0,
@@ -61,6 +63,7 @@ function _roundCurrent(doc) {
 function _roundLegacy(doc) {
   return {
     id: 'r1', name: '第一期',
+    depts: [],
     open: (doc && doc.chOpen) === true,
     examOpen: (doc && doc.chExamOpen) === true,
     examStartAt: 0, examEndAt: 0,
@@ -139,6 +142,39 @@ function _roundNextId(arr) {  let mx = 0
 function _roundDefaultName(arr) {
   return '第 ' + ((arr || []).length + 1) + ' 期'
 }
+// ---- v89 营次 × 部门 ----
+// 营次适用部门匹配：r.depts 为空 → 全部部门适用（兼容 v88 存量营次）；
+// 否则要求学员分部门 slug 精确命中，或其大部门命中（营次设 'dining' 时饮食部四分队都适用）。
+function roundDeptMatch(r, deptSlug) {
+  const list = Array.isArray(r && r.depts) ? r.depts.filter(x => x) : []
+  if (!list.length) return true                 // 未限定部门 → 全部适用
+  const k = String(deptSlug || '')
+  if (!k) return true                           // 未登录/管理员/其他部门 → 不因部门被挡住
+  if (list.indexOf(k) >= 0) return true
+  const major = k.split('/')[0]
+  if (list.indexOf(major) >= 0) return true     // 营次设的是大部门
+  // 营次设了某个分部门、学员是同一大部门其他分部门 → 不匹配
+  return false
+}
+// 学员端「我这一期」解析（v89）：
+//   ① 优先尊重管理员的当前指针 chRoundCur —— 只要它部门匹配，就用它（v88 语义不变；
+//      管理员切到哪一期，学员端就跟随哪一期，含「已切换但未到开放时间」的 upcoming 态）。
+//   ② 当前指针不适用本部门（例如它是给别的分部门开的）时，退而取「本部门适用且已开放」的最新一期。
+//   ③ 都不满足 → 取本部门适用的最新一期（哪怕未开放，学员端会显示对应锁定文案）。
+// deptSlug 为空（管理员/未登录/其他部门）→ ① 永远命中，行为与 v88 完全一致。
+function _roundCurrentForDept(doc, deptSlug) {
+  const arr = _roundsNorm(doc)
+  if (!arr.length) return _roundLegacy(doc)
+  const cur = _roundCurrent(doc)
+  if (cur && roundDeptMatch(cur, deptSlug)) return cur          // ①
+  for (let i = arr.length - 1; i >= 0; i--) {                    // ②
+    if (roundDeptMatch(arr[i], deptSlug) && roundOpenState(arr[i], Date.now()).on) return arr[i]
+  }
+  for (let i = arr.length - 1; i >= 0; i--) {                    // ③
+    if (roundDeptMatch(arr[i], deptSlug)) return arr[i]
+  }
+  return cur
+}
 const CLOUD_EVENTS_MAX = 1500            // 云端保留的最近事件数（更早的折叠进 base 聚合）
 const CLOUD_DURATION_CHUNK = 5 * 60      // 登录时长按 5 分钟分块上报（秒）
 const CLOUD_PUSH_INTERVAL = 5 * 60 * 1000 // 定期推送间隔（毫秒）
@@ -160,6 +196,9 @@ const CloudSync = {
   _listeners: [],
   _durAcc: 0,           // 未上报的登录时长累计（毫秒）
   _user: null,          // 当前登录用户 { u, n }
+  // v89：当前登录学员的分部门 slug（'dining/bar' 等）。由 app.js 在登录/切部门时写入，
+  // _getDoc 据此为学员挑选「本部门适用的那一期」营次；为空（管理员/未登录/其他部门）时行为与 v88 一致。
+  _deptSlug: '',
 
   init() {
     this._migrateLegacy()
@@ -186,6 +225,9 @@ const CloudSync = {
 
   // ---------- 当前登录用户（时长归属） ----------
   setUser(u, n) { this._user = { u, n } },
+  // v89：设置当前学员分部门 slug（'dining/bar'）。登录/切部门/退出时由 app.js 调用；
+  // 传空字符串即「不按部门挑营次」（管理员/未登录/其他部门）。
+  setDeptSlug(s) { this._deptSlug = String(s || '') },
 
   // ---------- 待上报队列（localStorage 持久化，断网不丢） ----------
   _queue() {
@@ -231,11 +273,15 @@ const CloudSync = {
     // v88 侧信道：七天挑战「营次」。所有拉取路径（周期探测 / fetchSyncSummary / getDashboardData /
     // 开关写后校验）都经此处，学员端/管理端读 CloudSync._chRounds / _chRoundCurId 即得最新状态。
     const rounds = _roundsNorm(doc)
-    const cur = _roundCurrent(doc) || _roundLegacy(doc)
+    // v89：学员端按「自己的分部门」挑营次（各分部门可同时进行不同期次）；
+    // 管理端/未登录/其他部门 → deptSlug 为空 → _roundCurrentForDept 行为与 v88 完全一致。
+    const depSlug = (typeof this._deptSlug === 'string') ? this._deptSlug : ''
+    const cur = _roundCurrentForDept(doc, depSlug)
     this._chRounds = rounds
     this._chHasRounds = rounds.length > 0
     this._chRoundCurId = cur.id
     this._chRoundCurName = cur.name
+    this._chRoundCurDepts = Array.isArray(cur.depts) ? cur.depts : []
     this._chRoundSeen = _roundsSeenIds()
     // v88：以下平台级侧信道统一取自「当前营次」——v76/v77/v83 的读取方（challenge.js 门禁、
     // 挑战重置检测、看板徽章）无需改动即自动跟随营次；自动排期在此结算为有效值。
@@ -514,6 +560,7 @@ const CloudSync = {
       rounds.push({
         id: newId,
         name: String(o.name || '').trim() || _roundDefaultName(rounds),
+        depts: Array.isArray(o.depts) ? o.depts.filter(x => typeof x === 'string' && x) : [],
         open: manual,
         examOpen: o.examOpen === true,
         examStartAt: Number(o.examStartAt) || 0,
@@ -541,6 +588,7 @@ const CloudSync = {
       const rec = rounds.find(r => r.id === rid)
       if (!rec) return false
       if ('name' in p) rec.name = String(p.name || '').trim() || rec.name
+      if ('depts' in p) rec.depts = Array.isArray(p.depts) ? p.depts.filter(x => typeof x === 'string' && x) : []
       if ('open' in p) { rec.open = p.open === true; if (rec.open) rec.at = Date.now() }
       if ('examOpen' in p) rec.examOpen = p.examOpen === true
       if ('startAt' in p) rec.startAt = Number(p.startAt) || 0

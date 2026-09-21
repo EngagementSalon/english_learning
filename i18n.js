@@ -29,10 +29,29 @@ const I18N = {
     deptSelectPh: '请选择', deptOtherPh: '请填写具体部门名称',
     errDeptRequired: '请选择大部门和分部门',
     deptTree: {
-      dining: { name: '饮食部', subs: ['标帜餐厅', '艳中餐厅', 'WOOBAR', 'WETBAR', 'LIQUID', '宴会运营', '客房送餐部'] },
+      dining: { name: '饮食部', subs: ['标帜餐厅', '艳中餐厅', '酒吧团队', '客房送餐'] },
       rooms: { name: '房务部', subs: ['迎宾前台', '礼宾部', '随时随需', '客房造型', '健身及水疗中心'] },
       other: { name: '其他部门', subs: [] }
     },
+    // v89：旧分部门 → 四分队归一（酒吧团队 = 原 WOOBAR + WETBAR + LIQUID）
+    deptSubAlias: {
+      'WOOBAR': '酒吧团队', 'WETBAR': '酒吧团队', 'LIQUID': '酒吧团队',
+      'woobar': '酒吧团队', 'wetbar': '酒吧团队', 'liquid': '酒吧团队',
+      '酒吧': '酒吧团队', '酒吧部': '酒吧团队', '酒水部': '酒吧团队',
+      '客房送餐部': '客房送餐', '送餐部': '客房送餐', '客房送餐服务': '客房送餐',
+      '标帜': '标帜餐厅', '艳中': '艳中餐厅', '艳餐厅': '艳中餐厅'
+    },
+    chDeptNames: {
+      '标帜餐厅': '标帜餐厅', '艳中餐厅': '艳中餐厅', '酒吧团队': '酒吧团队', '客房送餐': '客房送餐'
+    },
+    roundDeptLabel: '适用部门', roundDeptAll: '全部部门',
+    idxDining: '饮食部', idxRooms: '房务部', idxOther: '其他部门', idxAll: '全部',
+    legacyTag: '历史',
+    impDeptHint: '上传的题目会归入该部门题库，学员只在所属部门看到自己的题。',
+    chTitleDept: (d) => `${d}七天英文挑战`,
+    chBankShortWarn: (n, min) => `本部门题库当前只有 ${n} 题，跑完七天挑战建议至少 ${min} 题，请管理员继续上传题目。`,
+    dashRoundDeptHint: '不勾选 = 全部部门适用；勾选后该营次只对这些部门的学员开放。各部门可同时进行不同营次。',
+    dashChDeptFilterLabel: '部门',
     adminHint: '管理员账号由系统预置或由管理员创建',
     errInputUserPwd: '请输入用户名和密码',
     errWrongCredential: '用户名或密码错误',
@@ -751,11 +770,32 @@ const I18N = {
     deptMajorOpt: 'Major Department', deptSubOpt: 'Sub-department',
     deptSelectPh: 'Select...', deptOtherPh: 'Enter your department name',
     errDeptRequired: 'Please select your major department and sub-department',
+    // v89: four F&B sub-teams (Bar Team merges the former WOOBAR + WETBAR + LIQUID)
     deptTree: {
-      dining: { name: 'F&B', subs: ['Signatures Restaurant', 'Yan Chinese Restaurant', 'WOOBAR', 'WETBAR', 'LIQUID', 'Banquet Operations', 'In-Room Dining'] },
+      dining: { name: 'F&B', subs: ['Signatures Restaurant', 'Yan Chinese Restaurant', 'Bar Team', 'In-Room Dining'] },
       rooms: { name: 'Rooms', subs: ['Front Office', 'Concierge', 'Whatever/Whenever', 'Room Styling', 'Fitness & Spa'] },
       other: { name: 'Other', subs: [] }
     },
+    // v89: legacy sub-department → canonical sub-team
+    deptSubAlias: {
+      'WOOBAR': 'Bar Team', 'WETBAR': 'Bar Team', 'LIQUID': 'Bar Team',
+      'woobar': 'Bar Team', 'wetbar': 'Bar Team', 'liquid': 'Bar Team',
+      '酒吧团队': 'Bar Team',
+      '客房送餐部': 'In-Room Dining', '客房送餐': 'In-Room Dining',
+      '标帜餐厅': 'Signatures Restaurant', '艳中餐厅': 'Yan Chinese Restaurant'
+    },
+    chDeptNames: {
+      '标帜餐厅': 'Signatures Restaurant', '艳中餐厅': 'Yan Chinese Restaurant',
+      '酒吧团队': 'Bar Team', '客房送餐': 'In-Room Dining'
+    },
+    roundDeptLabel: 'Applies to', roundDeptAll: 'All Departments',
+    idxDining: 'F&B', idxRooms: 'Rooms', idxOther: 'Other', idxAll: 'All',
+    legacyTag: 'legacy',
+    impDeptHint: 'Uploaded questions go to this department bank; students only see their own department.',
+    chTitleDept: (d) => `${d} 7-Day English Challenge`,
+    chBankShortWarn: (n, min) => `This department bank currently has only ${n} questions; at least ${min} are recommended to complete the 7-day challenge. Please ask an admin to upload more.`,
+    dashRoundDeptHint: 'Leave all unchecked to apply to every department; checked departments see this round only. Different departments can run different rounds at the same time.',
+    dashChDeptFilterLabel: 'Dept',
     adminHint: 'Admin accounts are pre-configured or created by administrators',
     errInputUserPwd: 'Please enter username and password',
     errWrongCredential: 'Incorrect username or password',
