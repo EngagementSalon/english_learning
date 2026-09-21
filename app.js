@@ -3782,7 +3782,7 @@ function renderDashChallengeBlock(rows) {
       </div>`
     : ''
   if (!parts.length) {
-    el.innerHTML = `<div class="card" style="margin-top:16px">${filterBar}${deptBar}<div style="padding:24px;text-align:center;color:#9ca3af">🏅 ${t('dashChNone')}</div>
+    el.innerHTML = `<div class="card" style="margin-top:16px">${deptBar}${filterBar}<div style="padding:24px;text-align:center;color:#9ca3af">🏅 ${t('dashChNone')}</div>
       <p class="form-hint" style="text-align:center;margin:0">${t('dashRoundStatHint', rdName)}</p></div>`
     return
   }
@@ -3878,8 +3878,8 @@ function renderDashChallengeBlock(rows) {
   el.innerHTML = `
     <div class="card" style="margin-top:16px">
       <h3 style="margin-bottom:8px">🏅 ${t('dashChTitle')} · <span style="color:#2563eb">${escHtml(rdName)}</span></h3>
-      ${filterBar}
       ${deptBar}
+      ${filterBar}
       <div class="dashboard-summary" style="margin-bottom:12px">
         <div class="dash-stat"><div class="dash-val">${list.length}</div><div class="dash-lbl">${t('dashChJoin')}</div></div>
         <div class="dash-stat"><div class="dash-val">${totalQ}</div><div class="dash-lbl">${t('dashChTotalQ')}</div></div>
