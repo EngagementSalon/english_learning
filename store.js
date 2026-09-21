@@ -1309,11 +1309,14 @@ const Store = {
   },
   // v71：七天挑战阶段完成上报（chy 事件）→ 数据看板聚合参与名单 / 进度 / 每阶段分数 / Day1-Day7 测试分
   // v73：usedSec = 阶段净用时（秒）→ 看板积分榜（积分 = 答对 × 100 − 用时）；旧事件无此字段按 0
-  reportChallengeStage(day, si, kind, correct, total, usedSec) {
+  // v88：rd = 营次 id（多期营次隔离；缺省 '' 与旧数据一致，表示第一期/单期制）
+  reportChallengeStage(day, si, kind, correct, total, usedSec, round) {
     const s = this.getSession()
     if (!s || !s.username) return
     if (typeof CloudSync === 'undefined' || !CloudSync.enqueue) return
-    CloudSync.enqueue({ u: s.username, n: s.name || '', ty: 'chy', d: { day: day || 0, si: si || 0, kind: kind || 'practice', correct: correct || 0, total: total || 0, usedSec: usedSec || 0 } })
+    const rd = round != null && round !== '' ? String(round)
+      : (typeof chCurrentRound === 'function' ? String(chCurrentRound() || '') : '')
+    CloudSync.enqueue({ u: s.username, n: s.name || '', ty: 'chy', d: { day: day || 0, si: si || 0, kind: kind || 'practice', correct: correct || 0, total: total || 0, usedSec: usedSec || 0, rd: rd } })
   },
 
   // v38：看字选音发音修复的分数修正（一次性迁移，由 init 调用，见 init 内说明）

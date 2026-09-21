@@ -7,6 +7,138 @@
 // 说明：密码不进入云端，仍保存在各终端本地（账号只能在注册它的设备上登录）
 
 const CLOUD_SYNC_URL = 'https://textdb.dev/api/data/eq-quiz-sync-8bbbde30cfb569c6'
+
+// ====== v88 七天挑战「营次（Round）」=====
+// 背景：v77-v87 的挑战是单期制——平台级 chOpen/chExamOpen 一把开关，学员进度只有一份存档
+//   （localStorage eq_challenge_v2）。管理员再开一期会覆盖上一期数据，所以每期都得改代码发版。
+// v88 起支持多期营次：管理员在后台自助新建营次（可设起止时间 → 到点自动开放、到期自动关闭），
+//   每期有独立的存档键、题序种子与云端开关，历史期次数据完整保留、互不干扰。
+// 云端 doc 结构（向下兼容，旧字段保留用于「上线时的当期」迁移）：
+//   chRounds: [{ id, name, open, examOpen, examStartAt, examEndAt, startAt, endAt, at }]
+//     id      营次 ID（'r1'、'r2'… 递增；上线迁移动作为 'r1'）
+//     name    营次名称（如「第一期」）
+//     open    手动开关（自动排期未命中时的兜底；startAt/endAt 均缺省时完全由它决定，与 v87 行为一致）
+//     startAt 自动开放时间（毫秒时间戳，0 = 不限）→ 到点自动算作开放
+//     endAt   自动关闭时间（毫秒时间戳，0 = 不限）→ 到期自动算作结束
+//     examOpen/examStartAt/examEndAt  第 7 天期末考试的同款三件套（缺省 = 跟随手动值）
+//   chRoundLevels: { <营次>: { chResets, chResetModes } }  按营次隔离的管理员重置标记
+//   chRoundCur: 'r1'  当前营次 id（学员端只读写这一期；管理员可切换查看其它期）
+// 自动排期口径（两侧同源：本文件 roundOpenState/roundExamState，看板 renderDashRoundBlock 同逻辑副本）：
+//   任一时刻先看时间窗——未到 startAt → 未开始；已过 endAt → 已结束；
+//   在窗口内（或无时间限制）→ 以手动开关 open 为准。
+const ROUND_LEVEL_FIELDS = ['chOpen', 'chOpenAt', 'chExamOpen', 'chExamAt', 'chResets', 'chResetModes']
+
+// 归一化营次数组（脏数据兜底；无营次时返回空数组，由读取路径兜底成「默认期」）
+function _roundsNorm(doc) {
+  const arr = Array.isArray(doc && doc.chRounds) ? doc.chRounds : []
+  const out = []
+  arr.forEach((r, i) => {
+    if (!r || typeof r !== 'object') return
+    const id = String(r.id || '').trim()
+    if (!id) return
+    out.push({
+      id,
+      name: String(r.name || ('第 ' + (i + 1) + ' 期')),
+      open: r.open === true,
+      examOpen: r.examOpen === true,
+      examStartAt: Number(r.examStartAt) || 0,
+      examEndAt: Number(r.examEndAt) || 0,
+      startAt: Number(r.startAt) || 0,
+      endAt: Number(r.endAt) || 0,
+      at: Number(r.at) || 0,
+    })
+  })
+  return out
+}
+// 当前营次：doc.chRoundCur 命中则用它，否则取最后一个（最新一期）。
+function _roundCurrent(doc) {
+  const arr = _roundsNorm(doc)
+  if (!arr.length) return null
+  const cur = String((doc && doc.chRoundCur) || '')
+  return arr.find(r => r.id === cur) || arr[arr.length - 1]
+}
+// 「上线时的当期」（v87 及更早的单期制数据）：没建过任何营次时，平台级字段就是全部状态。
+function _roundLegacy(doc) {
+  return {
+    id: 'r1', name: '第一期',
+    open: (doc && doc.chOpen) === true,
+    examOpen: (doc && doc.chExamOpen) === true,
+    examStartAt: 0, examEndAt: 0,
+    startAt: 0, endAt: 0,
+    at: Number(doc && doc.chOpenAt) || 0,
+  }
+}
+// 学员端/管理端渲染共用的已见营次 id 列表（localStorage；旧版单期进度视同 'r1'）
+function _roundsSeenIds() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('eq_ch_rounds_seen') || '[]')
+    let ids = Array.isArray(raw) ? raw.filter(x => typeof x === 'string' && x) : []
+    if (localStorage.getItem('eq_challenge_v2') && ids.indexOf('r1') < 0) ids = ['r1'].concat(ids)
+    return ids
+  } catch (e) { return [] }
+}
+
+// 某营次的重置标记与模式（v88：按营次隔离存于 doc.chRoundLevels[营次]；
+// 老数据（v87 及更早）在 doc 顶层 —— 顶层即上线时的当期，只有 'r1'/'第一期' 会回落到它）。
+function _roundLevels(doc, id) {
+  const box = (doc && doc.chRoundLevels && typeof doc.chRoundLevels === 'object') ? doc.chRoundLevels : {}
+  const lv = (box && typeof box[id] === 'object' && box[id]) || {}
+  const legacy = (id === 'r1' || id === '第一期')
+  const resets = (lv.chResets && typeof lv.chResets === 'object') ? lv.chResets
+    : (legacy && doc && doc.chResets && typeof doc.chResets === 'object' ? doc.chResets : {})
+  const modes = (lv.chResetModes && typeof lv.chResetModes === 'object') ? lv.chResetModes
+    : (legacy && doc && doc.chResetModes && typeof doc.chResetModes === 'object' ? doc.chResetModes : {})
+  return { chResets: resets, chResetModes: modes }
+}
+
+// ---- v88 自动排期结算（学员端与看板共用同一口径，看板 renderDashRoundBlock 内联同逻辑）----
+// 时间窗（本地时区）三态：
+//   endAt>0 且 now>=endAt                    → 'ended'    已结束（无视手动开关）
+//   startAt>0 且 now<startAt                 → 'upcoming' 未开始
+//   其余（窗口内 / 无时间限制）               → 以手动开关 open 为准
+// 返回 { state, on, locked, everOpen }：
+//   state     给 UI 选文案（未开始 / 进行中 / 已结束）
+//   on        有效开放态（学员端门禁 chOpenLocked 用的就是它）
+//   everOpen  是否「曾开放过」——决定锁定文案是「未开放」还是「已结束」
+function roundOpenState(r, now) {
+  const t = Number(now) || Date.now()
+  const startAt = Number(r && r.startAt) || 0
+  const endAt = Number(r && r.endAt) || 0
+  const manual = !!(r && r.open)
+  if (endAt > 0 && t >= endAt) return { state: 'ended', on: false, locked: true, everOpen: true }
+  if (startAt > 0 && t < startAt) return { state: 'upcoming', on: false, locked: true, everOpen: false }
+  return { state: manual ? 'open' : 'closed', on: manual, locked: !manual, everOpen: manual || !!(Number(r && r.at) > 0) }
+}
+// 期末考试开关：单独一道开关（v76 语义不变）——营次是否开放由 chOpenLocked 另行拦截，
+// 这里不再叠加营次门禁，否则「挑战开着但考试开关开着」的 v87 存量数据会被误判为锁定。
+// 有营次且填了考试时间窗时，时间窗仍然生效。
+function roundExamState(r, now, openState) {
+  const t = Number(now) || Date.now()
+  const s = Number(r && r.examStartAt) || 0
+  const e = Number(r && r.examEndAt) || 0
+  if (e > 0 && t >= e) return { on: false, locked: true, everOpen: true }
+  if (s > 0 && t < s) return { on: false, locked: true, everOpen: false }
+  return { on: !!(r && r.examOpen), locked: !(r && r.examOpen), everOpen: !!(r && r.examOpen) }
+}
+// 营次「记录键」归一：chy 记录里的 rd 与 chreset 事件的 d.round 必须同口径才能对上。
+//   'r1' / '' / 缺省 → ''（第一期：v87 及更早的 chy 记录本就没有 rd 字段，重置事件也走 '' 分支）
+//   其余营次 → 原样（营次名称即记录键）
+function _roundSlugKey(id) {
+  const s = String(id == null ? '' : id).trim()
+  return (!s || s === 'r1') ? '' : s
+}
+// 营次 id 生成：'rN' 递增（N 取已有序号最大值 +1，避免删除后重号）
+function _roundNextId(arr) {  let mx = 0
+  ;(arr || []).forEach(r => {
+    const m = /^r(\d+)$/.exec(String((r && r.id) || ''))
+    if (m) mx = Math.max(mx, Number(m[1]))
+  })
+  return 'r' + (mx + 1)
+}
+// 新营次默认名称：序号按数组长度 +1（显示用，可被管理员覆盖）
+function _roundDefaultName(arr) {
+  return '第 ' + ((arr || []).length + 1) + ' 期'
+}
 const CLOUD_EVENTS_MAX = 1500            // 云端保留的最近事件数（更早的折叠进 base 聚合）
 const CLOUD_DURATION_CHUNK = 5 * 60      // 登录时长按 5 分钟分块上报（秒）
 const CLOUD_PUSH_INTERVAL = 5 * 60 * 1000 // 定期推送间隔（毫秒）
@@ -96,20 +228,38 @@ const CloudSync = {
     const txt = await r.text()
     const doc = JSON.parse(txt)
     if (!doc || typeof doc !== 'object' || !Array.isArray(doc.events)) throw new Error('bad cloud doc')
-    // v76 侧信道：七天挑战期末考试开关（doc 顶层字段，默认缺省=关闭）。
-    // 所有拉取路径（周期探测 / fetchSyncSummary / getDashboardData / 开关写后校验）都经此处，
-    // 学员端/管理端读 CloudSync._chExamOpen 即得最新状态。
-    this._chExamOpen = doc.chExamOpen === true
-    // v77 侧信道：七天挑战整体开关（doc 顶层字段，默认缺省=关闭）+ 最近一次开放时间。
+    // v88 侧信道：七天挑战「营次」。所有拉取路径（周期探测 / fetchSyncSummary / getDashboardData /
+    // 开关写后校验）都经此处，学员端/管理端读 CloudSync._chRounds / _chRoundCurId 即得最新状态。
+    const rounds = _roundsNorm(doc)
+    const cur = _roundCurrent(doc) || _roundLegacy(doc)
+    this._chRounds = rounds
+    this._chHasRounds = rounds.length > 0
+    this._chRoundCurId = cur.id
+    this._chRoundCurName = cur.name
+    this._chRoundSeen = _roundsSeenIds()
+    // v88：以下平台级侧信道统一取自「当前营次」——v76/v77/v83 的读取方（challenge.js 门禁、
+    // 挑战重置检测、看板徽章）无需改动即自动跟随营次；自动排期在此结算为有效值。
+    const effOpen = roundOpenState(cur, Date.now())
+    const effExam = roundExamState(cur, Date.now(), effOpen)
+    // v76 侧信道：七天挑战期末考试开关（默认缺省=关闭）
+    this._chExamOpen = effExam.on
+    // v77 侧信道：七天挑战整体开关（默认缺省=关闭）+ 最近一次开放时间。
     // 关闭时保留 chOpenAt → 学员端据「曾开放过」区分「未开放 / 已结束」两种锁定文案。
-    this._chOpen = doc.chOpen === true
-    this._chOpenAt = Number(doc.chOpenAt) || 0
-    // v83 侧信道：七天挑战重置标记（doc 顶层 chResets = { 用户名: 时间戳 }）。
+    this._chOpen = effOpen.on
+    this._chOpenAt = cur.at || 0
+    this._chOpenLocked = effOpen.locked
+    this._chStartAt = cur.startAt
+    this._chEndAt = cur.endAt
+    // v83 侧信道：七天挑战重置标记（按营次存于 doc.chRoundLevels[营次]；无营次容器时回落到 doc 顶层，
+    // 即 v87 的布局 —— 顶层字段永远是「第一期」的家）。
     // 管理员重置后，该学员端读到比本地已处理标记更新的值 → 按模式处理本地记录：
     //   chResetModes[用户名] === 'exam'（v84 起唯一模式）→ 只清两场水平测试成绩，练习进度保留
     //   无模式记录（v83 旧数据）→ 兼容为整表清空（回到 Day1）
-    this._chResets = (doc.chResets && typeof doc.chResets === 'object') ? doc.chResets : {}
-    this._chResetModes = (doc.chResetModes && typeof doc.chResetModes === 'object') ? doc.chResetModes : {}
+    // 注意：这里不做营次开放判定 —— 重置标记终须到达学员端，才能保证其本地存档同步清理；
+    //   挑战是否可进入另由 _chOpenLocked 拦截，两者互不干扰。
+    const lv = _roundLevels(doc, cur.id)
+    this._chResets = lv.chResets
+    this._chResetModes = lv.chResetModes
     try { localStorage.setItem('eq_cloud_cache', txt) } catch (e) { /* ignore */ }
     return doc
   },
@@ -219,39 +369,83 @@ const CloudSync = {
     this._logoGuardTimer = setTimeout(heal, Math.max(50, this._logoGuardDelay))
   },
 
-  // ---------- 七天挑战期末考试开关（v76，全平台同步） ----------
-  // 说明：开关存于云文档顶层字段 chExamOpen（缺省 = 关闭），与 Logo 同层的平台级配置，
-  // 不随事件折叠。管理员开启后，学员端才可进入第 7 天期末考试（Day1 摸底测试不受影响）。
+  // ---------- 七天挑战期末考试开关（v76；v88 起按营次） ----------
+  // 说明：开关存于当前营次的 examOpen 字段（缺省 = 关闭）；v88 前存于 doc 顶层 chExamOpen，
+  // 由 _roundLegacy 兜底为「第一期」读取，故旧数据行为不变。
+  // 管理员开启后，学员端才可进入第 7 天期末考试（Day1 摸底测试不受影响）。
   // 读-改-写 + 写后校验重试；成功后立即同步本地侧信道，无需等待下次拉取。
+  // open 可传布尔值，或 { open, startAt, endAt } 对象（排期设置，见 setChallengeRound）。
   async setChallengeExamOpen(open) {
-    const val = !!open
+    const spec = (open && typeof open === 'object') ? open : { open: open }
+    const val = spec.open === true
+    const setAt = Number(spec.startAt) || 0
+    const setEnd = Number(spec.endAt) || 0
+    const hasSchedule = ('startAt' in spec) || ('endAt' in spec)
     let saved = false
     for (let attempt = 0; attempt < 4 && !saved; attempt++) {
       try {
         const doc = await this._getDoc()
-        doc.chExamOpen = val
-        doc.chExamAt = Date.now()
+        const cur = _roundCurrent(doc)
+        if (cur) {
+          const arr = _roundsNorm(doc)
+          const rec = arr.find(r => r.id === cur.id)
+          if (!rec) throw new Error('round missing')
+          rec.examOpen = val
+          if (hasSchedule) { rec.examStartAt = setAt; rec.examEndAt = setEnd }
+          rec.at = rec.at || Date.now()
+          doc.chRounds = arr
+        } else {
+          // 兼容路径（尚无营次）：维持 v87 的顶层字段写法
+          doc.chExamOpen = val
+          doc.chExamAt = Date.now()
+        }
         await this._putDoc(doc)
         const check = await this._getDoc()
         if (check.chExamOpen === val) saved = true
       } catch (e) { /* 网络波动等 → 重试 */ }
     }
-    if (saved) this._chExamOpen = val
+    if (saved) {
+      this._chExamOpen = val
+      if (this._chRounds && this._chRounds.length) {
+        const rec = this._chRounds.find(r => r.id === this._chRoundCurId)
+        if (rec) {
+          rec.examOpen = val
+          if (hasSchedule) { rec.examStartAt = setAt; rec.examEndAt = setEnd }
+        }
+      }
+    }
     return saved ? { ok: true } : { ok: false, reason: 'network' }
   },
 
-  // ---------- 七天挑战开放开关（v77，全平台同步） ----------
-  // 说明：开关存于云文档顶层字段 chOpen（缺省 = 关闭），与 chExamOpen 同层的平台级配置，
-  // 不随事件折叠。开放时写 chOpenAt=now；关闭时保留 chOpenAt（学员端据此显示「已结束」而非「未开放」）。
+  // ---------- 七天挑战开放开关（v77；v88 起按营次） ----------
+  // 说明：开关存于当前营次的 open 字段（缺省 = 关闭）；v88 前存于 doc 顶层 chOpen，
+  // 由 _roundLegacy 兜底为「第一期」读取，故旧数据行为不变。
+  // 开放时写 at=now；关闭时保留 at（学员端据此显示「已结束」而非「未开放」）。
+  // open 可传布尔值，或 { open, startAt, endAt } 对象（排期设置：到点自动开放、到期自动关闭）。
   // 读-改-写 + 写后校验重试；成功后立即同步本地侧信道，无需等待下次拉取。
   async setChallengeOpen(open) {
-    const val = !!open
+    const spec = (open && typeof open === 'object') ? open : { open: open }
+    const val = spec.open === true
+    const setAt = Number(spec.startAt) || 0
+    const setEnd = Number(spec.endAt) || 0
+    const hasSchedule = ('startAt' in spec) || ('endAt' in spec)
     let saved = false
     for (let attempt = 0; attempt < 4 && !saved; attempt++) {
       try {
         const doc = await this._getDoc()
-        doc.chOpen = val
-        if (val) doc.chOpenAt = Date.now()
+        const cur = _roundCurrent(doc)
+        if (cur) {
+          const arr = _roundsNorm(doc)
+          const rec = arr.find(r => r.id === cur.id)
+          if (!rec) throw new Error('round missing')
+          rec.open = val
+          if (hasSchedule) { rec.startAt = setAt; rec.endAt = setEnd }
+          if (val) rec.at = Date.now()
+          doc.chRounds = arr
+        } else {
+          doc.chOpen = val
+          if (val) doc.chOpenAt = Date.now()
+        }
         await this._putDoc(doc)
         const check = await this._getDoc()
         if (check.chOpen === val) saved = true
@@ -259,43 +453,196 @@ const CloudSync = {
     }
     if (saved) {
       this._chOpen = val
-      if (val) this._chOpenAt = Date.now()
+      const rec = (this._chRounds || []).find(r => r.id === this._chRoundCurId)
+      if (rec) {
+        rec.open = val
+        if (hasSchedule) { rec.startAt = setAt; rec.endAt = setEnd }
+        if (val) rec.at = Date.now()
+        this._chOpenAt = rec.at
+      } else if (val) {
+        this._chOpenAt = Date.now()
+      }
     }
     return saved ? { ok: true } : { ok: false, reason: 'network' }
   },
 
-  // ---------- 重置某学员的七天挑战考试成绩（管理员触发，v83 引入 / v84 收窄口径） ----------
+  // ---------- 营次管理（v88） ----------
+  // 所有写操作统一走 _roundWrite：读-改-写 + 写后校验重试 4 次。
+  // mutator(doc, rounds) 直接改 rounds 数组（及任意 doc 字段），返回 false 表示校验失败条件。
+  async _roundWrite(mutator, verify) {
+    let saved = false
+    let detail = null
+    for (let attempt = 0; attempt < 4 && !saved; attempt++) {
+      try {
+        const doc = await this._getDoc()
+        const rounds = _roundsNorm(doc)
+        const r = mutator(doc, rounds)
+        if (r === false) return { ok: false, reason: 'invalid' }
+        detail = r || null
+        doc.chRounds = rounds
+        await this._putDoc(doc)
+        const check = await this._getDoc()
+        if (typeof verify === 'function' ? verify(check) : true) saved = true
+      } catch (e) { /* 网络波动等 → 重试 */ }
+    }
+    if (!saved) return { ok: false, reason: 'network' }
+    return { ok: true, doc: detail }
+  },
+  _roundSeenAdd(id) {
+    try {
+      const ids = _roundsSeenIds()
+      if (id && ids.indexOf(id) < 0) { ids.push(id); localStorage.setItem('eq_ch_rounds_seen', JSON.stringify(ids)) }
+    } catch (e) { /* ignore */ }
+    this._chRoundSeen = _roundsSeenIds()
+  },
+  // 新建营次。opts = { name, open, examOpen, startAt, endAt, examStartAt, examEndAt, makeCurrent }
+  // 新营次默认「未开放」（除非显式 open:true）——避免误点把全班推进新一期。
+  async addChallengeRound(opts) {
+    const o = opts || {}
+    let newId = ''
+    const res = await this._roundWrite((doc, rounds) => {
+      // 首次建营次时，先把 v87 之前的单期状态迁成「第一期」，历史数据不丢
+      if (!rounds.length) {
+        const legacy = _roundLegacy(doc)
+        rounds.push(legacy)
+        if (!doc.chRoundCur) doc.chRoundCur = legacy.id
+      }
+      newId = _roundNextId(rounds)
+      const startAt = Number(o.startAt) || 0
+      const endAt = Number(o.endAt) || 0
+      const manual = o.open === true
+      rounds.push({
+        id: newId,
+        name: String(o.name || '').trim() || _roundDefaultName(rounds),
+        open: manual,
+        examOpen: o.examOpen === true,
+        examStartAt: Number(o.examStartAt) || 0,
+        examEndAt: Number(o.examEndAt) || 0,
+        startAt, endAt,
+        at: manual ? Date.now() : 0,
+      })
+      doc.chRoundCur = newId   // 新建即设为当前营次（学员端切换依据）
+      return { id: newId }
+    }, check => {
+      const arr = _roundsNorm(check)
+      return arr.some(r => r.id === newId)
+    })
+    if (res.ok) this._roundSeenAdd(newId)
+    return res.ok ? { ok: true, id: newId } : res
+  },
+  // 更新某营次字段。patch = { name, open, examOpen, startAt, endAt, examStartAt, examEndAt }
+  // 注意：这里 open/examOpen 一律按布尔值写入（不带 startAt/endAt 的排期修改请用 setChallengeOpen）。
+  async setChallengeRound(id, patch) {
+    const rid = String(id || '')
+    if (!rid) return { ok: false, reason: 'noround' }
+    const p = patch || {}
+    let applied = false
+    const res = await this._roundWrite((doc, rounds) => {
+      const rec = rounds.find(r => r.id === rid)
+      if (!rec) return false
+      if ('name' in p) rec.name = String(p.name || '').trim() || rec.name
+      if ('open' in p) { rec.open = p.open === true; if (rec.open) rec.at = Date.now() }
+      if ('examOpen' in p) rec.examOpen = p.examOpen === true
+      if ('startAt' in p) rec.startAt = Number(p.startAt) || 0
+      if ('endAt' in p) rec.endAt = Number(p.endAt) || 0
+      if ('examStartAt' in p) rec.examStartAt = Number(p.examStartAt) || 0
+      if ('examEndAt' in p) rec.examEndAt = Number(p.examEndAt) || 0
+      applied = true
+      return { id: rid }
+    }, check => {
+      if (!applied) return true
+      const arr = _roundsNorm(check)
+      return arr.some(r => r.id === rid)
+    })
+    return applied ? (res.ok ? { ok: true, id: rid } : res) : { ok: false, reason: 'noround' }
+  },
+  // 切换当前营次（chRoundCur）——学员端只读写这一期。
+  async setChallengeRoundCurrent(id) {
+    const rid = String(id || '')
+    if (!rid) return { ok: false, reason: 'noround' }
+    let existed = false
+    const res = await this._roundWrite((doc, rounds) => {
+      if (!rounds.some(r => r.id === rid)) return false
+      existed = true
+      doc.chRoundCur = rid
+      return { id: rid }
+    }, check => String(check.chRoundCur || '') === rid)
+    if (!existed) return { ok: false, reason: 'noround' }
+    if (res.ok) this._roundSeenAdd(rid)
+    return res.ok ? { ok: true, id: rid } : res
+  },
+  // 删除营次。顺带清掉该营次的考试重置标记（doc.chRoundLevels[营次]）。
+  // 不清理学员浏览器里该期的本地存档（换机器不可控），但当前营次被删时会回落到最新一期。
+  async deleteChallengeRound(id) {
+    const rid = String(id || '')
+    if (!rid) return { ok: false, reason: 'noround' }
+    let existed = false
+    const res = await this._roundWrite((doc, rounds) => {
+      const i = rounds.findIndex(r => r.id === rid)
+      if (i < 0) return false
+      existed = true
+      rounds.splice(i, 1)
+      if (doc.chRoundLevels && typeof doc.chRoundLevels === 'object') delete doc.chRoundLevels[rid]
+      if (String(doc.chRoundCur || '') === rid) doc.chRoundCur = rounds.length ? rounds[rounds.length - 1].id : ''
+      return { id: rid }
+    }, check => !_roundsNorm(check).some(r => r.id === rid))
+    return existed ? (res.ok ? { ok: true, id: rid } : res) : { ok: false, reason: 'noround' }
+  },
+
+  // ---------- 重置某学员的七天挑战考试成绩（管理员触发，v83 引入 / v84 收窄口径 / v88 按营次） ----------
   // v84 起只重置「考试」：Day1 摸底 + Day7 期末考试（kind==='test' 的水平测试）成绩清零、可重新参加考试；
   // 练习进度（Day1-7 巩固练习）、每日打卡、挑战错题、练习部分积分全部保留。
+  // v88：重置标记按营次隔离（doc.chRoundLevels[当前营次]），重置只作用于当前营次，不影响其他期。
   // 两件事一起做，缺一不可：
-  //   ① doc 顶层 chResets[<用户名>] = 时间戳 + chResetModes[<用户名>] = 'exam'
+  //   ① doc.chRoundLevels[当前营次].chResets[<用户名>] = 时间戳 + chResetModes[<用户名>] = 'exam'
+  //      （当前营次为 'r1' 且尚无该容器时，兼容写回 doc 顶层 chResets/chResetModes —— v87 布局）
   //      → 该学员端读到更新标记后只删本地测试阶段记录（练习阶段记录是解锁权威，必须同步处理）
-  //   ② 推送 chreset 事件（d.mode='exam'）→ 云端聚合表过滤掉该学员 chy 中 kind==='test' 的记录，
-  //      看板等所有读取路径都是 base + events 重放，于是自然生效；事件按时间顺序重放，
-  //      重置之后重新考试提交的 chy 会正常累计（不会误删新成绩）。
+  //   ② 推送 chreset 事件（d.mode='exam' + d.round=当前营次）→ 云端聚合表过滤掉该学员该营次
+  //      chy 中 kind==='test' 的记录，看板等所有读取路径都是 base + events 重放，于是自然生效；
+  //      事件按时间顺序重放，重置之后重新考试提交的 chy 会正常累计（不会误删新成绩）。
   // 不清：题库级全局聚合 __q、普通练习明细 perQ、挑战错题 chQ（非考试成绩数据）。
   async setChallengeReset(username, name) {
     const u = String(username || '')
     if (!u) return { ok: false, reason: 'nouser' }
     const at = Date.now()
+    let round = ''
     let saved = false
     for (let attempt = 0; attempt < 4 && !saved; attempt++) {
       try {
         const doc = await this._getDoc()
-        doc.chResets = doc.chResets || {}
-        doc.chResets[u] = at
-        doc.chResetModes = doc.chResetModes || {}
-        doc.chResetModes[u] = 'exam'
+        const cur = _roundCurrent(doc)
+        round = cur ? cur.id : ''
+        if (round) {
+          doc.chRoundLevels = (doc.chRoundLevels && typeof doc.chRoundLevels === 'object') ? doc.chRoundLevels : {}
+          const box = doc.chRoundLevels[round] || (doc.chRoundLevels[round] = {})
+          box.chResets = box.chResets || {}
+          box.chResets[u] = at
+          box.chResetModes = box.chResetModes || {}
+          box.chResetModes[u] = 'exam'
+          // 第一期始终镜像到顶层（v87 及更早的学员端/看板只认顶层字段）
+          if (round === 'r1') {
+            doc.chResets = box.chResets
+            doc.chResetModes = box.chResetModes
+          }
+        } else {
+          doc.chResets = doc.chResets || {}
+          doc.chResets[u] = at
+          doc.chResetModes = doc.chResetModes || {}
+          doc.chResetModes[u] = 'exam'
+        }
         await this._putDoc(doc)
         const check = await this._getDoc()
-        if (Number((check.chResets || {})[u]) === at && (check.chResetModes || {})[u] === 'exam') saved = true
+        const box = (check.chRoundLevels && check.chRoundLevels[round]) || {}
+        const got = round ? Number((box.chResets || {})[u]) : Number((check.chResets || {})[u])
+        const mode = round ? (box.chResetModes || {})[u] : (check.chResetModes || {})[u]
+        if (got === at && mode === 'exam') saved = true
       } catch (e) { /* 网络波动等 → 重试 */ }
     }
     if (!saved) return { ok: false, reason: 'network' }
     // 聚合表清考试成绩（事件进队列；推送失败也不影响，队列留待下次周期推送）
-    this.enqueue({ u, n: name || u, ty: 'chreset', ts: at, d: { mode: 'exam' } })
+    this.enqueue({ u, n: name || u, ty: 'chreset', ts: at, d: { mode: 'exam', round: _roundSlugKey(round) } })
     try { await this.pushPending() } catch (e) { /* 保留在队列 */ }
-    return { ok: true, at }
+    return { ok: true, at, round }
   },
 
   // ---------- 聚合 ----------
@@ -415,11 +762,12 @@ const CloudSync = {
       case 'chy':
         // v71 七天挑战阶段完成上报：保留每次完成记录（练习重练多条；水平测试仅一条）
         // v73：usedSec = 阶段净用时秒（积分榜用；旧事件无此字段按 0，不影响积分）
+        // v88：rd = 营次 id（缺省 '' = 第一期/单期制旧数据）
         r.chy = r.chy || []
         r.chy.push({
           day: Number(d.day) || 0, si: Number(d.si) || 0, kind: String(d.kind || 'practice'),
           correct: Number(d.correct) || 0, total: Number(d.total) || 0,
-          usedSec: Number(d.usedSec) || 0, at: ev.ts,
+          usedSec: Number(d.usedSec) || 0, at: ev.ts, rd: _roundSlugKey(d.rd),
         })
         break
       case 'chreset':
@@ -427,15 +775,20 @@ const CloudSync = {
         //（kind==='test'：Day1 摸底 / Day7 期末）降级为「已重置存根」：保留 day/si/kind/at 供进度与每日打卡统计，
         // 清零 correct/total/usedSec（看板两列成绩显示「—」，积分不再计入该场考试；重考后写入的新记录正常计分）。
         // d.mode 缺省 / 'all'（v83 旧事件）→ 兼容为整表清空（chy 与挑战错题 chQ）。
+        // v88：d.round = 营次 id；只作用于该营次的 chy 记录（'' = 第一期/单期制旧数据，与 x.rd 缺省对齐）。
         // 题库级全局聚合 __q 与普通练习明细 perQ 不受影响（非挑战数据）。
+        const rids = _roundSlugKey(d.round)
+        const inRound = x => _roundSlugKey(x && x.rd) === rids
         if (d.mode === 'exam') {
           // 只降级「重置之前」的测试记录（x.at <= ev.ts）→ 事件重放幂等，重考产生的新成绩不会被重复清除
-          r.chy = (r.chy || []).map(x => (x && x.kind === 'test' && !x.cleared && (x.at || 0) <= ev.ts)
-            ? { day: x.day, si: x.si, kind: 'test', correct: 0, total: 0, usedSec: 0, at: x.at, cleared: true }
+          r.chy = (r.chy || []).map(x => (x && x.kind === 'test' && !x.cleared && inRound(x) && (x.at || 0) <= ev.ts)
+            ? { day: x.day, si: x.si, kind: 'test', correct: 0, total: 0, usedSec: 0, at: x.at, rd: _roundSlugKey(x.rd), cleared: true }
             : x)
         } else {
-          r.chy = []
-          r.chQ = {}
+          // v83 旧口径（整表清空）：该营次的挑战阶段记录；挑战错题 chQ 未按营次存储，
+          // 仅在「第一期/单期制」（rd=''）时一并清空，避免清一期误伤另一期的错题排行。
+          r.chy = (r.chy || []).filter(x => !inRound(x))
+          if (rids === '') r.chQ = {}
         }
         r.chResetAt = ev.ts
         r.chResetMode = d.mode === 'exam' ? 'exam' : 'all'

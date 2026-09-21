@@ -91,6 +91,13 @@ function renderBoard() {
   vm.runInContext(extractFn(appSrc, 'escAttr'), sb)
   vm.runInContext(extractFn(appSrc, 'dashChStageWeight'), sb)
   vm.runInContext(extractFn(appSrc, 'renderDashChallengeBlock'), sb)
+  // v88：营次筛选依赖（dashRoundView/dashRoundCurId/dashRoundList）——从 app.js 提取真实实现，
+  // 沙箱无云端营次 → dashRoundList 返回空数组、dashRoundCurId 兜底 'r1'，等价单期（第一期）口径
+  vm.runInContext('let dashRoundView = \'\'', sb)
+  vm.runInContext(extractFn(appSrc, 'dashRoundList'), sb)
+  vm.runInContext(extractFn(appSrc, 'dashRoundCurId'), sb)
+  vm.runInContext(extractFn(appSrc, 'dashRoundSlug'), sb)
+
   vm.runInContext('renderDashChallengeBlock(__rows)', sb)
   return sb.__el.innerHTML
 }

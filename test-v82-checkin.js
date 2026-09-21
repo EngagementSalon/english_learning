@@ -36,6 +36,13 @@ function renderDash(rows) {
   vm.runInContext(extractFn(appSrc, 'escAttr'), sb)   // v85：重置按钮 data-u/data-n 转义
   vm.runInContext(extractFn(appSrc, 'dashChStageWeight'), sb)
   vm.runInContext(extractFn(appSrc, 'renderDashChallengeBlock'), sb)
+  // v88：营次筛选依赖（dashRoundView/dashRoundCurId/dashRoundList）——从 app.js 提取真实实现，
+  // 沙箱无云端营次 → dashRoundList 返回空数组、dashRoundCurId 兜底 'r1'，等价单期（第一期）口径
+  vm.runInContext('let dashRoundView = \'\'', sb)
+  vm.runInContext(extractFn(appSrc, 'dashRoundList'), sb)
+  vm.runInContext(extractFn(appSrc, 'dashRoundCurId'), sb)
+  vm.runInContext(extractFn(appSrc, 'dashRoundSlug'), sb)
+
   vm.runInContext('const TYPE_LABELS = new Proxy({}, { get: (_, k) => k })', sb)
   vm.runInContext('const Store = { getQuestions: () => [] }', sb)
   vm.runInContext(`renderDashChallengeBlock(${JSON.stringify(rows)})`, sb)

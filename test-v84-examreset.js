@@ -43,6 +43,13 @@ function renderDash(rows) {
   vm.runInContext(extractFn(APP, 'escAttr'), sb)   // v85：重置按钮 data-u/data-n 转义
   vm.runInContext(extractFn(APP, 'dashChStageWeight'), sb)
   vm.runInContext(extractFn(APP, 'renderDashChallengeBlock'), sb)
+  // v88：营次筛选依赖（dashRoundView/dashRoundCurId/dashRoundList）——从 app.js 提取真实实现，
+  // 沙箱无云端营次 → dashRoundList 返回空数组、dashRoundCurId 兜底 'r1'，等价单期（第一期）口径
+  vm.runInContext('let dashRoundView = \'\'', sb)
+  vm.runInContext(extractFn(APP, 'dashRoundList'), sb)
+  vm.runInContext(extractFn(APP, 'dashRoundCurId'), sb)
+  vm.runInContext(extractFn(APP, 'dashRoundSlug'), sb)
+
   vm.runInContext('const TYPE_LABELS = new Proxy({}, { get: (_, k) => k })', sb)
   vm.runInContext('const Store = { getQuestions: () => [] }', sb)
   vm.runInContext(`renderDashChallengeBlock(${JSON.stringify(rows)})`, sb)
@@ -199,7 +206,9 @@ function fullChy(cleared) {
 
   // ---------- ④ 口径与接线 ----------
   console.log('\n[4] 实现口径与接线')
-  assert('云端：exam 模式按重置时刻过滤（重放幂等，只清重置前的成绩）', /x\.kind === 'test' && !x\.cleared && \(x\.at \|\| 0\) <= ev\.ts/.test(fs.readFileSync(path.join(__dirname, 'cloud-store.js'), 'utf-8')))
+  // v88：重置改为按营次作用 → 条件中多了 inRound(x)（仅清当前营次的测试记录），
+  // 但「按重置时刻过滤、只清重置前的成绩」这一幂等口径不变。
+  assert('云端：exam 模式按重置时刻过滤（重放幂等，只清重置前的成绩）', /x\.kind === 'test' && !x\.cleared && inRound\(x\) && \(x\.at \|\| 0\) <= ev\.ts/.test(fs.readFileSync(path.join(__dirname, 'cloud-store.js'), 'utf-8')))
   assert('看板：测试列跳过存根（!x.cleared）', APP.includes("x.kind === 'test' && x.day === 1 && !x.cleared") && APP.includes("x.kind === 'test' && x.day === 7 && !x.cleared"))
   assert('看板：积分去重跳过存根', /firstByStage\[k\] \|\| \(x\.at \|\| 0\)/.test(APP) && APP.includes('if (x.cleared) return'))
   assert('学员端积分榜同样跳过存根', CH.includes('if (x && x.cleared) return'))

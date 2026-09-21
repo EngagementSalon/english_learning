@@ -988,18 +988,22 @@ function renderPractice() {
 }
 
 // 七天挑战入口卡片（v70：入口移入练习页下方，不再是独立导航项；v77 未开放/已结束时提示锁定态）
+// v88：多期营次 —— 显示当前营次名；锁定态分「未开始 / 未开放 / 已结束」三种文案。
 function challengeEntryHtml() {
   challengeLoad()
   const doneDays = CHALLENGE_DAYS.filter(d => chDayDone(d.day)).length
-  const lockHint = typeof chOpenLocked === 'function' && chOpenLocked()
-    ? `<p class="form-hint" style="margin:4px 0 0;color:#9ca3af">${chOpenEverOpened() ? '🏁 ' + t('chEnded') : '🔒 ' + t('chNotOpen')}</p>`
+  const locked = typeof chOpenLocked === 'function' && chOpenLocked()
+  const st = typeof chRoundOpenState === 'function' ? chRoundOpenState() : { state: 'closed' }
+  const rName = typeof chRoundName === 'function' ? chRoundName() : '第一期'
+  const lockHint = locked
+    ? `<p class="form-hint" style="margin:4px 0 0;color:#9ca3af">${st.state === 'upcoming' ? '⏳ ' + t('chRoundUpcoming', rName) : st.state === 'ended' ? '🏁 ' + t('chEnded') : '🔒 ' + t('chNotOpen')}</p>`
     : ''
   return `
     <div class="card" onclick="navigate('challenge')" style="cursor:pointer;margin-top:16px;border:2px solid #f59e0b">
       <div style="display:flex;align-items:center;gap:12px">
         <div style="font-size:32px">🏅</div>
         <div style="flex:1;min-width:0">
-          <h3 style="margin:0 0 4px">${t('chTitle')}</h3>
+          <h3 style="margin:0 0 4px">${t('chTitle')} <span style="font-size:12px;font-weight:600;color:#2563eb">· ${escHtml(rName)}</span></h3>
           <p class="form-hint" style="margin:0">${t('chEntryHint', doneDays)}</p>
           ${lockHint}
         </div>
@@ -3054,9 +3058,7 @@ async function renderDashboard() {
 
     <div id="dashCatBlock"></div>
 
-    ${dashChOpenGateHtml()}
-
-    ${dashChExamGateHtml()}
+    <div id="dashRoundsPanel">${dashRoundsPanelHtml()}</div>
 
     <div id="dashChallengeBlock"></div>
 
@@ -3165,6 +3167,188 @@ async function dashToggleChOpen() {
   }
 }
 
+// ====== 管理员看板：七天挑战营次管理（v88） ======
+// 管理员自助新建营次（可设起止时间 → 到点自动开放、到期自动关闭），切换当前营次，删除营次。
+// 云端结构见 cloud-store.js 顶部「营次（Round）」说明；此处只负责渲染与调用。
+// 排期结算与 cloud-store roundOpenState 同口径（看板只读，不依赖 CloudSync 方法是否已加载）。
+function dashRoundOpenState(r, now) {
+  const t0 = Number(now) || Date.now()
+  const startAt = Number(r && r.startAt) || 0
+  const endAt = Number(r && r.endAt) || 0
+  const manual = !!(r && r.open)
+  if (endAt > 0 && t0 >= endAt) return 'ended'
+  if (startAt > 0 && t0 < startAt) return 'upcoming'
+  return manual ? 'open' : 'closed'
+}
+function dashRoundStateTag(st) {
+  if (st === 'open') return `<span style="font-size:11px;font-weight:800;color:#059669;background:#d1fae5;border-radius:10px;padding:2px 8px">● ${t('dashRoundOpenTag')}</span>`
+  if (st === 'upcoming') return `<span style="font-size:11px;font-weight:800;color:#b45309;background:#fef3c7;border-radius:10px;padding:2px 8px">⏳ ${t('dashRoundUpcomingTag')}</span>`
+  if (st === 'ended') return `<span style="font-size:11px;font-weight:800;color:#6b7280;background:#f3f4f6;border-radius:10px;padding:2px 8px">🏁 ${t('dashRoundEndedTag')}</span>`
+  return `<span style="font-size:11px;font-weight:800;color:#6b7280;background:#f3f4f6;border-radius:10px;padding:2px 8px">● ${t('dashRoundClosedTag')}</span>`
+}
+function dashRoundWindowText(r) {
+  const s = Number(r && r.startAt) || 0
+  const e = Number(r && r.endAt) || 0
+  const f = ts => new Date(ts).toLocaleString(LANG === 'en' ? 'en-US' : 'zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  if (s && e) return `${f(s)} → ${f(e)}`
+  if (s) return LANG === 'en' ? `from ${f(s)}` : `${f(s)} 起`
+  if (e) return LANG === 'en' ? `until ${f(e)}` : `至 ${f(e)}`
+  return `<span style="color:#9ca3af">${t('dashRoundNoWindow')}</span>`
+}
+function dashRoundList() {
+  try {
+    if (typeof CloudSync === 'undefined') return []
+    return Array.isArray(CloudSync._chRounds) ? CloudSync._chRounds : []
+  } catch (e) { return [] }
+}
+function dashRoundCurId() {
+  try {
+    if (typeof CloudSync !== 'undefined' && CloudSync._chRoundCurId) return String(CloudSync._chRoundCurId)
+  } catch (e) {}
+  return 'r1'
+}
+// 营次 slug 归一（与 challenge.js chRoundSlug 同口径）：
+//   '' / undefined / 'r1' → '第一期'（v87 及更早的记录不带 rd 字段，一律归第一期）
+//   其余原样返回（营次名称即 slug，天然唯一）
+function dashRoundSlug(id) {
+  const s = String(id == null ? '' : id).trim()
+  return (!s || s === 'r1') ? '第一期' : s
+}
+// 看板营次面板：营次列表（状态 / 排期 / 查看 / 设为当前 / 删除）+ 新建表单
+// 说明：v88 起不再提供「关闭挑战」作为常驻操作——本期结束后新建下一期即可；
+//   若需临时关闭当前期，展开该营次的排期设置把「自动关闭时间」设为过去即可（下次重绘生效）。
+function dashRoundsPanelHtml() {
+  const list = dashRoundList()
+  const curId = dashRoundCurId()
+  const now = Date.now()
+  const rows = list.map(r => {
+    const st = dashRoundOpenState(r, now)
+    const isCur = r.id === curId
+    const viewed = dashRoundView === r.id
+    return `<tr${viewed ? ' style="background:#eff6ff"' : ''}>
+      <td style="white-space:nowrap">${escHtml(r.name)}${isCur ? ` <span style="font-size:11px;font-weight:800;color:#2563eb;background:#dbeafe;border-radius:10px;padding:2px 8px">${t('dashRoundCurrent')}</span>` : ''}</td>
+      <td style="white-space:nowrap">${dashRoundStateTag(st)}</td>
+      <td style="white-space:nowrap;font-size:12px;color:#6b7280">${dashRoundWindowText(r)}</td>
+      <td style="white-space:nowrap;text-align:center">
+        ${viewed ? '' : `<button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:12px;margin-right:4px" data-rid="${escAttr(r.id)}" onclick="dashViewRound(this)">${t('dashRoundView')}</button>`}
+        ${isCur ? '' : `<button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:12px;margin-right:4px" data-rid="${escAttr(r.id)}" onclick="dashSetRoundCur(this)">${t('dashRoundMakeCur')}</button>`}
+        <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:12px;color:#dc2626" data-rid="${escAttr(r.id)}" data-n="${escAttr(r.name)}" onclick="dashDelRound(this)">${t('dashRoundDel')}</button>
+      </td>
+    </tr>`
+  }).join('')
+  return `
+    <div class="card" style="margin-top:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:6px">
+        <h3 style="margin:0;font-size:16px">📆 ${t('dashRoundTitle')}</h3>
+        <button class="btn btn-primary btn-sm" id="dashRoundAddBtn" onclick="dashToggleRoundForm()">${t('dashRoundAddBtn')}</button>
+      </div>
+      <p class="form-hint" style="margin-bottom:12px">${t('dashRoundHint')}</p>
+      <div id="dashRoundForm" style="display:none;border:1px dashed #c7d2fe;background:#f8faff;border-radius:10px;padding:14px;margin-bottom:14px">
+        <div style="font-weight:700;font-size:14px;margin-bottom:10px">🆕 ${t('dashRoundNewTitle')}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px">
+          <input id="dashRoundName" class="input-answer" style="flex:1;min-width:180px" placeholder="${escAttr(t('dashRoundNamePh'))}" />
+          <input id="dashRoundStart" type="datetime-local" class="input-answer" style="flex:1;min-width:180px" title="${escAttr(t('dashRoundStartPh'))}" />
+          <input id="dashRoundEnd" type="datetime-local" class="input-answer" style="flex:1;min-width:180px" title="${escAttr(t('dashRoundEndPh'))}" />
+        </div>
+        <p class="form-hint" style="margin:0 0 10px">⏰ ${t('dashRoundScheduleHint')}</p>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" id="dashRoundCreateBtn" onclick="dashCreateRound()">${t('dashRoundCreate')}</button>
+          <button class="btn btn-ghost btn-sm" onclick="dashToggleRoundForm()">${t('dashRoundCancel')}</button>
+        </div>
+      </div>
+      ${list.length ? `
+      <div style="overflow-x:auto">
+        <table class="admin-table" style="font-size:13px">
+          <thead><tr>
+            <th>${t('dashRoundNameLabel')}</th>
+            <th>${t('dashRoundStatusLabel')}</th>
+            <th>${t('dashRoundWindowLabel')}</th>
+            <th style="text-align:center">${t('dashRoundOpsLabel')}</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>` : `<div style="padding:18px;text-align:center;color:#9ca3af;font-size:13px">${t('dashRoundEmpty')}</div>`}
+    </div>`
+}
+function dashToggleRoundForm() {
+  const el = document.getElementById('dashRoundForm')
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'
+}
+// datetime-local → 毫秒时间戳（本地时区；空值 → 0）
+function dashParseLocalDT(v) {
+  const s = String(v || '').trim()
+  if (!s) return 0
+  const ts = new Date(s).getTime()
+  return isNaN(ts) ? 0 : ts
+}
+async function dashCreateRound() {
+  if (typeof CloudSync === 'undefined' || !CloudSync.addChallengeRound) return
+  const nameEl = document.getElementById('dashRoundName')
+  const startEl = document.getElementById('dashRoundStart')
+  const endEl = document.getElementById('dashRoundEnd')
+  const name = (nameEl && nameEl.value || '').trim()
+  const startAt = dashParseLocalDT(startEl && startEl.value)
+  const endAt = dashParseLocalDT(endEl && endEl.value)
+  if (startAt && endAt && endAt <= startAt) { alert(t('dashRoundCreateFail')); return }
+  const btn = document.getElementById('dashRoundCreateBtn')
+  if (btn) btn.disabled = true
+  try {
+    const res = await CloudSync.addChallengeRound({ name, startAt, endAt })
+    if (res && res.ok) {
+      alert(t('dashRoundCreated', name || ('第 ' + ((dashRoundList().length) + 1) + ' 期')))
+      dashRoundView = res.id
+      renderDashboard()
+    } else {
+      alert(t('dashRoundCreateFail'))
+      if (btn) btn.disabled = false
+    }
+  } catch (e) {
+    alert(t('dashRoundCreateFail'))
+    if (btn) btn.disabled = false
+  }
+}
+async function dashSetRoundCur(el) {
+  const rid = (el && el.dataset && el.dataset.rid) || ''
+  if (!rid || typeof CloudSync === 'undefined' || !CloudSync.setChallengeRoundCurrent) return
+  const rec = dashRoundList().find(r => r.id === rid)
+  const label = (rec && rec.name) || rid
+  if (!confirm((LANG === 'en'
+    ? `Set "${label}" as the current round?\n\nAll students switch to it within about a minute and start from Day 1. The previous round is fully preserved and can be switched back to at any time.`
+    : `把「${label}」设为当前营次？\n\n全体学员约 1 分钟内切换到该营次并从第 1 天开始；之前营次的进度与成绩完整保留，随时可切回。`))) return
+  if (el) el.disabled = true
+  try {
+    const res = await CloudSync.setChallengeRoundCurrent(rid)
+    if (res && res.ok) { alert(t('dashRoundSwitched', label)); dashRoundView = rid; renderDashboard() }
+    else { alert(t('dashRoundSwitchFail')); if (el) el.disabled = false }
+  } catch (e) {
+    alert(t('dashRoundSwitchFail'))
+    if (el) el.disabled = false
+  }
+}
+async function dashDelRound(el) {
+  const rid = (el && el.dataset && el.dataset.rid) || ''
+  const nm = (el && el.dataset && el.dataset.n) || rid
+  if (!rid || typeof CloudSync === 'undefined' || !CloudSync.deleteChallengeRound) return
+  if (!confirm(t('dashRoundDelConfirm', nm))) return
+  if (el) el.disabled = true
+  try {
+    const res = await CloudSync.deleteChallengeRound(rid)
+    if (res && res.ok) { alert(t('dashRoundDeleted', nm)); if (dashRoundView === rid) dashRoundView = ''; renderDashboard() }
+    else { alert(t('dashRoundDeleteFail')); if (el) el.disabled = false }
+  } catch (e) {
+    alert(t('dashRoundDeleteFail'))
+    if (el) el.disabled = false
+  }
+}
+// 切换看板统计所查看的营次（只影响统计口径，不动学员端指针）
+function dashViewRound(el) {
+  dashRoundView = (el && el.dataset && el.dataset.rid) || ''
+  renderDashChallengeBlock(_perQLastRows || [])
+  const p = document.getElementById('dashRoundsPanel')
+  if (p) p.innerHTML = dashRoundsPanelHtml()
+}
+let dashRoundView = ''   // '' = 当前营次；否则为指定营次 id（看板统计筛选）
+
 // ====== 管理员看板：重置某学员的挑战考试成绩（v83 引入，v84 收窄口径，v85 修按钮接线） ======
 // 二次确认后调 CloudSync.setChallengeReset：① 云端过滤掉该学员 chy 中 kind==='test' 的记录
 //（Day1 摸底 / Day7 期末考试成绩清零，看板两列成绩与积分中的考试部分同步归零）
@@ -3191,6 +3375,7 @@ async function dashResetChUser(btnOrUser, nameOrIdx, legacyIdx) {
     const res = await CloudSync.setChallengeReset(username, name)
     if (res && res.ok) {
       alert(t('dashChResetOk', label))
+      dashRoundView = ''   // v88：重置只作用于当前营次 → 统计视图回到当前营次，避免看到未刷新的其它期
       renderDashboard()   // 重新拉取云端聚合（setChallengeReset 内已刷新缓存）→ 两列成绩与积分中的考试部分归零
     } else {
       alert(t('dashChResetFail'))
@@ -3252,21 +3437,38 @@ function dashChStageWeight(day, kind) {
 function renderDashChallengeBlock(rows) {
   const el = document.getElementById('dashChallengeBlock')
   if (!el) return
-  const parts = (rows || []).filter(r => r && r.chy && r.chy.length)
+  // v88 营次筛选：'' = 当前营次；否则为指定营次 id。老的 chy 记录无 rd 字段 → 视同第一期（rd=''）。
+  const want = dashRoundView || dashRoundCurId()
+  const wantSlug = dashRoundSlug(want)
+  // 记录营次归一：'' / 'r1' / undefined 均视同第一期（v87 及更早的记录不带 rd 字段）
+  const recSlug = x => dashRoundSlug((x && x.rd) || '')
+  const chyOf = r => (r && r.chy ? r.chy.filter(x => recSlug(x) === wantSlug) : [])
+  const parts = (rows || []).filter(r => r && chyOf(r).length)
+  const rdList = dashRoundList()
+  const rdName = (rdList.find(r => r.id === want) || {}).name || (want === 'r1' ? '第一期' : want)
+  // v88 营次筛选按钮组（多期并存时才有意义；单期时只显示提示行）
+  const filterBar = rdList.length > 1
+    ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+        <span style="font-size:12px;color:#6b7280">${t('dashRoundFilterLabel')}：</span>
+        ${rdList.map(r => `<button class="btn btn-sm ${r.id === want ? 'btn-primary' : 'btn-ghost'}" style="padding:3px 10px;font-size:12px" data-rid="${escAttr(r.id)}" onclick="dashViewRound(this)">${escHtml(r.name)}</button>`).join('')}
+      </div>`
+    : ''
   if (!parts.length) {
-    el.innerHTML = `<div class="card" style="margin-top:16px;padding:24px;text-align:center;color:#9ca3af">🏅 ${t('dashChNone')}</div>`
+    el.innerHTML = `<div class="card" style="margin-top:16px">${filterBar}<div style="padding:24px;text-align:center;color:#9ca3af">🏅 ${t('dashChNone')}</div>
+      <p class="form-hint" style="text-align:center;margin:0">${t('dashRoundStatHint', rdName)}</p></div>`
     return
   }
   // 汇总
   let totalQ = 0, totalC = 0
   const list = parts.map(r => {
-    const q = (r.chy || []).reduce((s, c) => s + (c.total || 0), 0)
-    const c = (r.chy || []).reduce((s, x) => s + (x.correct || 0), 0)
+    const chy = chyOf(r)
+    const q = chy.reduce((s, c) => s + (c.total || 0), 0)
+    const c = chy.reduce((s, x) => s + (x.correct || 0), 0)
     totalQ += q; totalC += c
     // 进度：完成的（day,si）去重取最新；最高天
     const seen = {}
     let stagesDone = 0, maxDay = 0
-    ;(r.chy || []).forEach(x => {
+    chy.forEach(x => {
       const k = x.day + '-' + x.si
       if (!seen[k]) { seen[k] = true; stagesDone++ }
       if (x.day > maxDay) maxDay = x.day
@@ -3281,14 +3483,14 @@ function renderDashChallengeBlock(rows) {
       checkin.push(n === 0 ? 0 : n === stageCnt[d] ? 2 : 1)
     }
     // 测试分：Day1 / Day7 的水平测试（test 只上报一次）；v84：成绩被管理员重置的存根跳过 → 显示「—」
-    const t1 = (r.chy || []).find(x => x.kind === 'test' && x.day === 1 && !x.cleared)
-    const t7 = (r.chy || []).find(x => x.kind === 'test' && x.day === 7 && !x.cleared)
+    const t1 = chy.find(x => x.kind === 'test' && x.day === 1 && !x.cleared)
+    const t7 = chy.find(x => x.kind === 'test' && x.day === 7 && !x.cleared)
     const score = x => x && x.total ? Math.round(x.correct / x.total * 100) : null
     // v73 积分榜：每环节按首次完成计（day-si 去重取 at 最早一条，重练不刷速度分）；
     // v78：答对分按环节权重（第七天期末考试 3 倍），用时扣分不变
     // v84：成绩已重置的考试存根不计分（重考后产生的新记录才计入）
     const firstByStage = {}
-    ;(r.chy || []).forEach(x => {
+    chy.forEach(x => {
       if (x.cleared) return
       const k = x.day + '-' + x.si
       if (!firstByStage[k] || (x.at || 0) < (firstByStage[k].at || 0)) firstByStage[k] = x
@@ -3347,12 +3549,14 @@ function renderDashChallengeBlock(rows) {
     : `<span style="font-weight:700;color:${s >= 80 ? '#059669' : s >= 60 ? '#d97706' : '#dc2626'}">${s}</span>`
   el.innerHTML = `
     <div class="card" style="margin-top:16px">
-      <h3 style="margin-bottom:8px">🏅 ${t('dashChTitle')}</h3>
+      <h3 style="margin-bottom:8px">🏅 ${t('dashChTitle')} · <span style="color:#2563eb">${escHtml(rdName)}</span></h3>
+      ${filterBar}
       <div class="dashboard-summary" style="margin-bottom:12px">
         <div class="dash-stat"><div class="dash-val">${list.length}</div><div class="dash-lbl">${t('dashChJoin')}</div></div>
         <div class="dash-stat"><div class="dash-val">${totalQ}</div><div class="dash-lbl">${t('dashChTotalQ')}</div></div>
         <div class="dash-stat"><div class="dash-val">${avgAcc}%</div><div class="dash-lbl">${t('dashChAvg')}</div></div>
       </div>
+      <p class="form-hint" style="margin:0 0 10px">${t('dashRoundStatHint', rdName)}</p>
       <div style="margin:4px 0 10px;padding:10px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;color:#92400e;font-size:14px;font-weight:600">🏆 ${t('dashChPrizeHint')}</div>
       <h4 style="margin:14px 0 6px">🏆 ${t('dashChRankTitle')}</h4>
       <p class="form-hint" style="margin:0 0 8px">${t('dashChScoreRule')}</p>
@@ -3419,7 +3623,7 @@ function renderDashChallengeBlock(rows) {
     </div>
     ${wrongList.length ? `
     <div class="card" style="margin-top:16px">
-      <h3 style="margin-bottom:8px">📌 ${t('dashChWrongTitle')}</h3>
+      <h3 style="margin-bottom:8px">📌 ${t('dashChWrongTitle')} · <span style="color:#2563eb">${escHtml(rdName)}</span></h3>
       <p class="form-hint" style="margin-bottom:10px">${t('dashChWrongHint')}</p>
       <div style="overflow-x:auto">
         <table class="admin-table" style="font-size:13px">

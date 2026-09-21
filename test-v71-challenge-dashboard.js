@@ -49,6 +49,13 @@ function makeSandbox() {
   vm.runInContext(extractFn(appSrc, 'escHtml'), sb)
   vm.runInContext(extractFn(appSrc, 'escAttr'), sb)
   vm.runInContext(extractFn(appSrc, 'renderDashChallengeBlock'), sb)
+  // v88：营次筛选依赖（dashRoundView/dashRoundCurId/dashRoundList）——从 app.js 提取真实实现，
+  // 沙箱无云端营次 → dashRoundList 返回空数组、dashRoundCurId 兜底 'r1'，等价单期（第一期）口径
+  vm.runInContext('let dashRoundView = \'\'', sb)
+  vm.runInContext(extractFn(appSrc, 'dashRoundList'), sb)
+  vm.runInContext(extractFn(appSrc, 'dashRoundCurId'), sb)
+  vm.runInContext(extractFn(appSrc, 'dashRoundSlug'), sb)
+
   vm.runInContext(extractFn(appSrc, 'dashChStageWeight'), sb)   // v78：积分环节权重（第七天期末考试 3 倍）
   vm.runInContext('const TYPE_LABELS = new Proxy({}, { get: (_, k) => k })', sb)
   vm.runInContext('Store.init()', sb)

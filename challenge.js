@@ -3,17 +3,22 @@
 //        v77 挑战整体需管理员手动开放（chOpen）：未开放/已结束时全部环节灰掉锁定；
 //        v79 练习题序改为人手一套：种子按登录用户名派生，每人随机序列不同（难度配比与逐日递增不变）；
 //        v83 管理员可重置某学员挑战；v84 重置收窄为只清考试成绩（两场水平测试），练习进度/打卡/错题保留 ======
+//        v88 多期营次（Round）：管理员后台自助新建营次（可设起止时间 → 到点自动开放、到期自动关闭），
+//             每期独立存档键 / 独立题序种子 / 独立云端开关与重置标记，历史期次数据完整保留。
+//             ⚠️ v88 没有「关闭期次开关」，管理员改为「新建下一期」——故本期结束后看板仍按营次分别统计 ======
 // 题源：分类 12「标帜餐厅常见词汇」（684 题 = 456 listen + 228 single，v71 起无 voicematch）。
+// 营次（v88）：存档键 = eq_challenge_v2 / eq_challenge_v2_<营次id>（'第一期'/r1 用原名，旧存档直接沿用）；
+//   题序种子混入营次哈希 → 同一学员不同期题目也不同；云端 doc.chRounds 数组 + chRoundCur 指明当前期。
 // 练习序列（每人一套，v79）：按难度分桶（1/2/3）按天配比抽取（CHALLENGE_DIFF_PLAN），Day1 均值 1.0 → Day7 均值 2.2；
 //   Day1 巩固练习 10 题 → Day2-6 每日练习 30 题 → Day7 巩固练习 10 题，共 170 题；
-//   种子 = CHALLENGE_SEED + 用户名哈希 → 不同学员题序不同，同一学员序列固定（重练同题、选项每次重洗）。
+//   种子 = CHALLENGE_SEED + 用户名哈希 + 营次哈希 → 不同学员/不同期序不同，同一学员同期固定（重练同题、选项每次重洗）。
 // 水平测试（v80 起考已刷题）：Day1/Day7 各 20 题，每次进入分层随机（难度1×10 + 难度2×7 + 难度3×3）；
 //   题源 = 本人已刷过的练习题（个人序列中已完成练习阶段覆盖的前缀）；Day1 摸底时还没刷过题 → 回退全库随机。
 //   每次进入题目都不同；仍仅一次判分机会。
 // 错题闭环（v72）：每日练习首次答错的题必须进入「错题回顾」轮刷到全对，该天才算完成；
 //   前一天所有环节（练习+测试）的错题会在次日开始时额外追加到练习题末尾（不占每日 30 题配额），滚动复习。
 // 入口在练习页底部（app.js renderPractice 挂入口卡片，navigate('challenge') 打开本页）。
-// 进度存 localStorage eq_challenge_v2（绑定登录用户；v72 就地扩展 stage.wrong 字段，旧进度兼容）；
+// 进度存 localStorage 按营次隔离（绑定登录用户；v72 就地扩展 stage.wrong 字段，旧进度兼容）；
 // 每题经 Store.addProgress(mode:'practice', challenge:true) 与 Store.trackPractice 汇入进度页/数据看板。
 // 阶段完成经 Store.reportChallengeStage 上报云端（chy 事件，correct/total 为首次作答口径，不含回顾轮）。
 // 时间锁（v71）：Day N 解锁需 Day N-1 全部完成且已过完成日次日 0 点（本地时区）——每天只能推进一天。
@@ -21,7 +26,9 @@
 // 复用 app.js 工具：shuffleOptions / checkAnswer / quizTitleHtml / vmOptionsHtml / autoplayListen。
 
 const CHALLENGE_SEED = 20260912
-const CHALLENGE_KEY = 'eq_challenge_v2'
+const CHALLENGE_KEY = 'eq_challenge_v2'          // 第一期存档键（v88 前的唯一键，保持原名以便旧存档直接沿用）
+const CHALLENGE_KEY_PREFIX = 'eq_challenge_v2_'  // v88：第 N 期存档键（N≥2）
+const CHALLENGE_ROUND_SEEN_KEY = 'eq_ch_seen_rounds'
 const CHALLENGE_DAYS = [
   { day: 1, stages: [ { kind: 'test', count: 20 }, { kind: 'practice', count: 10 } ] },
   { day: 2, stages: [ { kind: 'practice', count: 30 } ] },
@@ -52,13 +59,75 @@ function challengeRng(seed) {
   }
 }
 
+// ---- v88 营次（Round）解析 ----
+// 当前营次 = 云端 doc.chRoundCur 指向的一期（经 CloudSync._chRoundCurId 侧信道到达）。
+// 云端不可达/尚无营次时兜底为「第一期」，其存档键就是 v88 之前的 eq_challenge_v2 → 老数据无缝沿用。
+function chRoundSlug(id) {
+  const s = String(id || '第一期').trim()
+  return s === 'r1' ? '第一期' : s
+}
+// 学员端当前营次 id（'' 表示云端未拉取到营次信息 → 视同第一期）
+function chCurrentRound() {
+  try {
+    const id = (typeof CloudSync !== 'undefined' && CloudSync._chRoundCurId)
+    return id ? String(id) : '第一期'
+  } catch (e) { return '第一期' }
+}
+// 当前营次存档键：第一期沿用 CHALLENGE_KEY（兼容旧存档），其余期加后缀
+function chStorageKeyFor(round) {
+  const slug = chRoundSlug(round)
+  return slug === '第一期' ? CHALLENGE_KEY : CHALLENGE_KEY_PREFIX + slug
+}
+function chStorageKey() { return chStorageKeyFor(chCurrentRound()) }
+// 本地「已见营次」列表：渲染期次切换器用（无云端时也能列出历史期）
+function chSeenRounds() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CHALLENGE_ROUND_SEEN_KEY) || '[]')
+    return Array.isArray(raw) ? raw.filter(x => typeof x === 'string' && x) : []
+  } catch (e) { return [] }
+}
+function chSeenRoundsAdd(round) {
+  const id = String(round || '')
+  if (!id) return
+  const list = chSeenRounds()
+  if (list.indexOf(id) < 0) {
+    list.push(id)
+    try { localStorage.setItem(CHALLENGE_ROUND_SEEN_KEY, JSON.stringify(list)) } catch (e) {}
+  }
+}
+// 管理员在云端切换当前营次后：把学员端本地进度指针切到新营次（换键重新装载）
+function chEnsureRound() {
+  const id = chCurrentRound()
+  if (_chRoundLoaded === id) return false
+  chSeenRoundsAdd(id)
+  const uid = challengeUid()
+  let st = null
+  try { st = JSON.parse(localStorage.getItem(chStorageKey()) || 'null') } catch (e) { st = null }
+  if (!st || typeof st !== 'object' || !st.days || st.uid !== uid) {
+    st = { uid, days: {} }
+    try { localStorage.setItem(chStorageKey(), JSON.stringify(st)) } catch (e) {}
+  }
+  challengeState = st
+  _chRoundLoaded = id
+  _chLbCache = { at: 0, top: null }   // 营次变了 → 积分榜缓存作废
+  return true
+}
+let _chRoundLoaded = ''    // 已装载的营次 id（切换判断用）
+
 // v79：练习题序种子 = CHALLENGE_SEED + FNV-1a(登录用户名)。
 // 不同用户名 → 不同序列（人人题目不同）；未登录/测试环境兜底 'anon'（行为与 v78 固定种子一致）。
+// v88：再混入营次哈希 → 同一学员不同期题目也不同（各期独立出题，避免跨期背题）。
 function chUserSeed() {
   const str = challengeUid()
   let h = 2166136261
   for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) }
-  return (CHALLENGE_SEED + (h >>> 0)) >>> 0
+  const rid = chRoundSlug(chCurrentRound())
+  let h2 = 0
+  if (rid !== '第一期') {
+    h2 = 2166136261
+    for (let i = 0; i < rid.length; i++) { h2 ^= rid.charCodeAt(i); h2 = Math.imul(h2, 16777619) }
+  }
+  return (CHALLENGE_SEED + (h >>> 0) + (h2 >>> 0)) >>> 0
 }
 
 // 练习序列：分类 12 全部题（id 去重防御）→ 按难度分桶（桶内按用户名派生种子洗牌）→ 按档配比抽取 170 题。
@@ -191,15 +260,17 @@ function challengeKindOf(day, si) {
   return m ? m.kind : 'practice'
 }
 
-// ---- 挑战进度（localStorage，绑定登录用户） ----
+// ---- 挑战进度（localStorage，绑定登录用户；v88 按营次隔离） ----
 let challengeState = null
 function challengeUid() {
   let s = null
   try { s = Store.getSession() } catch (e) {}
   return String((s && (s.username || s.id || s.name)) || 'anon')
 }
+// v88：营次变化 → 先切键，再按需重置 uid；返回营次是否刚切换（渲染层据此重取题序/积分榜）
 function challengeLoad() {
-  try { challengeState = JSON.parse(localStorage.getItem(CHALLENGE_KEY) || 'null') } catch (e) { challengeState = null }
+  const switched = chEnsureRound()
+  try { challengeState = JSON.parse(localStorage.getItem(chStorageKey()) || 'null') } catch (e) { challengeState = null }
   if (!challengeState || typeof challengeState !== 'object' || !challengeState.days) challengeState = null
   const uid = challengeUid()
   if (!challengeState || challengeState.uid !== uid) {
@@ -207,7 +278,8 @@ function challengeLoad() {
     challengeSave() // 换号重置立即落盘，避免上一账号数据残留 localStorage
   }
   // v83/v84：管理员重置检测（云端标记比本地已处理的新 → 按模式处理本地记录；考试成绩模式只清测试成绩）
-  return chCheckRemoteReset()
+  const reset = chCheckRemoteReset()
+  return switched || reset
 }
 
 // v83 管理员重置：云端 doc.chResets[本人] 存着最近一次重置时间戳（经 CloudSync._chResets 侧信道到达），
@@ -250,13 +322,16 @@ function chClearExamStageRecs() {
 function chCheckRemoteReset() {
   let at = 0
   let mode = 'all'
+  let rnd = ''
   try {
     const uid = challengeUid()
     at = Number((CloudSync._chResets || {})[uid]) || 0
     mode = ((CloudSync._chResetModes || {})[uid] === 'exam') ? 'exam' : 'all'
+    rnd = chRoundSlug(chCurrentRound())
   } catch (e) { return false }
   if (!at) return false
-  const key = 'eq_ch_reset_seen_' + challengeUid()
+  // v88：已处理标记按营次隔离（换期后同一重置时间戳在新期不生效）
+  const key = 'eq_ch_reset_seen_' + challengeUid() + '_' + rnd
   let seen = 0
   try { seen = Number(localStorage.getItem(key)) || 0 } catch (e) {}
   if (at <= seen) return false
@@ -276,7 +351,7 @@ function chCheckRemoteReset() {
   return true
 }
 function challengeSave() {
-  try { localStorage.setItem(CHALLENGE_KEY, JSON.stringify(challengeState)) } catch (e) {}
+  try { localStorage.setItem(chStorageKey(), JSON.stringify(challengeState)) } catch (e) {}
 }
 function chStageRec(day, si) {
   const d = challengeState && challengeState.days[day]
@@ -330,21 +405,68 @@ function chStageUnlocked(day, si) {
   return si === 0 ? chDayUnlocked(day) : chStageDone(day, si - 1)
 }
 
-// v76 期末考试门禁：仅 Day7 的水平测试需管理员在云端开启（doc.chExamOpen）；
+// v77 挑战门禁：整个七天挑战需当前营次处于开放态（自动排期结算见 cloud-store roundOpenState，
+// 经 _getDoc 侧信道 _chOpen/_chOpenLocked/_chOpenAt 到达）。云端不可达/未拉取时视为未开放。
+// v88：三态文案 —— 未开始（未到 startAt）/ 进行中 / 已结束（已过 endAt 或管理员关闭过）。
+function chOpenLocked() {
+  try {
+    if (typeof CloudSync === 'undefined') return true
+    // 侧信道带 _chOpenLocked 时以它为准（排期结算结果）；否则回退 v87 的手动开关口径
+    if (typeof CloudSync._chOpenLocked === 'boolean') return CloudSync._chOpenLocked
+    return CloudSync._chOpen !== true
+  } catch (e) { return true }
+}
+function chOpenEverOpened() {
+  try {
+    if (typeof CloudSync === 'undefined') return false
+    const st = chRoundOpenState()
+    if (st.state === 'upcoming') return false
+    return st.everOpen || (Number(CloudSync._chOpenAt) || 0) > 0
+  } catch (e) { return false }
+}
+// 当前营次的排期态：优先用云端侧信道结算结果，缺失时按本地兜底（无排期信息 → 手动值）
+function chRoundOpenState() {
+  try {
+    if (typeof CloudSync === 'undefined') return { state: 'closed', on: false, locked: true, everOpen: false }
+    if (typeof roundOpenState === 'function' && Array.isArray(CloudSync._chRounds)) {
+      const rec = CloudSync._chRounds.find(r => r.id === CloudSync._chRoundCurId)
+      if (rec) return roundOpenState(rec, Date.now())
+    }
+    const at = Number(CloudSync._chOpenAt) || 0
+    const on = CloudSync._chOpen === true
+    return { state: on ? 'open' : (at > 0 ? 'ended' : 'closed'), on, locked: !on, everOpen: on || at > 0 }
+  } catch (e) { return { state: 'closed', on: false, locked: true, everOpen: false } }
+}
+// 当前营次名称（横幅显示，如「第一期」）；云端未拉取时兜底「第一期」
+function chRoundName() {
+  try {
+    if (typeof CloudSync !== 'undefined' && CloudSync._chRoundCurName) return String(CloudSync._chRoundCurName)
+  } catch (e) {}
+  return '第一期'
+}
+// 当前营次是否有起止时间（横幅提示用）
+function chRoundHasSchedule() {
+  try {
+    if (typeof CloudSync === 'undefined' || !Array.isArray(CloudSync._chRounds)) return false
+    const rec = CloudSync._chRounds.find(r => r.id === CloudSync._chRoundCurId)
+    return !!(rec && ((Number(rec.startAt) || 0) > 0 || (Number(rec.endAt) || 0) > 0))
+  } catch (e) { return false }
+}
+// v76 期末考试门禁：仅 Day7 的水平测试需当前营次开放考试（营次 examOpen 或排期命中）；
 // Day1 摸底测试不受影响；已完成的期末考试仍显示成绩。云端不可达/未拉取时视为未开放。
 function chIsFinalExam(day, si) {
   return day === 7 && challengeKindOf(day, si) === 'test'
 }
+// v88：期末考试门禁按营次结算（营次未开放 → 一律锁定；侧信道缺失时回退 v76 口径）
 function chFinalExamLocked() {
-  try { return !(typeof CloudSync !== 'undefined' && CloudSync._chExamOpen === true) } catch (e) { return true }
-}
-// v77 挑战门禁：整个七天挑战需管理员在云端开放（doc.chOpen，缺省=关闭）。
-// 云端不可达/未拉取时视为未开放；关闭后学员端全部环节灰掉（曾开放过 → 显示「已结束」）。
-function chOpenLocked() {
-  try { return !(typeof CloudSync !== 'undefined' && CloudSync._chOpen === true) } catch (e) { return true }
-}
-function chOpenEverOpened() {
-  try { return typeof CloudSync !== 'undefined' && (Number(CloudSync._chOpenAt) || 0) > 0 } catch (e) { return false }
+  try {
+    if (typeof CloudSync === 'undefined') return true
+    if (typeof roundExamState === 'function' && Array.isArray(CloudSync._chRounds)) {
+      const rec = CloudSync._chRounds.find(r => r.id === CloudSync._chRoundCurId)
+      if (rec) return roundExamState(rec, Date.now()).locked
+    }
+    return CloudSync._chExamOpen !== true
+  } catch (e) { return true }
 }
 // v78 积分权重：第七天期末考试（day 7 的 test）答对每题按 3 倍计分，其余环节 1 倍。
 // 看板 app.js dashChStageWeight 与之同口径（test-v78 断言两侧对同一输入得分一致）；管理员不参加排名。
@@ -467,12 +589,17 @@ function chProgressHtml() {
 // 与管理员看板 renderDashChallengeBlock 同口径：每环节按首次完成计（day-si 去重取 at 最早的 chy，
 // 重练不刷分），积分 = Σ(答对×100×环节权重) − Σ用时秒；v78：第七天期末考试 3 倍权重，管理员不参加排名。
 // v84：被管理员重置成绩的测试记录（cleared 存根）不计分——重考后的新记录才计入。
-function chLbAggregate(rows) {
+// v88：只看当前营次的记录（rd 缺省 = 第一期/单期制旧数据）；round 省略时用当前营次。
+// v88：只看当前营次的记录（rd 缺省 = 第一期/单期制旧数据）；round 省略时用当前营次。
+function chLbAggregate(rows, round) {
+  const want = String(round == null ? chCurrentRound() : round)
+  const matchRound = x => chRoundSlug(String((x && x.rd) || '')) === chRoundSlug(want)
   // v78：管理员账号不参加排名（学员端前三同样剔除）
   const list = (rows || []).filter(r => r && r.role !== 'admin' && r.chy && r.chy.length).map(r => {
     const first = {}
     ;(r.chy || []).forEach(x => {
       if (x && x.cleared) return   // v84：成绩已重置的考试记录不计分
+      if (!matchRound(x)) return   // v88：别的营次的记录不计入本期
       const k = x.day + '-' + x.si
       if (!first[k] || (x.at || 0) < (first[k].at || 0)) first[k] = x
     })
@@ -516,18 +643,20 @@ async function chLoadLeaderboard() {
   let top = null
   try {
     if (typeof CloudSync !== 'undefined' && CloudSync.getDashboardData) {
-      top = chLbAggregate(await CloudSync.getDashboardData())
+      top = chLbAggregate(await CloudSync.getDashboardData(), chCurrentRound())
     }
   } catch (e) { /* 网络失败保留旧缓存或显示空态 */ }
   if (top) _chLbCache = { at: now, top }
   chLbFill(_chLbCache.top)
   // v76/v77：积分榜拉取顺带刷新了开关侧信道（_getDoc）→ 管理员刚开/关挑战或考试时重渲染入口；
   // v83：同一拉取也刷新了重置侧信道（_chResets）→ 刚被重置则清空本地进度并重渲染入口；
+  // v88：营次切换（管理员新建/切换当前营次）也在此感知 → 换键重新装载本地进度；
   // 仅概览页响应（答题中 renderChallenge 会走会话分支，不打断作答）
   try {
     if (typeof CloudSync !== 'undefined' && _chGateRendered !== null) {
-      const cur = { open: chOpenLocked(), exam: chFinalExamLocked() }
+      const cur = { open: chOpenLocked(), exam: chFinalExamLocked(), round: chCurrentRound() }
       if (cur.open !== _chGateRendered.open || cur.exam !== _chGateRendered.exam) { renderChallenge(); return }
+      if (cur.round !== _chGateRendered.round) { chEnsureRound(); renderChallenge(); return }
       if (chCheckRemoteReset()) renderChallenge()
     }
   } catch (e) { /* ignore */ }
@@ -539,16 +668,41 @@ function renderChallenge() {
   challengeLoad()
   if (chs && (chs.phase === 'quiz' || chs.phase === 'review' || chs.phase === 'result')) { renderChallengeQuiz(); return }
   // v77：记录本次渲染的门禁态（挑战开关 + 考试开关），拉取后变化则重渲染入口
-  _chGateRendered = { open: chOpenLocked(), exam: chFinalExamLocked() }
+  // v88：营次切换也会改变门禁与进度 → 一并纳入比较
+  _chGateRendered = { open: chOpenLocked(), exam: chFinalExamLocked(), round: chCurrentRound() }
   const bankN = Store.getQuestions().filter(q => Number(q.category_id) === 12).length
   const rows = CHALLENGE_DAYS.map(d => chDayBlockHtml(d)).join('')
-  // v77：挑战未开放/已结束横幅（进度/积分榜/报告仍可查看）
+  // v77 挑战未开放/已结束横幅（进度/积分榜/报告仍可查看）；v88 三态 + 营次名与起止时间
+  const st = chRoundOpenState()
+  const rName = chRoundName()
+  const rMeta = chRoundMetaText()
+  let bannerTitle = ''
+  let bannerHint = ''
+  let bannerBorder = '#9ca3af'
+  if (st.state === 'upcoming') {
+    bannerTitle = '⏳ ' + t('chRoundUpcoming', rName)
+    bannerHint = t('chRoundUpcomingHint')
+    bannerBorder = '#f59e0b'
+  } else if (st.state === 'ended') {
+    bannerTitle = '🏁 ' + t('chEnded') + ' · ' + escHtml(rName)
+    bannerHint = t('chEndedHint')
+  } else {
+    bannerTitle = '🔒 ' + t('chNotOpen')
+    bannerHint = t('chNotOpenHint')
+    bannerBorder = '#f59e0b'
+  }
   const chClosedBanner = chOpenLocked()
-    ? `<div class="card" style="border:2px solid ${chOpenEverOpened() ? '#9ca3af' : '#f59e0b'};margin-bottom:16px;text-align:center;padding:18px">
-        <div style="font-size:15px;font-weight:800;margin-bottom:4px">${chOpenEverOpened() ? '🏁 ' + t('chEnded') : '🔒 ' + t('chNotOpen')}</div>
-        <div style="font-size:12px;color:#6b7280">${chOpenEverOpened() ? t('chEndedHint') : t('chNotOpenHint')}</div>
+    ? `<div class="card" style="border:2px solid ${bannerBorder};margin-bottom:16px;text-align:center;padding:18px">
+        <div style="font-size:15px;font-weight:800;margin-bottom:4px">${bannerTitle}</div>
+        <div style="font-size:12px;color:#6b7280">${bannerHint}</div>
+        ${rMeta ? `<div style="font-size:12px;color:#9ca3af;margin-top:6px">${rMeta}</div>` : ''}
       </div>`
     : ''
+  // v82/v88 营次标识条：让学员随时知道自己在哪一期（多期并存时尤其重要）
+  const chRoundBar = `<div class="card" style="margin-bottom:16px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+      <div style="font-size:13px;font-weight:700">🎯 ${t('chRoundLabel')}：<span style="color:#2563eb">${escHtml(rName)}</span>${st.state === 'open' ? ` <span style="font-size:11px;color:#059669">● ${t('chRoundOpenTag')}</span>` : ''}</div>
+      ${rMeta ? `<div style="font-size:12px;color:#6b7280">${rMeta}</div>` : ''}
+    </div>`
   // v83/v84：管理员重置本学员记录后的一次性提示（10 分钟内保持可见）；考试成绩模式文案不同
   const chResetIsExam = chResetNoticeIsExam()
   const chResetBanner = chResetNoticeActive()
@@ -559,6 +713,7 @@ function renderChallenge() {
     : ''
   el.innerHTML = `
     ${chResetBanner}
+    ${chRoundBar}
     ${chClosedBanner}
     ${chProgressHtml()}
     <div class="card" style="border:2px solid #f59e0b;margin-bottom:16px">
@@ -578,6 +733,21 @@ function renderChallenge() {
     </div>
   `
   chLoadLeaderboard()
+}
+
+function chRoundMetaText() {
+  try {
+    if (typeof CloudSync === 'undefined' || !Array.isArray(CloudSync._chRounds)) return ''
+    const rec = CloudSync._chRounds.find(r => r.id === CloudSync._chRoundCurId)
+    if (!rec) return ''
+    const s = Number(rec.startAt) || 0
+    const e = Number(rec.endAt) || 0
+    const f = ts => new Date(ts).toLocaleString(LANG === 'en' ? 'en-US' : 'zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    if (s && e) return t('chRoundWindow', f(s), f(e))
+    if (s) return t('chRoundStartAt', f(s))
+    if (e) return t('chRoundEndAt', f(e))
+  } catch (err) { /* ignore */ }
+  return ''
 }
 
 function chDayBlockHtml(cfg) {
@@ -600,8 +770,10 @@ function chStageRowHtml(day, si, s) {
   const tagCls = isTest ? 'tag tag-type' : 'tag tag-category'
   let right = ''
   // v77：挑战未开放/已结束 → 全部入口灰掉（已完成测试仍显示分数，不给重练/开始）
+  // v88：三态文案（未开始 / 未开放 / 已结束）
   if (chOpenLocked() && !(done && isTest)) {
-    const closedTxt = chOpenEverOpened() ? t('chEnded') : t('chNotOpenShort')
+    const st = chRoundOpenState()
+    const closedTxt = st.state === 'upcoming' ? t('chRoundUpcomingShort') : (st.state === 'ended' ? t('chEnded') : t('chNotOpenShort'))
     right = `<span style="font-size:12px;color:#9ca3af;flex-shrink:0">🔒 ${closedTxt}</span>`
   } else if (done) {
     if (isTest) {
@@ -790,7 +962,8 @@ function chRecordStage(correct, total, wrongQids) {
   challengeSave()
   Store.trackPractice(correct, total)
   const usedSec = chs.startedAt ? Math.max(0, Math.round((Date.now() - chs.startedAt) / 1000)) : 0
-  try { Store.reportChallengeStage(chs.day, chs.si, chs.kind, correct, total, usedSec) } catch (e) {}
+  // v88：带上营次 id → 看板可按营次分别统计、管理员重置考试只作用于该营次
+  try { Store.reportChallengeStage(chs.day, chs.si, chs.kind, correct, total, usedSec, chCurrentRound()) } catch (e) {}
 }
 
 // ---- 每日练习（逐题反馈） ----

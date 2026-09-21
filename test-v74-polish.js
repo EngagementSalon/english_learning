@@ -204,7 +204,11 @@ function makeSandbox() {
     const sb = { console, Math, JSON, Object, Array, String, Number }
     vm.createContext(sb)
     vm.runInContext(extractFn(chSrc, 'chLbStageWeight'), sb)   // v78：环节权重（第七天期末考试 3 倍）
-    vm.runInContext(extractFn(chSrc, 'chLbAggregate'), sb)
+    // v88：积分按营次过滤 → chLbAggregate 依赖 chCurrentRound / chRoundSlug，
+// 沙箱无云端营次 → chCurrentRound 回落 '第一期'，等价单期口径
+vm.runInContext(extractFn(chSrc, 'chRoundSlug'), sb)
+vm.runInContext(extractFn(chSrc, 'chCurrentRound'), sb)
+vm.runInContext(extractFn(chSrc, 'chLbAggregate'), sb)
     const rows = [
       {
         username: 'bob', name: '小王', dept: 'dining',
