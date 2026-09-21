@@ -80,7 +80,7 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     navCourse: '📖 线下课',
     // 标帜餐厅七天英文挑战（v68）
     chTitle: '七天英文挑战',
-    chIntro: '第 1 天：水平测试 20 题（每次随机，仅一次）→ 巩固练习 10 题；第 2-6 天：每日练习 30 题；第 7 天：巩固练习 10 题 → 水平测试 20 题（每次随机，仅一次）。全部选自「标帜餐厅常见词汇」题库，每天只能解锁新的一天，难度逐日递增；练习错题要当天刷到全对，前一天的错题还会在第二天额外复习。',
+    chIntro: '第 1 天：水平测试 20 题（每次随机，仅一次）→ 巩固练习 10 题；第 2-6 天：每日练习 30 题；第 7 天：巩固练习 10 题 → 水平测试 20 题（每次随机，仅一次）。题目全部选自当前部门挑战题库，每天只能解锁新的一天，难度逐日递增；练习错题要当天刷到全对，前一天的错题还会在第二天额外复习。',
     chPoolInfo: (n) => `题库共 ${n} 题 · 每日 30 题（共 210 题）· 难度逐日递增 · 错题次日复习 · 每人题目随机不同 · 考题出自本人已刷题目`,
     chEntryHint: (d) => `已完成 ${d}/7 天 · 每日 30 题 · 点击进入`,
     chStageLocked: '完成上方环节后解锁',
@@ -114,7 +114,7 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     dashChJoin: '参加人数',
     dashChTotalQ: '挑战答题数',
     dashChAvg: '平均正确率',
-    dashChNone: '还没有学员参加七天挑战。学员可在「练习」页底部进入「标帜餐厅七天英文挑战」。',
+    dashChNone: '还没有学员参加七天挑战。学员可在「练习」页底部进入「七天英文挑战」。',
     dashChThProgress: '挑战进度',
     dashChThQAcc: '答题 · 正确率',
     dashChThDay1: '摸底测',
@@ -836,7 +836,7 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     navCourse: '📖 Courses',
     // Signature Restaurant 7-Day Challenge (v68)
     chTitle: '7-Day English Challenge',
-    chIntro: 'Day 1: a 20-question placement test (randomized each attempt, one attempt) followed by 10 consolidation questions; Days 2-6: 30 daily practice questions; Day 7: 10 consolidation questions followed by the 20-question placement test (randomized each attempt, one attempt). All drawn from the "Signature Restaurant Vocabulary" bank — only one new day unlocks per day and difficulty rises daily; you must retry every missed question until all correct the same day, and yesterday\'s wrong questions come back as extra review the next day.',
+    chIntro: 'Day 1: a 20-question placement test (randomized each attempt, one attempt) followed by 10 consolidation questions; Days 2-6: 30 daily practice questions; Day 7: 10 consolidation questions followed by the 20-question placement test (randomized each attempt, one attempt). All drawn from the department\'s challenge bank — only one new day unlocks per day and difficulty rises daily; you must retry every missed question until all correct the same day, and yesterday\'s wrong questions come back as extra review the next day.',
     chPoolInfo: (n) => `Bank of ${n} questions · 30 per day (210 total) · difficulty rises daily · wrong answers reviewed next day · questions vary per person · exam questions come from your practiced set`,
     chEntryHint: (d) => `${d}/7 days done · 30 questions per day · tap to open`,
     chStageLocked: 'Finish the step above to unlock',
