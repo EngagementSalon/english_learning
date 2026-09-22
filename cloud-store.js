@@ -159,10 +159,17 @@ function roundExamState(r, now, openState) {
 }
 // 营次「记录键」归一：chy 记录里的 rd 与 chreset 事件的 d.round 必须同口径才能对上。
 //   'r1' / '' / 缺省 → ''（第一期：v87 及更早的 chy 记录本就没有 rd 字段，重置事件也走 '' 分支）
-//   其余营次 → 原样（营次名称即记录键）
+//   其余营次 → 原样（营次 id 或旧版营次名称）
+// ⚠️ v102 关键约束：本函数**只做「第一期」归一，绝不能依赖营次名称**。
+//   历史事故：v88 首次实现时「记录键 = 营次名称」，而 v90 把第一期从「第一期」改名成
+//   「标帜餐厅七天挑战第一期」→ 所有存量记录的 rd="第一期" 与看板 wantSlug="标帜餐厅七天挑战第一期"
+//   对不上，学员考完的成绩在看板全部丢失（呈现为「成绩没同步过来」）。
+//   **营次名称是可变的显示字段，永远不能作为数据键**。
 function _roundSlugKey(id) {
   const s = String(id == null ? '' : id).trim()
-  return (!s || s === 'r1') ? '' : s
+  if (!s) return ''
+  if (s === 'r1' || s === '第一期') return ''   // '第一期' 是 chRoundSlug('r1') 的产物，与 r1 同键
+  return s
 }
 // 营次 id 生成：'rN' 递增（N 取已有序号最大值 +1，避免删除后重号）
 function _roundNextId(arr) {  let mx = 0

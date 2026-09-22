@@ -3520,11 +3520,15 @@ function dashRoundCurId() {
   return 'r1'
 }
 // 营次 slug 归一（与 challenge.js chRoundSlug 同口径）：
-//   '' / undefined / 'r1' → '第一期'（v87 及更早的记录不带 rd 字段，一律归第一期）
-//   其余原样返回（营次名称即 slug，天然唯一）
+//   '' / undefined / 'r1' / '第一期' → '第一期'（v87 及更早的记录不带 rd 字段，一律归第一期）
+//   其余原样返回（营次 id，如 'r2'）
+// ⚠️ v102：**绝不能把营次名称当记录键**。历史事故见 cloud-store.js `_roundSlugKey` 注释——
+//   v88 曾用营次名称作键，v90 改名后存量记录与新记录双双对不上，成绩在看板整体丢失。
 function dashRoundSlug(id) {
   const s = String(id == null ? '' : id).trim()
-  return (!s || s === 'r1') ? '第一期' : s
+  if (!s) return '第一期'
+  if (s === 'r1' || s === '第一期') return '第一期'
+  return s
 }
 // v89：营次适用部门（空数组 = 全部部门，兼容 v88 存量营次）→ 本地化显示文本
 function dashRoundDeptText(r) {

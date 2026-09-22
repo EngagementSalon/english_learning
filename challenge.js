@@ -116,9 +116,11 @@ function challengeRng(seed) {
 // ---- v88 营次（Round）解析 ----
 // 当前营次 = 云端 doc.chRoundCur 指向的一期（经 CloudSync._chRoundCurId 侧信道到达）。
 // 云端不可达/尚无营次时兜底为「第一期」，其存档键就是 v88 之前的 eq_challenge_v2 → 老数据无缝沿用。
+// ⚠️ v102：'第一期' 与 'r1' 必须归一到同一个键。'第一期' 是本函数对 'r1' 的输出，
+//   而存档键 / chy 记录的 rd 都走这里 → 若不归一，读到的 '第一期' 会派生出一个不存在的营次键。
 function chRoundSlug(id) {
   const s = String(id || '第一期').trim()
-  return s === 'r1' ? '第一期' : s
+  return (!s || s === 'r1' || s === '第一期') ? '第一期' : s
 }
 // v97：按当前视角部门（chDeptKey()）实时解析「本部门当前营次」记录。
 // 云端侧信道 _chRoundCurId/_chRoundCurName 是 _getDoc 拉取时按登录部门（CloudSync._deptSlug）算好的缓存；

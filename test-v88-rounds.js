@@ -307,8 +307,9 @@ const call = (sb, expr) => vm.runInContext(expr, sb)
     assert('setChallengeReset 返回当前营次 id', rr.ok === true && rr.round === 'r2', JSON.stringify(rr))
     assert('重置标记写入 chRoundLevels[r2].chResets', Number(((live6.chRoundLevels || {}).r2 || {}).chResets.alice) > 0, JSON.stringify(live6.chRoundLevels))
     const ev = (live6.events || []).filter(e => e.ty === 'chreset').pop()
-    // 记录键口径：chy 的 rd 存的是「营次名称」（学员端上报 chRoundSlug 结果），
-    // 所以 chreset 事件也必须用名称才能对上；仅第一期（'r1'）归一为空串。
+    // 记录键口径（v102 修正）：chy 的 rd 存的是「营次记录键」而不是营次名称。
+    // v88 最初用营次名称作键，v90 改名后存量记录全变孤儿（学员成绩在看板消失）→ v102 起
+    // 记录键只由营次 id 派生（'r1'/''/'第一期' → ''，其余原样），名称永不参与。
     assert("重置事件 d.round = 营次记录键（r2 → 'r2'）", !!ev && ev.d.round === 'r2', JSON.stringify(ev && ev.d))
     // 第一期镜像到顶层（v87 客户端只认顶层）
     load6({ users: {}, events: [], chRounds: [{ id: 'r1', name: '第一期', open: true }], chRoundCur: 'r1' })
@@ -323,7 +324,8 @@ const call = (sb, expr) => vm.runInContext(expr, sb)
   // ================= ⑦ 学员端按营次派生 =================
   console.log('\n[7] 学员端：存档键 / 题序种子 / 门禁按营次派生')
   {
-    assert('chRoundSlug 存在且 r1 → 第一期', /function chRoundSlug/.test(CH) && /s === 'r1' \? '第一期' : s/.test(CH))
+    // v102：口径固化为「显式处理 第一期 族」，不再依赖旧的单行三元写法
+    assert('chRoundSlug 存在且 r1 / 第一期 均归第一期', /function chRoundSlug/.test(CH) && /'第一期'/.test(extractFn(CH, 'chRoundSlug')))
     // 存档键：第一期沿用原名（兼容旧存档），第 N 期加后缀
     const sb = {
       console,
@@ -419,7 +421,8 @@ const call = (sb, expr) => vm.runInContext(expr, sb)
       'dashParseLocalDT', 'dashCreateRound', 'dashSetRoundCur', 'dashDelRound', 'dashViewRound']
     const missing = names.filter(n => !APP.includes('function ' + n))
     assert('营次面板函数族齐备', missing.length === 0, missing.join(','))
-    assert("看板营次归一与学员端同口径（'' / 'r1' → 第一期）", /function dashRoundSlug/.test(APP) && /'r1'\) \? '第一期' : s/.test(APP))
+    assert("看板营次归一与学员端同口径（空串 / 'r1' / '第一期' → 第一期）",
+      /function dashRoundSlug/.test(APP) && /'第一期'/.test(extractFn(APP, 'dashRoundSlug')))
     assert('renderDashboard 渲染营次面板（取代原手动开关行）', APP.includes('dashRoundsPanelHtml()') && APP.includes('id="dashRoundsPanel"'))
     assert('renderDashChallengeBlock 按营次筛选 chy', /const recSlug = x => dashRoundSlug/.test(APP) && /matchRound|x => recSlug\(x\) === wantSlug/.test(APP) ||
       /recSlug\(x\) === wantSlug/.test(APP))
