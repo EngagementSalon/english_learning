@@ -745,48 +745,83 @@ const CloudSync = {
   //      chy 中 kind==='test' 的记录，看板等所有读取路径都是 base + events 重放，于是自然生效；
   //      事件按时间顺序重放，重置之后重新考试提交的 chy 会正常累计（不会误删新成绩）。
   // 不清：题库级全局聚合 __q、普通练习明细 perQ、挑战错题 chQ（非考试成绩数据）。
+  // ⚠️ v103 修复（成绩跨营次被误删）：
+  //   v88/v99 的实现把「重置哪个营次」绑到**全局指针 chRoundCur** 上，而学员的考试记录
+  //   是按**学员自己所属营次**写入的（rd = 学员营次 id）。两个营次并存时（r1 标帜 / r2 艳中）
+  //   指针只指向一个，于是给另一营次的学员点重置时：
+  //     重置目标 = r1，学员记录 rd = r2 → inRound 判否 → 走 else 整表清空分支
+  //     → 该学员**该营次的全部 chy 记录（含刚考完的 Day7 期末成绩）被 filter 掉，且不可恢复**。
+  //   修复：重置按**学员实际拥有记录的营次集合**逐条落刀，不读全局指针。
+  //     ① 该学员 chy 里出现过的每个 rd（归一后）各写一份重置标记 + 各推一条 chreset 事件；
+  //     ② 学员一条记录都没有（全新学员）时，退化为「当前指针营次」，保证「先重置再考」语义不变。
+  //   配套：_apply 的 chreset 分支加 rd 爆炸半径守卫（见该处注释），双保险。
   async setChallengeReset(username, name) {
     const u = String(username || '')
     if (!u) return { ok: false, reason: 'nouser' }
     const at = Date.now()
-    let round = ''
+    let targets = []
     let saved = false
     for (let attempt = 0; attempt < 4 && !saved; attempt++) {
       try {
         const doc = await this._getDoc()
-        const cur = _roundCurrent(doc)
-        round = cur ? cur.id : ''
-        if (round) {
-          doc.chRoundLevels = (doc.chRoundLevels && typeof doc.chRoundLevels === 'object') ? doc.chRoundLevels : {}
-          const box = doc.chRoundLevels[round] || (doc.chRoundLevels[round] = {})
-          box.chResets = box.chResets || {}
-          box.chResets[u] = at
-          box.chResetModes = box.chResetModes || {}
-          box.chResetModes[u] = 'exam'
-          // 第一期始终镜像到顶层（v87 及更早的学员端/看板只认顶层字段）
-          if (round === 'r1') {
-            doc.chResets = box.chResets
-            doc.chResetModes = box.chResetModes
-          }
-        } else {
-          doc.chResets = doc.chResets || {}
-          doc.chResets[u] = at
-          doc.chResetModes = doc.chResetModes || {}
-          doc.chResetModes[u] = 'exam'
+        // ① 从云端全量（base + events）重放该学员的 chy，收集他实际拥有的营次集合
+        const own = {}
+        const collect = arr => {
+          (Array.isArray(arr) ? arr : []).forEach(x => {
+            if (x && x.kind === 'test') own[_roundSlugKey(x.rd)] = true
+          })
         }
+        const brec = (doc.base && doc.base[u]) || null
+        if (brec) collect(brec.chy)
+        ;(doc.events || []).forEach(ev => {
+          if (ev && ev.ty === 'chy' && ev.u === u) collect([(ev.d || {})])
+        })
+        let keys = Object.keys(own)
+        // ② 全新学员（无任何记录）→ 回落到当前指针营次（保持「先重置、后考试」的原有语义）
+        if (!keys.length) {
+          const cur = _roundCurrent(doc)
+          keys = [_roundSlugKey(cur ? cur.id : '')]
+        }
+        targets = keys
+        doc.chRoundLevels = (doc.chRoundLevels && typeof doc.chRoundLevels === 'object') ? doc.chRoundLevels : {}
+        keys.forEach(k => {
+          if (k === '') {
+            // 第一期（记录键 ''）永远写顶层 + r1 容器 —— 兼容 v87 及更早只认顶层字段的学员端
+            doc.chResets = doc.chResets || {}
+            doc.chResets[u] = at
+            doc.chResetModes = doc.chResetModes || {}
+            doc.chResetModes[u] = 'exam'
+            const r1box = doc.chRoundLevels.r1 || (doc.chRoundLevels.r1 = {})
+            r1box.chResets = r1box.chResets || {}
+            r1box.chResets[u] = at
+            r1box.chResetModes = r1box.chResetModes || {}
+            r1box.chResetModes[u] = 'exam'
+          } else {
+            const box = doc.chRoundLevels[k] || (doc.chRoundLevels[k] = {})
+            box.chResets = box.chResets || {}
+            box.chResets[u] = at
+            box.chResetModes = box.chResetModes || {}
+            box.chResetModes[u] = 'exam'
+          }
+        })
         await this._putDoc(doc)
+        // 写后校验：每个目标营次的重置标记都必须落地（任一失败 → 整轮重试）
         const check = await this._getDoc()
-        const box = (check.chRoundLevels && check.chRoundLevels[round]) || {}
-        const got = round ? Number((box.chResets || {})[u]) : Number((check.chResets || {})[u])
-        const mode = round ? (box.chResetModes || {})[u] : (check.chResetModes || {})[u]
-        if (got === at && mode === 'exam') saved = true
+        saved = keys.every(k => {
+          if (k === '') return Number((check.chResets || {})[u]) === at && (check.chResetModes || {})[u] === 'exam'
+          const box = (check.chRoundLevels && check.chRoundLevels[k]) || {}
+          return Number((box.chResets || {})[u]) === at && (box.chResetModes || {})[u] === 'exam'
+        })
       } catch (e) { /* 网络波动等 → 重试 */ }
     }
     if (!saved) return { ok: false, reason: 'network' }
-    // 聚合表清考试成绩（事件进队列；推送失败也不影响，队列留待下次周期推送）
-    this.enqueue({ u, n: name || u, ty: 'chreset', ts: at, d: { mode: 'exam', round: _roundSlugKey(round) } })
+    // 聚合表清考试成绩：每个目标营次各推一条 chreset（事件进队列；推送失败也不影响，
+    // 队列留待下次周期推送）
+    targets.forEach(k => {
+      this.enqueue({ u, n: name || u, ty: 'chreset', ts: at, d: { mode: 'exam', round: k } })
+    })
     try { await this.pushPending() } catch (e) { /* 保留在队列 */ }
-    return { ok: true, at, round }
+    return { ok: true, at, rounds: targets, round: targets[0] || '' }
   },
 
   // ---------- 聚合 ----------
@@ -931,7 +966,16 @@ const CloudSync = {
         } else {
           // v83 旧口径（整表清空）：该营次的挑战阶段记录；挑战错题 chQ 未按营次存储，
           // 仅在「第一期/单期制」（rd=''）时一并清空，避免清一期误伤另一期的错题排行。
-          r.chy = (r.chy || []).filter(x => !inRound(x))
+          // ⚠️ v103 爆炸半径守卫：v88/v99 的 setChallengeReset 曾按「全局指针营次」落刀，
+          //   而学员记录按「自己的营次」写入 → 两营次并存时 inRound 全判否，filter 结果是
+          //   **整表清空**（学员刚考完的 Day7 成绩被永久删除，已验证线上真实发生）。
+          //   'all' 模式现在只允许清「重置标记所声明的营次」；一条都没清到 + 记录里存在
+          //   别的营次 → 判定为口径错位，拒绝执行，宁可不清也不误删。
+          const kept = (r.chy || []).filter(x => !inRound(x))
+          const wouldWipeAll = (r.chy || []).length > 0 && kept.length === 0
+          const hasOtherRound = (r.chy || []).some(x => x && !inRound(x))
+          if (wouldWipeAll && hasOtherRound) break   // 口径错位 → 不动数据
+          r.chy = kept
           if (rids === '') r.chQ = {}
         }
         r.chResetAt = ev.ts

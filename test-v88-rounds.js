@@ -261,7 +261,9 @@ const call = (sb, expr) => vm.runInContext(expr, sb)
   {
     // 资源侧：事件带 rd
     assert("chy 事件写入 rd = _roundSlugKey(d.rd)（'' 与 'r1' 同口径）", /rd:\s*_roundSlugKey\(d\.rd\)/.test(CLOUD))
-    assert('chreset 事件写入 d.round = _roundSlugKey(round)', /round:\s*_roundSlugKey\(round\)/.test(CLOUD))
+    // v103：setChallengeReset 改为「按学员实际拥有的营次逐条落刀」——事件在循环里产出，
+    // 写的是已归一的记录键 k（不再对 round 变量重复归一）。契约断言：每个目标营次推一条事件。
+    assert('chreset 事件按目标营次逐条产出（d.round = 记录键）', /targets\.forEach\(k\s*=>\s*\{[\s\S]{0,220}?ty:\s*'chreset'[\s\S]{0,120}?round:\s*k/.test(CLOUD))
     assert('_apply(chreset) 用 _roundSlugKey 双端归一后比对', /const inRound = x => _roundSlugKey\(x && x\.rd\) === rids/.test(CLOUD))
 
     // 行为侧：两期各有考试成绩，重置只清当前期
@@ -304,7 +306,7 @@ const call = (sb, expr) => vm.runInContext(expr, sb)
     load6({ users: {}, events: [], chRounds: [{ id: 'r1', name: '第一期', open: true }, { id: 'r2', name: '第二期', open: true }], chRoundCur: 'r2' })
     const sbR = makeCloudSandbox(live6)
     const rr = JSON.parse(await call(sbR, `(async () => JSON.stringify(await CloudSync.setChallengeReset('alice', 'Alice')))()`))
-    assert('setChallengeReset 返回当前营次 id', rr.ok === true && rr.round === 'r2', JSON.stringify(rr))
+    assert('setChallengeReset 返回目标营次（无记录学员 → 回落当前营次 r2）', rr.ok === true && rr.round === 'r2', JSON.stringify(rr))
     assert('重置标记写入 chRoundLevels[r2].chResets', Number(((live6.chRoundLevels || {}).r2 || {}).chResets.alice) > 0, JSON.stringify(live6.chRoundLevels))
     const ev = (live6.events || []).filter(e => e.ty === 'chreset').pop()
     // 记录键口径（v102 修正）：chy 的 rd 存的是「营次记录键」而不是营次名称。
