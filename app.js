@@ -3370,6 +3370,8 @@ async function renderDashboard() {
 
     <div id="dashRoundsPanel">${dashRoundsPanelHtml()}</div>
 
+    <div id="dashChExamGate">${dashChExamGateHtml()}</div>
+
     <div id="dashChallengeBlock"></div>
 
     <h2 style="margin:24px 0 12px;font-size:18px">📊 ${t('dashDetailTitle')}</h2>
@@ -3706,6 +3708,12 @@ function dashViewRound(el) {
   renderDashChallengeBlock(_perQLastRows || [])
   const p = document.getElementById('dashRoundsPanel')
   if (p) p.innerHTML = dashRoundsPanelHtml()
+  dashRefreshExamGate()   // v100：同步期末考试卡（营次切换后徽章/按钮随当前营次刷新）
+}
+// v100：期末考试开关卡的就地刷新（重渲染其外层容器 handle）
+function dashRefreshExamGate() {
+  const box = document.getElementById('dashChExamGate')
+  if (box) box.innerHTML = dashChExamGateHtml()
 }
 let dashRoundView = ''   // '' = 当前营次；否则为指定营次 id（看板统计筛选）
 // v89：看板挑战统计的部门筛选（'all' = 全部部门；否则大部门 key / 分部门 slug）
@@ -3781,7 +3789,7 @@ async function dashToggleChExam() {
     const res = await CloudSync.setChallengeExamOpen(next)
     if (res && res.ok) {
       CloudSync._chExamOpen = next
-      renderDashboard()   // 重渲染看板刷新徽章与按钮（顺带刷新其余板块数据）
+      dashRefreshExamGate()   // v100：就地刷新考试卡（徽章 + 按钮文案）
     } else {
       alert(t('dashChExamFail'))
       if (btn) btn.disabled = false

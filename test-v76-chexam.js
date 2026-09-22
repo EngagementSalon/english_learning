@@ -135,6 +135,7 @@ function makeChSandbox(examOpen) {
     const res2 = await vm.runInContext('CloudSync.setChallengeExamOpen(false)', sb)
     assert('setChallengeExamOpen(false) 关闭（云端+侧信道）', !!res2 && res2.ok === true && state.doc.chExamOpen === false && vm.runInContext('CloudSync._chExamOpen === false', sb))
     // 跨端：云端被其他设备改为 true → 本端拉取后同步
+    // v88：无营次数组时写/读仍走 doc 顶层 chExamOpen（兼容路径），行为与 v87 一致
     state.doc.chExamOpen = true
     await CloudSync.pushPending()
     assert('其他端开启后本端拉取即同步', vm.runInContext('CloudSync._chExamOpen === true', sb))
@@ -203,8 +204,16 @@ function makeChSandbox(examOpen) {
     const appSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8')
     assert('dashChExamGateHtml 定义', appSrc.includes('function dashChExamGateHtml'))
     assert('dashToggleChExam 定义并调 setChallengeExamOpen', appSrc.includes('async function dashToggleChExam') && appSrc.includes('CloudSync.setChallengeExamOpen(next)'))
-    assert('renderDashboard 在挑战板块前插入开关行', appSrc.includes('${dashChExamGateHtml()}'))
-    assert('开关行插入于 dashChallengeBlock 占位之前', appSrc.indexOf('${dashChExamGateHtml()}') >= 0 && appSrc.indexOf('${dashChExamGateHtml()}') < appSrc.indexOf('<div id="dashChallengeBlock"></div>'))
+    assert('renderDashboard 插入营次面板', appSrc.includes('${dashRoundsPanelHtml()}'))
+    assert('营次面板插入于 dashChallengeBlock 占位之前', appSrc.indexOf('${dashRoundsPanelHtml()}') >= 0 && appSrc.indexOf('${dashRoundsPanelHtml()}') < appSrc.indexOf('<div id="dashChallengeBlock"></div>'))
+    // ⚠️ v100 修复：v88 加营次面板时误删了考试开关卡的插入（v76 只断言「函数定义存在」→ 缺陷逃逸两个版本，
+    //    管理员看板上根本没有「开放考试」按钮）。此处改为断言「真的被渲染进看板 HTML」。
+    assert('v100：考试开关卡真的插入看板（dashChExamGateHtml 被调用，非仅定义）',
+      /<div id="dashChExamGate">\$\{dashChExamGateHtml\(\)\}<\/div>/.test(appSrc))
+    assert('v100：考试卡位于营次面板之后、挑战统计之前',
+      appSrc.indexOf('${dashChExamGateHtml()}') > appSrc.indexOf('${dashRoundsPanelHtml()}') &&
+      appSrc.indexOf('${dashChExamGateHtml()}') < appSrc.indexOf('<div id="dashChallengeBlock"></div>'))
+    assert('v100：开关成功后就地刷新考试卡', appSrc.includes('function dashRefreshExamGate') && appSrc.includes('dashRefreshExamGate()'))
     const chSrc = fs.readFileSync(path.join(__dirname, 'challenge.js'), 'utf-8')
     assert('challenge.js 门禁判定与拦截接线', chSrc.includes('function chFinalExamLocked') && chSrc.includes('function chIsFinalExam') && chSrc.includes('chExamLockedAlert'))
     const i18nSrc = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8')
