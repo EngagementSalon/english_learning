@@ -1101,7 +1101,14 @@ let practiceState = { questions: [], index: 0, answers: [], submitted: false, co
 //   'dining/bar' 等分队 slug = 该分队 + 大部门自身 + 通用
 //   'all'   = 仅通用题
 // 非管理员不使用本变量（恒走 Store.getSessionDeptKey()），切片 UI 也不渲染。
-const PRACTICE_DEPT_TABS = ['', 'dining', 'dining/sig', 'dining/yan', 'dining/bar', 'dining/ird', 'rooms', 'all']
+// v109：一级栏目层级化 —— 顶部一级行只放 全部部门/饮食部/房务部/通用 四项（用户口径：
+//   「应该只有餐饮部和房务部两个栏目」），分部门不再平铺在一级行，选中大部门时在下方展开二级行。
+const PRACTICE_DEPT_TABS = ['', 'dining', 'rooms', 'all']
+// v109：合法切片全集（一级 + 二级分部门）。setPracticeDept 校验与 chDeptKey 联动（challenge.js）都用它，
+//   否则点二级分部门按钮会被误判非法而回落「全部部门」。
+const PRACTICE_DEPT_SLUGS = ['', 'dining', 'rooms', 'all',
+  'dining/sig', 'dining/yan', 'dining/bar', 'dining/ird',
+  'rooms/fo', 'rooms/concierge', 'rooms/ww', 'rooms/styling', 'rooms/spa']
 let practiceDept = ''
 // 切片项显示名
 function practiceDeptTabLabel(k) {
@@ -1119,28 +1126,42 @@ function practiceDeptCount(k) {
   } catch (e) { return 0 }
 }
 // 管理员练习页部门切片（仅管理员渲染）
+// v109：层级化 —— 一级行只放四个一级栏目；选中「饮食部/房务部」（或其二级行里的分部门）时，
+//   在下方展开该大部门的分部门二级行，点分部门才切到对应题库切片。
 function practiceDeptSwitchHtml() {
   if (!Store.isAdmin()) return ''
   if (typeof DEPT_SUB_SLUGS === 'undefined') return ''
-  const btns = PRACTICE_DEPT_TABS.map(k => {
+  const btn = (k, sub) => {
     const on = practiceDept === k
     const n = practiceDeptCount(k)
     const cls = on ? 'btn-primary' : 'btn-ghost'
     // 空题库的分队切片淡显（仍可点，避免误以为功能失效）
     const dim = n === 0 ? ';opacity:.55' : ''
-    return `<button class="btn btn-sm ${cls}" style="white-space:nowrap${dim}" onclick="setPracticeDept('${k}')">${escHtml(practiceDeptTabLabel(k))}<span style="font-size:11px;opacity:.75"> ${n}</span></button>`
-  }).join('')
+    const small = sub ? 'font-size:12px;' : ''
+    return `<button class="btn btn-sm ${cls}" style="white-space:nowrap${dim}${small}" onclick="setPracticeDept('${k}')">${escHtml(practiceDeptTabLabel(k))}<span style="font-size:11px;opacity:.75"> ${n}</span></button>`
+  }
+  const mainBtns = PRACTICE_DEPT_TABS.map(k => btn(k, false)).join('')
+  // 二级行：一级选中饮食部/房务部（或其分部门）时展开；DEPT_SUB_SLUGS 键为中文显示名、值为 slug
+  const major = String(practiceDept || '').split('/')[0]
+  let subRow = ''
+  if ((major === 'dining' || major === 'rooms') && DEPT_SUB_SLUGS[major]) {
+    const subs = Object.keys(DEPT_SUB_SLUGS[major])
+      .map(name => major + '/' + DEPT_SUB_SLUGS[major][name])
+      .map(k => btn(k, true)).join('')
+    subRow = `<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;padding-left:2px">${subs}</div>`
+  }
   return `
     <div class="filter-row" style="margin-top:10px;padding-top:10px;border-top:1px dashed #e5e7eb">
       <div class="filter-group" style="flex:1;min-width:0">
         <label>🏷️ ${t('practiceDeptLabel')}</label>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">${btns}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">${mainBtns}</div>
+        ${subRow}
         <p class="form-hint" style="margin:4px 0 0">${t('practiceDeptAdminHint')}</p>
       </div>
     </div>`
 }
 function setPracticeDept(val) {
-  practiceDept = PRACTICE_DEPT_TABS.indexOf(val) >= 0 ? val : ''
+  practiceDept = PRACTICE_DEPT_SLUGS.indexOf(val) >= 0 ? val : ''
   renderPractice()
 }
 
@@ -1207,11 +1228,15 @@ function renderPractice() {
 // v89：标题按学员所属分部门（各部门题不同、各自上传）
 // v107：按适用部门门禁 —— 只有饮食部四个二级分队（标帜/艳中/酒吧团队/客房送餐）可进；
 //       房务部/其他部门学员看到的是「不可参加」的说明卡（不可点击），不再是进去后「未开放」的死胡同。
+// v109：营次动态门禁 —— 有资格但本部门在当前营次列表没有专属营次（如酒吧团队/客房送餐，
+//       目前只有标帜/艳中开了营）时，显示「本部门暂无挑战」卡，不再渲染「本部门标题 + 别队营次名」的错位卡。
 function challengeEntryHtml() {
   challengeLoad()
   // v107：部门白名单门禁（管理员豁免）
   const deptOk = typeof chDeptAllowed === 'function' ? chDeptAllowed() : true
   if (!deptOk) return challengeEntryBlockedHtml()
+  // v109：本部门暂无专属营次 → 说明卡（管理员切片到无营次部门时同样生效）
+  if (typeof chNoRoundForDept === 'function' && chNoRoundForDept()) return challengeEntryNoRoundHtml()
   const doneDays = CHALLENGE_DAYS.filter(d => chDayDone(d.day)).length
   const locked = typeof chOpenLocked === 'function' && chOpenLocked()
   const st = typeof chRoundOpenState === 'function' ? chRoundOpenState() : { state: 'closed' }
@@ -1260,6 +1285,38 @@ function challengeEntryBlockedHtml() {
           <p class="form-hint" style="margin:0;color:#9ca3af">🚫 ${t(reason)}</p>
           ${list}
           ${cta}
+        </div>
+      </div>
+    </div>`
+}
+
+// v109：有资格但本部门暂无专属营次时的说明卡（酒吧团队/客房送餐等；管理员切片到无营次部门同此卡）。
+// 列出当前实际开设了营次的部门，学员一眼看清「现在谁的挑战开着」；不显示别队营次名，避免错位。
+function challengeEntryNoRoundHtml() {
+  let names = []
+  try {
+    const rounds = (typeof CloudSync !== 'undefined' && Array.isArray(CloudSync._chRounds)) ? CloudSync._chRounds : []
+    rounds.forEach(r => {
+      ;(Array.isArray(r && r.depts) ? r.depts : []).forEach(d => {
+        if (!d) return
+        let n = d
+        if (d.indexOf('/') >= 0) n = (typeof deptSlugName === 'function' && deptSlugName(d)) || d
+        else try { n = (deptTree()[d] || {}).name || d } catch (e) {}
+        if (names.indexOf(n) < 0) names.push(n)
+      })
+    })
+  } catch (e) { names = [] }
+  const list = names.length
+    ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${names.map(n => `<span style="font-size:11px;background:#fffbeb;color:#b45309;border:1px solid #fde68a;border-radius:999px;padding:2px 10px">${escHtml(n)}</span>`).join('')}</div>`
+    : ''
+  return `
+    <div class="card" style="margin-top:16px;border:2px dashed #fde68a;background:#fffbeb">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="font-size:32px;opacity:.5">🏅</div>
+        <div style="flex:1;min-width:0">
+          <h3 style="margin:0 0 4px;color:#6b7280">${escHtml(t('chTitle'))}</h3>
+          <p class="form-hint" style="margin:0;color:#9ca3af">🚫 ${t('chDeptNoRound')}</p>
+          ${list}
         </div>
       </div>
     </div>`

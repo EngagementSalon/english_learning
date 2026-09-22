@@ -51,11 +51,14 @@ const CHALLENGE_TEST_PLAN = [10, 7, 3]
 // v89：当前学员所属分部门（'dining/bar' 等 slug）；管理员/其他部门返回 ''（=不限部门，看全库）
 // v97：管理员跟随练习页「题目部门」切片 —— 切艳中即以艳中视角看挑战（标题/题库/营次/进度整体切换），
 //      切「全部部门」= 全库视角（与旧行为一致）。非管理员仍按本人 session 部门，切片对其无效。
+// v109：校验全集改用 PRACTICE_DEPT_SLUGS（一级 + 二级分部门）—— 一级行层级化后
+//      PRACTICE_DEPT_TABS 只剩四个一级栏目，若仍按它校验，管理员切到分部门切片会误判非法而回落 ''，
+//      v97 的「切片联动挑战视角」就会断。
 function chDeptKey() {
   try {
     if (typeof Store !== 'undefined' && Store.isAdmin && Store.isAdmin()
-        && typeof PRACTICE_DEPT_TABS !== 'undefined' && typeof practiceDept !== 'undefined'
-        && PRACTICE_DEPT_TABS.indexOf(practiceDept) >= 0) {
+        && typeof PRACTICE_DEPT_SLUGS !== 'undefined' && typeof practiceDept !== 'undefined'
+        && PRACTICE_DEPT_SLUGS.indexOf(practiceDept) >= 0) {
       return practiceDept
     }
     if (typeof sessionDeptSlug === 'function') return sessionDeptSlug()
@@ -886,6 +889,36 @@ function chDeptBlockedPageHtml() {
     </div>`
 }
 
+// v109：有资格但本部门暂无专属营次（如酒吧团队/客房送餐，目前只有标帜/艳中开营）时打开挑战页的整页说明。
+// 与入口卡 challengeEntryNoRoundHtml 同口径：列出当前实际有营次的部门，不渲染别队营次的挑战内容。
+function chDeptNoRoundPageHtml() {
+  let names = []
+  try {
+    const rounds = (typeof CloudSync !== 'undefined' && Array.isArray(CloudSync._chRounds)) ? CloudSync._chRounds : []
+    rounds.forEach(r => {
+      ;(Array.isArray(r && r.depts) ? r.depts : []).forEach(d => {
+        if (!d) return
+        let n = d
+        if (d.indexOf('/') >= 0) n = (typeof deptSlugName === 'function' && deptSlugName(d)) || d
+        else try { n = (deptTree()[d] || {}).name || d } catch (e) {}
+        if (names.indexOf(n) < 0) names.push(n)
+      })
+    })
+  } catch (e) { names = [] }
+  const list = names.map(n => `<span style="font-size:12px;background:#fef3c7;color:#b45309;border:1px solid #fde68a;border-radius:999px;padding:3px 12px">${escHtml(n)}</span>`).join('')
+  return `
+    <div class="card" style="max-width:520px;margin:24px auto;text-align:center">
+      <div style="font-size:44px;opacity:.45">🏅</div>
+      <h2 style="margin:8px 0 6px;color:#374151">${escHtml(t('chTitle'))}</h2>
+      <p class="form-hint" style="margin:0;color:#9ca3af">🚫 ${t('chDeptNoRound')}</p>
+      ${names.length ? `<p class="form-hint" style="margin:16px 0 8px;color:#6b7280">${t('chDeptNoRoundList')}</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center">${list}</div>` : ''}
+      <div style="margin-top:18px">
+        <button class="btn btn-ghost btn-sm" onclick="navigate('practice')">${escHtml(t('backHome'))}</button>
+      </div>
+    </div>`
+}
+
 function renderChallenge() {
   const el = document.getElementById('page-challenge')
   if (!el) return
@@ -896,6 +929,12 @@ function renderChallenge() {
   if (typeof chDeptAllowed === 'function' && !chDeptAllowed()) {
     _chGateRendered = { open: chOpenLocked(), exam: chFinalExamLocked(), round: chCurrentRound(), dept: chDeptKey(), shape: 'blocked' }
     el.innerHTML = chDeptBlockedPageHtml()
+    return
+  }
+  // v109：有资格但本部门暂无专属营次 → 说明页（否则会渲染「本部门标题 + 别队营次」的错位内容）
+  if (typeof chNoRoundForDept === 'function' && chNoRoundForDept()) {
+    _chGateRendered = { open: chOpenLocked(), exam: chFinalExamLocked(), round: chCurrentRound(), dept: chDeptKey(), shape: 'noround' }
+    el.innerHTML = chDeptNoRoundPageHtml()
     return
   }
   if (chs && (chs.phase === 'quiz' || chs.phase === 'review' || chs.phase === 'result')) { renderChallengeQuiz(); return }
