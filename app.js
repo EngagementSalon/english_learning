@@ -3720,6 +3720,8 @@ function dashRefreshExamGate() {
   if (box) box.innerHTML = dashChExamGateHtml()
 }
 let dashRoundView = ''   // '' = 当前营次；否则为指定营次 id（看板统计筛选）
+// v105：最近一次渲染的挑战明细行（供批量补录筛选「进度已到 Day7 但 D7 无成绩」的学员）
+let _chDashRows = []
 // v89：看板挑战统计的部门筛选（'all' = 全部部门；否则大部门 key / 分部门 slug）
 let dashChDept = 'all'
 function dashChSetDept(k) {
@@ -3763,6 +3765,113 @@ async function dashResetChUser(btnOrUser, nameOrIdx, legacyIdx) {
     alert(t('dashChResetFail'))
     if (btn) { btn.disabled = false; btn.textContent = t('dashChResetBtn') }
   }
+}
+
+// ====== 管理员看板：手动补录挑战考试成绩（v105 引入） ======
+// 用途：营次在学员页面打开之后才创建时（v104 修的 bug），学员端被总闸拦下 → 云端零上报，
+//   但界面上进度与成绩照常显示，学员与管理员两边对不上。让学员重考是首选；
+//   学员已离场/不便重考时，用这里手动补录。
+//
+// ⚠️ 一律沿用 v85 的传参模式：参数走 data-* 属性（escAttr 转义），onclick 只传 this,
+//    绝不把用户名/姓名拼进内联 onclick —— 名字里一个引号就能让属性被 HTML 解析器截断，
+//    按钮会静默失效（v83/v84 就是这么坏的）。
+//
+// 补录的口径：
+//   · Day 可选 1（摸底，固定 20 题）或 7（期末，固定 20 题）
+//   · 只录入「答对数」，正确率与积分按现有规则由云端聚合计算（与真实考试同口径）
+//   · usedSec 用于积分中的用时扣减，补录时默认给 0 秒（等于不扣），可手动填
+//   · overwrite 勾选时推 chyfix 覆写已有成绩（录错了再改），否则新增一条
+function dashManualScoreOpen(usernames, name) {
+  const list = (Array.isArray(usernames) ? usernames : [usernames]).map(x => String(x || '')).filter(Boolean)
+  if (!list.length) return
+  const label = list.length === 1
+    ? ((name && name !== list[0]) ? `${name}（${list[0]}）` : list[0])
+    : t('dashChManualMultiLabel', list.length)
+  const old = document.getElementById('dashChManualModal')
+  if (old) old.remove()
+  const box = document.createElement('div')
+  box.id = 'dashChManualModal'
+  box.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);padding:16px'
+  box.innerHTML = `
+    <div style="background:#fff;border-radius:12px;max-width:420px;width:100%;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.2)">
+      <h3 style="margin:0 0 4px;font-size:16px">✍️ ${t('dashChManualTitle')}</h3>
+      <p style="margin:0 0 14px;font-size:13px;color:#6b7280">${escHtml(label)}</p>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <label style="font-size:13px">${t('dashChManualDay')}
+          <select id="dashChManualDay" style="width:100%;margin-top:4px;padding:8px;border:1px solid #d1d5db;border-radius:8px">
+            <option value="7">${t('dashChManualDay7')}</option>
+            <option value="1">${t('dashChManualDay1')}</option>
+          </select>
+        </label>
+        <label style="font-size:13px">${t('dashChManualCorrect')}
+          <input id="dashChManualCorrect" type="number" min="0" max="20" value="20"
+            style="width:100%;margin-top:4px;padding:8px;border:1px solid #d1d5db;border-radius:8px">
+        </label>
+        <label style="font-size:13px">${t('dashChManualSec')}
+          <input id="dashChManualSec" type="number" min="0" value="0"
+            style="width:100%;margin-top:4px;padding:8px;border:1px solid #d1d5db;border-radius:8px">
+        </label>
+        <label style="font-size:13px;display:flex;align-items:center;gap:8px">
+          <input id="dashChManualOverwrite" type="checkbox" style="width:16px;height:16px">
+          <span>${t('dashChManualOverwrite')}</span>
+        </label>
+      </div>
+      <p style="margin:12px 0 0;font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px">${t('dashChManualWarn')}</p>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+        <button class="btn btn-ghost" onclick="dashManualScoreClose()">${t('dashChManualCancel')}</button>
+        <button class="btn btn-primary" id="dashChManualOk" data-u="${escAttr(list.join(','))}">${t('dashChManualSubmit')}</button>
+      </div>
+    </div>`
+  document.body.appendChild(box)
+  const ok = document.getElementById('dashChManualOk')
+  if (ok) ok.onclick = () => dashManualScoreSubmit(ok)
+}
+function dashManualScoreClose() {
+  const el = document.getElementById('dashChManualModal')
+  if (el) el.remove()
+}
+// 表内按钮入口：参数一律走 data-*（v85 教训，绝不用内联引号拼用户名）
+function dashManualScoreFromBtn(btn) {
+  if (!btn || !btn.dataset) return
+  const u = btn.dataset.u || ''
+  const n = btn.dataset.n || ''
+  if (u) dashManualScoreOpen([u], n)
+}
+async function dashManualScoreSubmit(btn) {
+  const usernames = String((btn && btn.dataset && btn.dataset.u) || '').split(',').map(s => s.trim()).filter(Boolean)
+  if (!usernames.length) return
+  const day = Number((document.getElementById('dashChManualDay') || {}).value) || 7
+  const total = 20
+  let correct = Number((document.getElementById('dashChManualCorrect') || {}).value)
+  if (!isFinite(correct)) correct = total
+  correct = Math.max(0, Math.min(total, Math.round(correct)))
+  const usedSec = Math.max(0, Math.round(Number((document.getElementById('dashChManualSec') || {}).value) || 0))
+  const overwrite = !!((document.getElementById('dashChManualOverwrite') || {}).checked)
+  if (overwrite && !confirm(t('dashChManualOverwriteConfirm'))) return
+  if (btn) { btn.disabled = true; btn.textContent = t('dashChManualWorking') }
+  try {
+    const res = await CloudSync.setChallengeManualScore(usernames, {
+      day, si: day === 7 ? 1 : 0, kind: 'test', correct, total, usedSec, overwrite,
+    })
+    if (res && res.ok) {
+      dashManualScoreClose()
+      alert(t('dashChManualOk', res.count, correct, total))
+      renderDashboard()
+    } else {
+      alert(t('dashChManualFail'))
+      if (btn) { btn.disabled = false; btn.textContent = t('dashChManualSubmit') }
+    }
+  } catch (e) {
+    alert(t('dashChManualFail'))
+    if (btn) { btn.disabled = false; btn.textContent = t('dashChManualSubmit') }
+  }
+}
+// 批量补录：把当前表格里所有「进度已到 Day7 但 D7 无成绩」的学员一次性纳入弹窗
+function dashManualScoreBatch() {
+  const lack = (_chDashRows || []).filter(p => p.s7 == null && p.maxDay >= 7).map(p => p.username)
+  if (!lack.length) { alert(t('dashChManualBatchEmpty')); return }
+  if (!confirm(t('dashChManualBatchConfirm', lack.length))) return
+  dashManualScoreOpen(lack, '')
 }
 
 // ====== 管理员看板：期末考试开关（v76） ======
@@ -3943,12 +4052,15 @@ function renderDashChallengeBlock(rows) {
       username: r.username, name: r.name, dept: r.dept, role: r.role,
       maxDay, stagesDone, q, acc: q > 0 ? Math.round(c / q * 100) : 0,
       s1: score(t1), s7: score(t7),
+      // v105：该场成绩是否来自管理员手动补录（看板打「手动录入」标记，便于事后区分人工数据）
+      m7: !!(t7 && t7.manual), m1: !!(t1 && t1.manual),
       checkin,
       lbC, lbT, lbScore: lbPts - lbT,
       chQ: r.chQ || {},
     }
   })
   list.sort((a, b) => b.q - a.q)
+  _chDashRows = list   // v105：供批量补录读取（「进度已到 Day7 但 D7 无成绩」的学员集合）
   // v82 每日打卡汇总：每天完成（全部阶段）的人数
   const checkinStats = [0, 0, 0, 0, 0, 0, 0]
   list.forEach(p => (p.checkin || []).forEach((c, i) => { if (c === 2) checkinStats[i]++ }))
@@ -3981,9 +4093,13 @@ function renderDashChallengeBlock(rows) {
     .sort((a, b) => b.wrong - a.wrong)
     .slice(0, 50)
   const avgAcc = totalQ > 0 ? Math.round(totalC / totalQ * 100) : 0
-  const scoreCell = s => s == null
+  // v105：进度已到 Day7 但 D7 无成绩的人数 → 提示补录入口（正是本次事故的表现形态）
+  const lack7 = list.filter(p => p.s7 == null && p.maxDay >= 7).length
+  const scoreCell = (s, manual) => (s == null
     ? '<span style="color:#9ca3af;font-size:12px">—</span>'
-    : `<span style="font-weight:700;color:${s >= 80 ? '#059669' : s >= 60 ? '#d97706' : '#dc2626'}">${s}</span>`
+    : `<span style="font-weight:700;color:${s >= 80 ? '#059669' : s >= 60 ? '#d97706' : '#dc2626'}">${s}</span>`)
+    // v105：手动补录的成绩加标记，避免事后与真实考试成绩混淆
+    + (manual && s != null ? `<span title="${escAttr(t('dashChManualBadgeHint'))}" style="margin-left:4px;font-size:10px;color:#92400e;background:#fef3c7;border-radius:6px;padding:1px 5px;vertical-align:middle">${t('dashChManualBadge')}</span>` : '')
   el.innerHTML = `
     <div class="card" style="margin-top:16px">
       <h3 style="margin-bottom:8px">🏅 ${t('dashChTitle')} · <span style="color:#2563eb">${escHtml(rdName)}</span></h3>
@@ -3994,6 +4110,10 @@ function renderDashChallengeBlock(rows) {
         <div class="dash-stat"><div class="dash-val">${totalQ}</div><div class="dash-lbl">${t('dashChTotalQ')}</div></div>
         <div class="dash-stat"><div class="dash-val">${avgAcc}%</div><div class="dash-lbl">${t('dashChAvg')}</div></div>
       </div>
+      ${lack7 > 0 ? `<div style="margin:0 0 10px;padding:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <span style="font-size:13px;color:#1e40af">✍️ ${t('dashChManualLack', lack7)}</span>
+        <button class="btn btn-primary btn-sm" style="flex-shrink:0" onclick="dashManualScoreBatch()">${t('dashChManualBatchBtn')}</button>
+      </div>` : ''}
       <p class="form-hint" style="margin:0 0 10px">${t('dashRoundStatHint', rdName)}</p>
       <div style="margin:4px 0 10px;padding:10px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;color:#92400e;font-size:14px;font-weight:600">🏆 ${t('dashChPrizeHint')}</div>
       <h4 style="margin:14px 0 6px">🏆 ${t('dashChRankTitle')}</h4>
@@ -4043,13 +4163,16 @@ function renderDashChallengeBlock(rows) {
               <td>${escHtml(p.dept || '—')}</td>
               <td class="ch-prog">${t('chDashProgress', p.maxDay, p.stagesDone)}</td>
               <td style="text-align:center">${p.q} · <span class="perq-rate ${p.acc >= 80 ? 'perq-good' : p.acc >= 60 ? 'perq-ok' : 'perq-bad'}">${p.acc}%</span></td>
-              <td style="text-align:center">${scoreCell(p.s1)}</td>
-              <td style="text-align:center">${scoreCell(p.s7)}</td>
+              <td style="text-align:center">${scoreCell(p.s1, p.m1)}</td>
+              <td style="text-align:center">${scoreCell(p.s7, p.m7)}</td>
               ${(p.checkin || []).map((c, i) => `<td style="text-align:center;border-left:${i === 0 ? '2px solid #e5e7eb' : 'none'}">${checkinCell(c)}</td>`).join('')}
-              <td style="text-align:center;border-left:2px solid #e5e7eb">
+              <td style="text-align:center;border-left:2px solid #e5e7eb;white-space:nowrap">
                 <button class="btn btn-ghost" id="dashChResetBtn_${pi}" style="padding:4px 10px;font-size:12px;white-space:nowrap"
                   data-u="${escAttr(p.username)}" data-n="${escAttr(p.name || '')}"
                   onclick="dashResetChUser(this, ${pi})">${t('dashChResetBtn')}</button>
+                <button class="btn btn-ghost" id="dashChManualBtn_${pi}" style="padding:4px 10px;font-size:12px;white-space:nowrap;margin-left:4px"
+                  data-u="${escAttr(p.username)}" data-n="${escAttr(p.name || '')}"
+                  onclick="dashManualScoreFromBtn(this)">${t('dashChManualBtn')}</button>
               </td>
             </tr>`).join('')}
           </tbody>

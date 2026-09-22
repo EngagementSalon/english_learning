@@ -824,6 +824,83 @@ const CloudSync = {
     return { ok: true, at, rounds: targets, round: targets[0] || '' }
   },
 
+  // ---------- 管理员手动补录某学员的挑战考试成绩（v105 引入） ----------
+  // 背景（2026-09-22 事故，见 v104）：营次在学员页面打开之后才创建时，学员端内存缓存不刷新
+  // → chOpenLocked() 恒 true → 开始考试被总闸拦下 → **云端零 chy 上报**，但学员界面上
+  //   进度与历史成绩照常渲染（走本机 localStorage），学员以为自己考完了、管理员查不到。
+  //   让学员重考是首选；但当学员已经离场 / 不便重考时，需要一条管理员补录通道。
+  //
+  // 口径与 setChallengeReset 刻意同源（v103 的教训：凡按营次操作数据，目标营次必须
+  // **从被操作数据本身推导**，绝不读全局指针）：
+  //   ① 从云端 base + events 重放该学员的 chy，收集他**实际拥有记录的营次集合**；
+  //   ② 每个营次各推一条/多条 chy 事件（事件是唯一写入口，看板等所有读取路径都是
+  //      base + events 重放 → 自然生效，无需另写聚合代码）；
+  //   ③ 全新学员（无任何记录）退化为「当前指针营次」，保证「先补录、后查看」语义可用。
+  // 刻意不写 base：并发写 base 会被其它设备的旧快照覆盖；只走事件队列最稳。
+  //
+  // opts: { day, si, kind, correct, total, usedSec, round, overwrite }
+  //   day/si 缺省 → day=7, si=1（Day7 期末考试，本功能的主用途）
+  //   correct/total 缺省 → 按 CH_MANUAL_TOTAL 定额（Day7 20 题）
+  //   overwrite=true → 推 chyfix 覆写该营次该阶段**最近一条** test 记录（用于「录错了再改」）
+  // 写入的记录带 manual:true，看板会打「手动录入」标记，便于事后区分人工数据。
+  async setChallengeManualScore(usernames, opts) {
+    const list = (Array.isArray(usernames) ? usernames : [usernames])
+      .map(x => String(x || '').trim()).filter(Boolean)
+    if (!list.length) return { ok: false, reason: 'nouser' }
+    const o = opts || {}
+    const day = Number(o.day) || 7
+    const si = o.si != null ? Number(o.si) : (day === 7 ? 1 : 0)
+    const kind = String(o.kind || 'test')
+    const total = Number(o.total) || 20
+    let correct = Number(o.correct)
+    if (!isFinite(correct)) correct = total
+    correct = Math.max(0, Math.min(total, Math.round(correct)))
+    const usedSec = Math.max(0, Math.round(Number(o.usedSec) || 0))
+    const at = Date.now()
+    // ① 解析每名学员实际归属的营次集合（v103 口径：从数据本身推导，不读全局指针）
+    let assigned, names
+    try {
+      const doc = await this._getDoc()
+      assigned = {}
+      names = {}
+      list.forEach(u => {
+        const own = {}
+        const rec = (doc.base && doc.base[u]) || null
+        names[u] = (rec && rec.name) || u
+        ;(Array.isArray(rec && rec.chy) ? rec.chy : []).forEach(x => { if (x) own[_roundSlugKey(x.rd)] = true })
+        ;(doc.events || []).forEach(ev => {
+          if (ev && ev.ty === 'chy' && ev.u === u) own[_roundSlugKey((ev.d || {}).rd)] = true
+        })
+        let keys = Object.keys(own)
+        // 全新学员（无任何记录）→ 回落当前指针营次，保证「先补录、后查看」可用
+        if (!keys.length) {
+          const cur = _roundCurrent(doc)
+          keys = [_roundSlugKey(cur ? cur.id : '')]
+        }
+        assigned[u] = keys
+      })
+    } catch (e) {
+      return { ok: false, reason: 'network' }
+    }
+    const rounds = Array.from(new Set([].concat.apply([], list.map(u => assigned[u]))))
+    // ② 逐学员逐营次入队（事件是唯一写入口；看板等读取路径均为 base + events 重放，故自然生效）
+    //    不写 base：并发写 base 会被其它设备的旧快照覆盖，只走事件队列最稳。
+    let n = 0
+    list.forEach(u => {
+      assigned[u].forEach(k => {
+        const ts = at + (n++)
+        if (o.overwrite) {
+          // chyfix：覆写该营次该阶段最近一条 test 记录（「录错了再改」）
+          this.enqueue({ u, n: names[u], ty: 'chyfix', ts, d: { day, si, rd: k, correct, total, usedSec, manual: true } })
+        } else {
+          this.enqueue({ u, n: names[u], ty: 'chy', ts, d: { day, si, kind, correct, total, usedSec, rd: k, manual: true } })
+        }
+      })
+    })
+    try { await this.pushPending() } catch (e) { /* 保留在队列，下次周期推送 */ }
+    return { ok: true, at, users: list, rounds, day, si, correct, total, usedSec, count: list.length, overwrite: !!o.overwrite }
+  },
+
   // ---------- 聚合 ----------
   // 把一条事件应用到用户聚合表 map（可直接用于云端 base 或本地聚合）
   _apply(map, ev) {
@@ -942,12 +1019,45 @@ const CloudSync = {
         // v71 七天挑战阶段完成上报：保留每次完成记录（练习重练多条；水平测试仅一条）
         // v73：usedSec = 阶段净用时秒（积分榜用；旧事件无此字段按 0，不影响积分）
         // v88：rd = 营次 id（缺省 '' = 第一期/单期制旧数据）
+        // v105：manual=true = 管理员手动补录（营次在页面打开后才创建导致学员云端零上报时的救济通道）。
+        //   记录照常参与统计与积分，但看板会打「手动录入」标记，便于事后区分人工数据。
         r.chy = r.chy || []
         r.chy.push({
           day: Number(d.day) || 0, si: Number(d.si) || 0, kind: String(d.kind || 'practice'),
           correct: Number(d.correct) || 0, total: Number(d.total) || 0,
           usedSec: Number(d.usedSec) || 0, at: ev.ts, rd: _roundSlugKey(d.rd),
+          ...(d.manual ? { manual: true } : {}),
         })
+        break
+      case 'chyfix':
+        // v105：管理员修正已录入的挑战成绩（补录录错后改数）。按 (day, si, rd) 定位该营次该阶段
+        // **最近一条** kind==='test' 且未被 cleared 的记录并覆写 correct/total/usedSec。
+        // 幂等：重复应用同一条 chyfix 结果相同（都是覆写同一目标）。只动 test，绝不碰 practice。
+        // 找不到目标（记录不存在 / 已被重置降级为 cleared）→ 静默忽略，不凭空造记录。
+        {
+          const rd = _roundSlugKey(d.round != null ? d.round : d.rd)
+          const dayN = Number(d.day) || 0, siN = Number(d.si) || 0
+          const list = Array.isArray(r.chy) ? r.chy : []
+          let hit = -1
+          for (let i = list.length - 1; i >= 0; i--) {
+            const x = list[i]
+            if (!x || x.kind !== 'test' || x.cleared) continue
+            if ((Number(x.day) || 0) !== dayN || (Number(x.si) || 0) !== siN) continue
+            if (_roundSlugKey(x.rd) !== rd) continue
+            hit = i; break
+          }
+          if (hit >= 0) {
+            const x = list[hit]
+            list[hit] = {
+              day: x.day, si: x.si, kind: 'test',
+              correct: Number(d.correct) || 0, total: Number(d.total) || 0,
+              usedSec: Number(d.usedSec) || 0, at: x.at, rd: _roundSlugKey(x.rd),
+              manual: true,
+              ...(x.cleared ? { cleared: true } : {}),
+            }
+            r.chy = list
+          }
+        }
         break
       case 'chreset':
         // 管理员重置该学员的挑战记录：v84 起默认只清「考试成绩」——把 chy 中的水平测试记录

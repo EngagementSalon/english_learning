@@ -97,6 +97,19 @@ function renderBoard() {
   vm.runInContext(extractFn(appSrc, 'dashRoundList'), sb)
   vm.runInContext(extractFn(appSrc, 'dashRoundCurId'), sb)
   vm.runInContext(extractFn(appSrc, 'dashRoundSlug'), sb)
+  // v89：看板挑战统计的部门筛选（dashChDept / normDept）——沙箱按「全部部门」口径，行为与 v88 一致
+  vm.runInContext('let dashChDept = "all"', sb)
+  vm.runInContext(extractFn(appSrc, 'normDept'), sb)
+  vm.runInContext(extractFn(appSrc, 'normDeptSub'), sb)
+  vm.runInContext(extractFn(appSrc, '_deptSubIndex'), sb)
+  vm.runInContext(extractFn(appSrc, 'deptTree'), sb)
+  vm.runInContext('const DEPT_MAJOR_KEYS = ["dining", "rooms", "other"]', sb)
+  vm.runInContext('const DEPT_CANON = { dining: ["标帜餐厅", "艳中餐厅", "酒吧团队", "客房送餐"], rooms: ["迎宾前台", "礼宾部", "随时随需", "客房造型", "健身及水疗中心"] }', sb)
+  vm.runInContext('const DEPT_SUB_SLUGS = { dining: { "标帜餐厅": "sig", "艳中餐厅": "yan", "酒吧团队": "bar", "客房送餐": "ird" }, rooms: { "迎宾前台": "fo", "礼宾部": "concierge", "随时随需": "ww", "客房造型": "styling", "健身及水疗中心": "spa" } }', sb)
+  vm.runInContext('const DEPT_SUB_BY_SLUG = (() => { const o = {}; Object.keys(DEPT_SUB_SLUGS).forEach(mk => Object.keys(DEPT_SUB_SLUGS[mk]).forEach(s => { o[mk + "/" + DEPT_SUB_SLUGS[mk][s]] = s })); return o })()', sb)
+  vm.runInContext(extractFn(appSrc, 'deptSlug'), sb)
+  vm.runInContext(extractFn(appSrc, 'deptSlugName'), sb)
+  vm.runInContext(extractFn(appSrc, 'deptGroupKey'), sb)
 
   vm.runInContext('renderDashChallengeBlock(__rows)', sb)
   return sb.__el.innerHTML
@@ -148,13 +161,36 @@ function runOnclick(code, mockEl) {
   // 旧反模式的字样不应再出现在按钮上
   assert('按钮不再内嵌 JSON.stringify 的参数字符串',
     !resetOnclicks.some(v => v.includes('JSON') || v.includes('\\"')), '')
-  const dataU = parseAttr(html, 'data-u')
-  const dataN = parseAttr(html, 'data-n')
-  assert('data-u 数量与学员数一致', dataU.length === ROWS.length, JSON.stringify(dataU))
+  // v105：每行现在有两个按钮（重置 + 补录），都带同一对 data-u/data-n
+  // → 断言必须按「按钮种类」取样，不能对全表 data-u 计数（否则新按钮一加就误报）
+  const btnAttrs = code => {
+    const out = []
+    const re = new RegExp('<button[^>]*onclick="' + code + '"[^>]*>', 'g')
+    let m
+    while ((m = re.exec(html))) {
+      const u = /data-u="([^"]*)"/.exec(m[0])
+      const n = /data-n="([^"]*)"/.exec(m[0])
+      out.push({ u: u ? u[1] : null, n: n ? n[1] : null })
+    }
+    return out
+  }
+  const resetAttrs = btnAttrs('dashResetChUser\\(this, \\d+\\)')
+  const manualAttrs = btnAttrs('dashManualScoreFromBtn\\(this\\)')
+  const dataU = resetAttrs.map(x => x.u)
+  const dataN = resetAttrs.map(x => x.n)
+  assert('重置按钮每行一个（data-u 数量与学员数一致）', dataU.length === ROWS.length, JSON.stringify(dataU))
   assert('data-u 逐行对应用户名（含引号用户名被转义）',
     dataU[0] === 'alice' && dataU[1] === '张三' && dataU[2] === 'o&#39;brien&quot;x', JSON.stringify(dataU))
   assert('data-n 逐行对应姓名（双引号→&quot; 单引号→&#39;）',
     dataN[0] === 'Alice Wang' && dataN[2] === 'Pat &quot;PJ&quot; O&#39;Brien', JSON.stringify(dataN))
+  // v105：补录按钮同样必须走 data-*（不得把用户名拼进 onclick）
+  assert('补录按钮每行一个，且同样携带 data-u/data-n',
+    manualAttrs.length === ROWS.length
+    && manualAttrs[0].u === 'alice' && manualAttrs[1].u === '张三' && manualAttrs[2].u === 'o&#39;brien&quot;x',
+    JSON.stringify(manualAttrs))
+  assert('补录按钮的 onclick 不含用户名（无内联引号拼接）',
+    onclicks.filter(v => v.includes('dashManualScoreFromBtn')).every(v => v === 'dashManualScoreFromBtn(this)'),
+    JSON.stringify(onclicks.filter(v => v.includes('dashManualScoreFromBtn'))))
 
   // ---------- ③ 端到端：点击真跑一遍 ----------
   console.log('\n[3] 端到端模拟点击（onclick 代码 + data-* 一起走完）')
