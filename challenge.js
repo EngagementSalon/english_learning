@@ -774,10 +774,21 @@ async function chLoadLeaderboard() {
   // v83：同一拉取也刷新了重置侧信道（_chResets）→ 刚被重置则清空本地进度并重渲染入口；
   // v88：营次切换（管理员新建/切换当前营次）也在此感知 → 换键重新装载本地进度；
   // 仅概览页响应（答题中 renderChallenge 会走会话分支，不打断作答）
+  // ⚠️ v104：必须比对「本部门适用营次的身份」，不能只比对 open/exam 两个布尔量。
+  //   事故：营次在学员页面已打开之后才创建（本部门原先无营次）时，open 前后都是 false
+  //   → 值没变化 → 不重渲染、不重拉，学员永远停在「本部门无营次」的旧状态。
+  //   表现极具迷惑性：挑战页打得开、进度与历史成绩照常显示（本地缓存渲染）、
+  //   心跳照常上报，但每次开始都被总闸拦下 → 云端零上报。学员以为考完了，管理员查不到。
   try {
     if (typeof CloudSync !== 'undefined' && _chGateRendered !== null) {
-      const cur = { open: chOpenLocked(), exam: chFinalExamLocked(), round: chCurrentRound() }
-      if (cur.open !== _chGateRendered.open || cur.exam !== _chGateRendered.exam) { renderChallenge(); return }
+      const cur = { open: chOpenLocked(), exam: chFinalExamLocked(), round: chCurrentRound(), dept: chDeptKey() }
+      // 营次身份 = 本部门当前营次 id + 是否「本部门无营次」；任一变化都要重渲染
+      const recNow = chRoundRecForDept()
+      const idNow = recNow && recNow.id ? String(recNow.id) : ''
+      const noRound = chNoRoundForDept()
+      const shape = idNow + '|' + (noRound ? '1' : '0')
+      if (cur.open !== _chGateRendered.open || cur.exam !== _chGateRendered.exam
+        || cur.dept !== _chGateRendered.dept || shape !== _chGateRendered.shape) { renderChallenge(); return }
       if (cur.round !== _chGateRendered.round) { chEnsureRound(); renderChallenge(); return }
       if (chCheckRemoteReset()) renderChallenge()
     }
@@ -791,7 +802,13 @@ function renderChallenge() {
   if (chs && (chs.phase === 'quiz' || chs.phase === 'review' || chs.phase === 'result')) { renderChallengeQuiz(); return }
   // v77：记录本次渲染的门禁态（挑战开关 + 考试开关），拉取后变化则重渲染入口
   // v88：营次切换也会改变门禁与进度 → 一并纳入比较
-  _chGateRendered = { open: chOpenLocked(), exam: chFinalExamLocked(), round: chCurrentRound() }
+  // v104：补 shape（本部门营次 id + 有无营次）与 dept —— 营次在页面打开之后才创建时，
+  //   open/exam 前后都是同一布尔值，只比它们会漏掉「从无营次变成有营次」这一跃迁。
+  _chGateRendered = {
+    open: chOpenLocked(), exam: chFinalExamLocked(), round: chCurrentRound(),
+    dept: chDeptKey(),
+    shape: ((chRoundRecForDept() || {}).id || '') + '|' + (chNoRoundForDept() ? '1' : '0'),
+  }
   // v89：题源/标题按本部门题库（各分部门一套题、各自上传）
   const bankN = chBankCount()
   const rows = CHALLENGE_DAYS.map(d => chDayBlockHtml(d)).join('')

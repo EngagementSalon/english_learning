@@ -62,6 +62,7 @@ function loadCloudStoreWithFetch(fetchFn) {
 
 // ---- challenge.js 沙箱（进度预置：Day1-6 全完成、Day7 巩固完成、期末考试未考） ----
 // chOpen=挑战开关；chOpenAt=最近一次开放时间（0=从未开放）
+// v88：额外注入营次侧信道（_chRounds 空 → challenge.js 走 v87 兜底口径；_chOpenLocked 与 chOpen 同步）
 function makeChSandbox(chOpen, chOpenAt) {
   const sb = {
     localStorage: {
@@ -90,7 +91,8 @@ function makeChSandbox(chOpen, chOpenAt) {
     dismiss() {},
     isAdminUser() { return false },
   }
-  sb.CloudSync = { enqueue() {}, _chExamOpen: true, _chOpen: !!chOpen, _chOpenAt: chOpenAt || 0 }
+  // v88：营次侧信道（无营次数组 → challenge.js 走 v87 兜底口径，行为与改造前一致）
+  sb.CloudSync = { enqueue() {}, _chExamOpen: true, _chOpen: !!chOpen, _chOpenAt: chOpenAt || 0, _chRoundCurId: 'r1', _chRoundCurName: '第一期', _chRounds: [], _chOpenLocked: !chOpen }
   vm.createContext(sb)
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'bank-data.js'), 'utf-8'), sb)
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'store.js'), 'utf-8'), sb)
@@ -176,6 +178,7 @@ function makeChSandbox(chOpen, chOpenAt) {
     // 概览横幅 + 阶段行灰掉
     vm.runInContext('renderChallenge()', sb)
     const page = vm.runInContext('document.getElementById("page-challenge").innerHTML', sb)
+    // v88：三态文案改造 —— 本沙箱无排期（startAt/endAt 均 0）→ 走「未开放」分支
     assert('未开放 → 概览顶部横幅「挑战暂未开放」+ 等待提示',
       page.includes('挑战暂未开放') && page.includes('请稍候'), page.slice(0, 300))
     // 练习页入口卡提示
@@ -222,11 +225,11 @@ function makeChSandbox(chOpen, chOpenAt) {
     vm.runInContext('renderChallenge()', sb)
     await new Promise(r => setTimeout(r, 20))   // 等内部 chLoadLeaderboard 微任务完成
     assert('状态未变 → 不额外重渲染', vm.runInContext('window.__rc', sb) === 1, 'rc=' + vm.runInContext('window.__rc', sb))
-    vm.runInContext('CloudSync._chOpen = true; CloudSync._chOpenAt = Date.now(); _chLbCache = { at: 0, top: null }', sb)
+    vm.runInContext('CloudSync._chOpen = true; CloudSync._chOpenLocked = false; CloudSync._chOpenAt = Date.now(); _chLbCache = { at: 0, top: null }', sb)
     await vm.runInContext('chLoadLeaderboard()', sb)
     await new Promise(r => setTimeout(r, 20))
     assert('管理员开放后拉取 → 概览自动重渲染（灰掉变按钮）', vm.runInContext('window.__rc', sb) === 2, 'rc=' + vm.runInContext('window.__rc', sb))
-    vm.runInContext('CloudSync._chOpen = false; _chLbCache = { at: 0, top: null }', sb)
+    vm.runInContext('CloudSync._chOpen = false; CloudSync._chOpenLocked = true; _chLbCache = { at: 0, top: null }', sb)
     await vm.runInContext('chLoadLeaderboard()', sb)
     await new Promise(r => setTimeout(r, 20))
     assert('关闭后拉取 → 再次重渲染（按钮变灰掉）', vm.runInContext('window.__rc', sb) === 3, 'rc=' + vm.runInContext('window.__rc', sb))
@@ -236,14 +239,17 @@ function makeChSandbox(chOpen, chOpenAt) {
   console.log('\n[6] app.js 接线 + i18n 双语 + style.css hover 修复')
   {
     const appSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8')
-    assert('dashChOpenGateHtml 定义', appSrc.includes('function dashChOpenGateHtml'))
+    assert('dashChOpenGateHtml 定义（v88 起作为营次面板内联的兜底实现保留）', appSrc.includes('function dashChOpenGateHtml'))
     assert('dashToggleChOpen 定义并调 setChallengeOpen', appSrc.includes('async function dashToggleChOpen') && appSrc.includes('CloudSync.setChallengeOpen(next)'))
-    assert('renderDashboard 同时插入挑战开关行与考试开关行',
-      appSrc.includes('${dashChOpenGateHtml()}') && appSrc.includes('${dashChExamGateHtml()}'))
-    assert('挑战开关行位于考试开关行之前（均为 dashChallengeBlock 占位之前）',
-      appSrc.indexOf('${dashChOpenGateHtml()}') >= 0
-      && appSrc.indexOf('${dashChOpenGateHtml()}') < appSrc.indexOf('${dashChExamGateHtml()}')
-      && appSrc.indexOf('${dashChExamGateHtml()}') < appSrc.indexOf('<div id="dashChallengeBlock"></div>'))
+    // v88：renderDashboard 的开/关两行被「营次面板」取代 —— 排期自动开放/关闭不再需要常驻手动开关
+    assert('renderDashboard 插入营次面板（dashRoundsPanel）',
+      appSrc.includes('${dashRoundsPanelHtml()}') && appSrc.includes("id=\"dashRoundsPanel\""))
+    assert('营次面板位于 dashChallengeBlock 占位之前',
+      appSrc.indexOf('${dashRoundsPanelHtml()}') >= 0
+      && appSrc.indexOf('${dashRoundsPanelHtml()}') < appSrc.indexOf('<div id="dashChallengeBlock"></div>'))
+    assert('营次管理与排期函数齐备',
+      appSrc.includes('async function dashCreateRound') && appSrc.includes('async function dashSetRoundCur')
+      && appSrc.includes('async function dashDelRound') && appSrc.includes('function dashRoundOpenState'))
     assert('挑战入口卡含锁定提示（challengeEntryHtml → chOpenLocked）',
       /function challengeEntryHtml[\s\S]*?chOpenLocked/.test(appSrc))
     const chSrc = fs.readFileSync(path.join(__dirname, 'challenge.js'), 'utf-8')
@@ -251,8 +257,19 @@ function makeChSandbox(chOpen, chOpenAt) {
       chSrc.includes('function chOpenLocked') && chSrc.includes('function chOpenEverOpened') && chSrc.includes('chNotOpenAlert'))
     assert('challenge.js 阶段行灰掉 + 概览横幅接线',
       chSrc.includes('chNotOpenShort') && chSrc.includes('chEnded') && chSrc.includes('chClosedBanner'))
-    assert('challenge.js 重渲染判定改为复合门禁态（open+exam）',
-      chSrc.includes('{ open: chOpenLocked(), exam: chFinalExamLocked() }'))
+    // v88：复合门禁态增加 round 维度（营次切换也要触发重渲染）
+    // v104：再增加 shape（本部门营次身份）+ dept —— 只比 open/exam 会漏掉
+    //       「无营次 → 有营次」这一跃迁（open 前后都是同一布尔值）。
+    // ⚠️ 断言按**语义**校验（这几个字段必须参与门禁态构造），不抄实现的字面写法，
+    //    否则每次扩展维度都要改测试（v88 曾把旧写法钉死，v104 又撞一次）。
+    const gateDecl = (chSrc.match(/_chGateRendered = \{[^}]*\}/) || [''])[0]
+    assert('challenge.js 重渲染判定改为复合门禁态（open+exam+round+dept+shape）',
+      ['open: chOpenLocked()', 'exam: chFinalExamLocked()', 'round: chCurrentRound()',
+        'dept: chDeptKey()', 'shape:'].every(f => gateDecl.includes(f)),
+      '实际：' + gateDecl.replace(/\s+/g, ' ').slice(0, 160))
+    assert('challenge.js 重渲染比对覆盖 dept 与 shape',
+      /cur\.dept !== _chGateRendered\.dept/.test(chSrc)
+      && /shape !== _chGateRendered\.shape/.test(chSrc))
     const i18nSrc = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8')
     const keys = ['chNotOpen', 'chNotOpenHint', 'chNotOpenShort', 'chNotOpenAlert', 'chEnded', 'chEndedHint',
       'dashChOpenTitle', 'dashChOpenOn', 'dashChOpenOff', 'dashChOpenOpenBtn', 'dashChOpenCloseBtn', 'dashChOpenHint']
