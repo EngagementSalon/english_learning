@@ -503,6 +503,7 @@ const CloudSync = {
     const setEnd = Number(spec.endAt) || 0
     const hasSchedule = ('startAt' in spec) || ('endAt' in spec)
     let saved = false
+    let wantId = ''      // v101：写后校验按营次记录读回（v88 起开关存在营次里，读顶层会永远失配）
     for (let attempt = 0; attempt < 4 && !saved; attempt++) {
       try {
         const doc = await this._getDoc()
@@ -515,14 +516,20 @@ const CloudSync = {
           if (hasSchedule) { rec.examStartAt = setAt; rec.examEndAt = setEnd }
           rec.at = rec.at || Date.now()
           doc.chRounds = arr
+          wantId = cur.id
         } else {
           // 兼容路径（尚无营次）：维持 v87 的顶层字段写法
           doc.chExamOpen = val
           doc.chExamAt = Date.now()
+          wantId = ''
         }
         await this._putDoc(doc)
         const check = await this._getDoc()
-        if (check.chExamOpen === val) saved = true
+        // v101 修复：有营次时校验营次记录的 examOpen（原代码恒定读顶层 chExamOpen → 永远 false → 恒报「失败」）
+        if (wantId) {
+          const chk = _roundsNorm(check).find(r => r.id === wantId)
+          if (chk && chk.examOpen === val) saved = true
+        } else if (check.chExamOpen === val) saved = true
       } catch (e) { /* 网络波动等 → 重试 */ }
     }
     if (saved) {
@@ -551,6 +558,7 @@ const CloudSync = {
     const setEnd = Number(spec.endAt) || 0
     const hasSchedule = ('startAt' in spec) || ('endAt' in spec)
     let saved = false
+    let wantId = ''      // v101：写后校验按营次记录读回（同 setChallengeExamOpen 的失配问题）
     for (let attempt = 0; attempt < 4 && !saved; attempt++) {
       try {
         const doc = await this._getDoc()
@@ -563,13 +571,19 @@ const CloudSync = {
           if (hasSchedule) { rec.startAt = setAt; rec.endAt = setEnd }
           if (val) rec.at = Date.now()
           doc.chRounds = arr
+          wantId = cur.id
         } else {
           doc.chOpen = val
           if (val) doc.chOpenAt = Date.now()
+          wantId = ''
         }
         await this._putDoc(doc)
         const check = await this._getDoc()
-        if (check.chOpen === val) saved = true
+        // v101 修复：有营次时校验营次记录的 open（原读顶层 chOpen → 恒失配 → 恒报「失败」）
+        if (wantId) {
+          const chk = _roundsNorm(check).find(r => r.id === wantId)
+          if (chk && chk.open === val) saved = true
+        } else if (check.chOpen === val) saved = true
       } catch (e) { /* 网络波动等 → 重试 */ }
     }
     if (saved) {
