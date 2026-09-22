@@ -120,7 +120,9 @@ const BAD_ROW = '单选题,Only one option here,Only,,,,A,,,L1'
   assert('题型归一 single / difficulty L1→1', rows[0].q.type === 'single' && rows[0].q.difficulty === 1)
   assert('内嵌引号已还原（"" → "）', rows[0].q.question.includes('says: "I will take care of you today."'), rows[0].q.question)
   assert('答案字母 → 索引 [0]', rows[0].q.answer[0] === 0, JSON.stringify(rows[0].q.answer))
-  assert('解析保留、E/F 空位为占位空串', rows[0].q.options.length === 6 && rows[0].q.options[4] === '' && rows[0].q.options[5] === '')
+  // v107：原先断言「E/F 空位保留为占位空串」——那正是线上「选项有空选项」的根因
+  //（占位空串会被渲染成一个有边框、能点、但没字的空白选项）。现在导入即裁掉尾部空槽。
+  assert('解析后尾部空槽已裁掉（v107）', rows[0].q.options.length === 4 && rows[0].q.options.every(o => o !== ''), JSON.stringify(rows[0].q.options))
   assert('第二行 L2 → difficulty 2', rows[1].q.difficulty === 2)
   assert('中文解析文本保留', rows[0].q.explanation.indexOf('take care of someone') >= 0)
 

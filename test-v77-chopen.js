@@ -98,7 +98,7 @@ function makeChSandbox(chOpen, chOpenAt) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'store.js'), 'utf-8'), sb)
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8'), sb)
   const appSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8')
-  vm.runInContext(['shuffleOptions', 'checkAnswer', 'safeQType', 'escAttr', 'escHtml'].map(n => extractFn(appSrc, n)).join('\n'), sb)
+  vm.runInContext(['visibleOptionIndexes', 'shuffleOptions', 'checkAnswer', 'safeQType', 'escAttr', 'escHtml'].map(n => extractFn(appSrc, n)).join('\n'), sb)
   // renderChallengeQuiz 渲染依赖（el 可用 → 注入简版，同 test-v76）
   vm.runInContext(
     'const TYPE_LABELS = new Proxy({}, { get: (_, k) => k });' +
@@ -108,6 +108,11 @@ function makeChSandbox(chOpen, chOpenAt) {
     sb
   )
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'challenge.js'), 'utf-8'), sb)
+  // v107：本套件测的是「挑战开关/考试开关」的门禁与横幅，不是部门资格。
+  //   部门白名单门禁（chDeptAllowed）默认要求学员属于饮食部四个分队，而本沙箱无登录态 →
+  //   chDeptKey() 返回 '' → 会被判定为「不可参加」，整页走说明卡，横幅断言全崩。
+  //   这里把该套件的视角固定为「标帜餐厅」（七天挑战的正式适用部门），使测试聚焦回开关逻辑。
+  vm.runInContext('function chDeptKey(){ return "dining/sig" }', sb)
   // challengeEntryHtml（app.js）单独提取注入（依赖 challengeLoad/chOpenLocked/t，沙箱已齐备）
   vm.runInContext(extractFn(appSrc, 'challengeEntryHtml'), sb)
   // 预置进度：Day1（两阶段）/ Day2-6 昨天 done；Day7 巩固刚 done
@@ -239,8 +244,11 @@ function makeChSandbox(chOpen, chOpenAt) {
   console.log('\n[6] app.js 接线 + i18n 双语 + style.css hover 修复')
   {
     const appSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8')
-    assert('dashChOpenGateHtml 定义（v88 起作为营次面板内联的兜底实现保留）', appSrc.includes('function dashChOpenGateHtml'))
-    assert('dashToggleChOpen 定义并调 setChallengeOpen', appSrc.includes('async function dashToggleChOpen') && appSrc.includes('CloudSync.setChallengeOpen(next)'))
+    // v107：单张「挑战开放」卡已被「按营期逐个渲染」取代 —— 每期一张卡，各带两个按钮。
+    assert('v107：开关面板按营期渲染（dashChGatePanelHtml + 逐卡 dashChRoundGateCardHtml）',
+      appSrc.includes('function dashChGatePanelHtml') && appSrc.includes('function dashChRoundGateCardHtml'))
+    assert('v107：挑战按钮按期传 roundId（不再只改指针那期）',
+      appSrc.includes('async function dashToggleChOpen') && appSrc.includes('CloudSync.setChallengeOpen({ open: next, roundId: rid })'))
     // v88：renderDashboard 的开/关两行被「营次面板」取代 —— 排期自动开放/关闭不再需要常驻手动开关
     assert('renderDashboard 插入营次面板（dashRoundsPanel）',
       appSrc.includes('${dashRoundsPanelHtml()}') && appSrc.includes("id=\"dashRoundsPanel\""))

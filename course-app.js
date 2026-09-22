@@ -1274,7 +1274,9 @@ function courseRenderTake() {
     const dis = locked ? '' : 'coursePick'
     optionsHtml = vmOptionsHtml(q, ans, showFeedback ? 'review' : 'live', dis)
   } else if (qt === 'single' || qt === 'judge' || qt === 'pronounce' || qt === 'listen') {
-    optionsHtml = q.options.map((opt, i) => {
+    // v107：只渲染有效选项（丢掉尾部空槽）
+    optionsHtml = visibleOptionIndexes(q.options).map(i => {
+      const opt = q.options[i]
       let cls = 'option-item'
       if (showFeedback) { if (q.answer.includes(i)) cls += ' correct'; else if (ans === i) cls += ' wrong' }
       else if (ans === i) cls += ' selected'
@@ -1284,7 +1286,8 @@ function courseRenderTake() {
         <div class="option-badge">${badge}</div><div class="option-text">${opt}</div></div>`
     }).join('')
   } else if (qt === 'multiple') {
-    optionsHtml = q.options.map((opt, i) => {
+    optionsHtml = visibleOptionIndexes(q.options).map(i => {
+      const opt = q.options[i]
       let cls = 'option-item'
       const sel = Array.isArray(ans) && ans.includes(i)
       if (showFeedback) { if (q.answer.includes(i)) cls += ' correct'; else if (sel) cls += ' wrong' }
@@ -3515,16 +3518,26 @@ async function courseSaveAssignEdit() {
   if (!title) { alert(t('courseErrTitle')); return }
   // 验证题目：至少 1 道有效题
   const questions = m.questions.map(q => {
-    // 清理空选项
-    const options = (q.type === 'fill' || q.type === 'translate')
-      ? [String(q.options[0] || '').trim()].filter(Boolean)
-      : q.options.map(o => String(o || '').trim()).filter(Boolean)
+    // v107：清理空选项，并按「保留的原始下标」重映射 answer —— 原先只 filter 掉空串却让 answer
+    // 沿用旧下标，一旦中间有空槽就会把答案指到别的选项上（判分错位）。
+    let options, answer
+    if (q.type === 'fill' || q.type === 'translate') {
+      options = [String(q.options[0] || '').trim()].filter(Boolean)
+      answer = [0]
+    } else {
+      const keep = visibleOptionIndexes(q.options)
+      options = keep.map(i => String(q.options[i] == null ? '' : q.options[i]).trim())
+      const map = new Map(keep.map((oi, ni) => [oi, ni]))
+      answer = (Array.isArray(q.answer) ? q.answer : [])
+        .map(a => map.get(a))
+        .filter(ni => ni !== undefined)
+    }
     return {
       type: q.type,
       difficulty: q.difficulty || 1,
       question: String(q.question || '').trim(),
       options,
-      answer: (q.answer || []).filter(a => a >= 0 && a < options.length),
+      answer,
       explanation: String(q.explanation || '').trim()
     }
   }).filter(q => q.question && q.options.length >= (q.type === 'judge' ? 2 : 1) && q.answer.length >= 1)

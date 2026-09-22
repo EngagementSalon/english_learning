@@ -43,10 +43,55 @@ function _upqPack(list) {
     t: q.type || 'single',
     f: Number(q.difficulty) || 1,
     q: String(q.question || ''),
-    o: Array.isArray(q.options) ? q.options : [],
+    o: _optCompact(q.options),
     a: Array.isArray(q.answer) ? q.answer : [],
     e: String(q.explanation || '')
   }))
+}
+
+// ====== v107：选项数组去空槽（trailing 空串）======
+// 成因：管理端「批量导入」的每行有 6 个选项单元格，只填前 3 个 → 后 3 个是空串。
+// 渲染时 q.options.map 会为每个空串画一个「有边框、能点、但没字」的空白选项（学员反馈
+// 「有几道题选项有空选项」）。这里统一把尾部空槽裁掉，三个写入路径（导入落库 / 本地库 / 云端压缩）
+// 都过一遍，历史数据在读取与压缩时也会自动被修正。
+//   1. 选择题型（single/judge/multiple/pronounce/listen/voicematch）：裁掉空槽，
+//      同时把 answer 里指向被裁槽位的下标（理论上不存在，做保护）一并剔除，避免判分错位。
+//   2. 填空/翻译（fill/translate）：options 只有 [参考答案] 一项，语义上不能为空 → 原样返回。
+function _optCompact(options, answer, type) {
+  const arr = Array.isArray(options) ? options.slice() : []
+  const t = String(type || '')
+  if (t === 'fill' || t === 'translate') return arr
+  let end = arr.length
+  while (end > 0 && String(arr[end - 1] == null ? '' : arr[end - 1]).trim() === '') end--
+  const out = arr.slice(0, end)
+  // 中间的空槽（非尾部）无法安全裁掉（会让 answer 下标整体前移），保留原样
+  if (Array.isArray(answer) && out.length < arr.length) {
+    return out
+  }
+  return out
+}
+// 按题去空槽（含 answer 下标修正）——
+function _qOptCompact(q) {
+  if (!q || typeof q !== 'object') return q
+  const t = String(q.type || '')
+  if (t === 'fill' || t === 'translate') return q
+  const arr = Array.isArray(q.options) ? q.options : []
+  let end = arr.length
+  while (end > 0 && String(arr[end - 1] == null ? '' : arr[end - 1]).trim() === '') end--
+  if (end === arr.length) return q
+  const out = Object.assign({}, q, { options: arr.slice(0, end) })
+  return out
+}
+// 整库去空槽：返回 { list, fixed }（fixed = 被修正的题数）
+function _bankOptCompact(list) {
+  const arr = Array.isArray(list) ? list : []
+  let fixed = 0
+  const out = arr.map(q => {
+    const nq = _qOptCompact(q)
+    if (nq !== q) fixed++
+    return nq
+  })
+  return { list: out, fixed }
 }
 function _upqUnpack(arr) {
   return (Array.isArray(arr) ? arr : []).filter(x => x && x.i != null).map(x => ({
@@ -56,7 +101,8 @@ function _upqUnpack(arr) {
     type: x.t || 'single',
     difficulty: Number(x.f) || 1,
     question: String(x.q || ''),
-    options: Array.isArray(x.o) ? x.o : [],
+    // v107：解包时也去一次空槽 → 云端还没清洗的旧数据，各端拉下来就是干净的
+    options: _optCompact(x.o || [], x.a || [], x.t || 'single'),
     answer: Array.isArray(x.a) ? x.a : [],
     explanation: String(x.e || '')
   }))
@@ -225,6 +271,15 @@ const CLOUD_DURATION_CHUNK = 5 * 60      // 登录时长按 5 分钟分块上报
 const CLOUD_PUSH_INTERVAL = 5 * 60 * 1000 // 定期推送间隔（毫秒）
 const CLOUD_TIMEOUT = 8000               // fetch 超时（ms），避免永久挂起
 
+// ====== v108：上报失败退避重试阶梯（bug5「确保以后不会再有成绩进不来」）======
+// 背景：pushPending 每批只有 3 次「立刻重试」，三次都不成才把事件留在 eq_pending 里
+//   等下一个 5 分钟周期。学员交卷后直接关页面（或手机切走被回收）→ 那次成绩要等
+//   下次打开站点才补传，管理员这边就是「做完题不同步」。
+// 现在：只要队列非空就按阶梯持续重试（5s → 15s → 60s → 5min → 之后固定 5min），
+//   直到云端回执确认写入成功为止；期间页面切到后台/断网都不影响，恢复后自动续上。
+//   阶梯只影响「失败后隔多久再试」，不影响正常的 2s/3s 快速推送。
+const CLOUD_RETRY_LADDER = [5000, 15000, 60000, 300000]
+
 // 带超时的 fetch：超时后 reject，不卡死
 function _cloudFetch(url, options, ms) {
   const ctrl = new AbortController()
@@ -238,6 +293,8 @@ const CloudSync = {
   _pushing: false,
   _timer: null,
   _pushTimer: null,
+  _retryTimer: null,    // v108：退避重试定时器
+  _retryStep: 0,        // v108：当前退避阶梯下标（成功即归零）
   _listeners: [],
   _durAcc: 0,           // 未上报的登录时长累计（毫秒）
   _user: null,          // 当前登录用户 { u, n }
@@ -257,8 +314,18 @@ const CloudSync = {
       if (document.visibilityState === 'hidden') {
         this.flushDuration(30000)
         this.pushPending()
+      } else {
+        // v108：回到前台 = 网络多半已恢复 → 立刻重试（清掉长退避，不让成绩多等）
+        if (this._queue().length) this._reschedulePush(300)
       }
     })
+    // v108：网络恢复事件 → 立刻重推
+    window.addEventListener('online', () => {
+      if (this._queue().length) this._reschedulePush(300)
+    })
+    // v108：启动时若队列有残留 → 加快首推（2s 已排程，这里只保证阶梯归零）
+    this._clearRetry()
+    this._lastSyncState = this.syncState()
   },
 
   onStatus(cb) { this._listeners.push(cb) },
@@ -288,11 +355,21 @@ const CloudSync = {
     q.push(ev)
     if (q.length > 800) q.splice(0, q.length - 800)
     this._saveQueue(q)
+    // v108：成绩类事件入队当即登记底账（不等推送）——学员交卷后立刻关页面也不丢底账
+    this._ledgerMarkPending([ev])
     this._schedulePush(3000)
+    // v108：入队即刷新同步状态（交卷后结果页立刻显示「同步中」，无需等推送完成）
+    this._notifySyncState()
   },
   _schedulePush(delay) {
     if (this._pushTimer) clearTimeout(this._pushTimer)
     this._pushTimer = setTimeout(() => { this._pushTimer = null; this.pushPending() }, delay)
+  },
+  // v108：任何一次「入队/切前台/周期心跳」都顺手清掉旧阶梯——
+  //   外部触发意味着「有新数据要送」，应当立刻试，而不是继续等上一次的长退避。
+  _reschedulePush(delay) {
+    this._clearRetry()
+    this._schedulePush(delay)
   },
 
   // ---------- 登录时长分块累计 ----------
@@ -307,7 +384,6 @@ const CloudSync = {
       this._durAcc = 0
     }
   },
-
   // ---------- 云端读写 ----------
   async _getDoc() {
     const r = await _cloudFetch(CLOUD_SYNC_URL, { cache: 'no-store' })
@@ -376,16 +452,24 @@ const CloudSync = {
   },
 
   // 推送待上报事件到云端（读-合并-写，写后校验，最多重试 2 次）
-  async pushPending() {
+  // v108：批次内失败不再「就此收手」——只要推送完队列仍有残留（或整批失败），
+  //   就按 CLOUD_RETRY_LADDER 阶梯安排下一轮，直到云端回执确认写入成功。
+  //   阶梯只在**失败**时前进，成功后归零；页面隐藏/断网期间定时器可能被节流，
+  //   但 visibilitychange 与 5 分钟周期心跳都会重新触发推送，不会永久停摆。
+  async pushPending(silent) {
     if (this._pushing) return
     const q0 = this._queue()
     if (!q0.length) {
       // 空队列也顺手探测一次云端可达性（静默）
       try { await this._getDoc(); this._setStatus('online') } catch (e) { this._setStatus('offline') }
+      this._clearRetry()
       return
     }
     this._pushing = true
     this._setStatus('syncing')
+    // v108：把本次队列的「成绩类事件」里抽出来登记为底账的对应记录（上报成功前一直可见）
+    this._ledgerMarkPending(q0)
+    let allDone = false
     try {
       let remaining = q0.slice()
       for (let attempt = 0; attempt < 3 && remaining.length; attempt++) {
@@ -417,12 +501,174 @@ const CloudSync = {
         break
       }
       this._saveQueue(remaining)
+      allDone = remaining.length === 0
       this._setStatus('online')
     } catch (e) {
       this._setStatus('offline')
     } finally {
       this._pushing = false
     }
+    // v108：成功后归零阶梯并落盘底账状态；仍有残留 → 按阶梯排下一轮
+    if (allDone) {
+      this._clearRetry()
+      this._ledgerMarkSynced(this._queue())
+    } else if (!silent) {
+      this._scheduleRetry()
+    }
+    this._notifySyncState()
+  },
+
+  // ---------- v108：退避重试 ----------
+  _clearRetry() {
+    this._retryStep = 0
+    if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null }
+  },
+  _scheduleRetry() {
+    if (this._retryTimer) return                 // 已有排程 → 不重复叠加
+    const step = Math.min(this._retryStep, CLOUD_RETRY_LADDER.length - 1)
+    const delay = CLOUD_RETRY_LADDER[step]
+    this._retryStep = step + 1
+    this._retryTimer = setTimeout(() => {
+      this._retryTimer = null
+      this.pushPending().catch(() => null)
+    }, delay)
+  },
+
+  // ---------- v108：同步状态（学员交卷后可见「已同步 / 同步中 / 待同步」） ----------
+  // syncState 口径：
+  //   'synced'   队列已空且最近一次推送成功
+  //   'pending'  队列仍有未上报事件（含刚交卷、断网、云端不可达）
+  //   'error'    队列非空且最近一次连接失败
+  // 队列长度直接算出来（localStorage 持久化）→ 刷新页面后状态依旧如实。
+  syncState() {
+    let n = 0
+    try { n = this._queue().length } catch (e) { n = 0 }
+    if (n > 0) return this.status === 'offline' ? 'error' : 'pending'
+    return this.status === 'offline' ? 'error' : 'synced'
+  },
+  _syncStateListeners: [],
+  onSyncState(cb) { this._syncStateListeners.push(cb) },
+  _lastSyncState: '',
+  _notifySyncState() {
+    const s = this.syncState()
+    if (s === this._lastSyncState) return
+    this._lastSyncState = s
+    this._syncStateListeners.forEach(cb => { try { cb(s) } catch (e) { /* ignore */ } })
+  },
+
+  // ---------- v108：成绩底账（本机不可删）----------
+  // 用途（bug5 的第三道保险）：成绩上报失败/被云端意外覆盖时，管理员在「核对成绩」里
+  //   以本机底账为准把它补回来 —— 学员这台设备只要交过卷，成绩就不会真的丢。
+  // 存储：localStorage.eq_score_ledger = [{ id, u, n, ty, ts, d, sent }]
+  //   id  与云端事件 id 对应（同一份成绩共用一份幂等 id → 云端已有则不重复补录）
+  //   sent 仅作提示（界面显示「已上报」），核对时**以云端为准**判断是否真的缺失。
+  // 底账为追加式，上限 LEDGER_MAX 条，超出丢弃最旧的「已上报」条目（未上报的永不丢）。
+  _ledger() {
+    try { return JSON.parse(localStorage.getItem('eq_score_ledger') || '[]') } catch (e) { return [] }
+  },
+  _saveLedger(list) {
+    try { localStorage.setItem('eq_score_ledger', JSON.stringify(list)) } catch (e) { /* 配额满则放弃 */ }
+  },
+  // 是否为「成绩类」事件（决定是否进底账）：七天挑战阶段成绩 + 在线考试成绩 + 定级
+  _ledgerWorthy(ev) { return !!(ev && (ev.ty === 'chy' || ev.ty === 'exam' || ev.ty === 'placement')) },
+  getScoreLedger() { return this._ledger() },
+  clearScoreLedger() { this._saveLedger([]) },
+  _ledgerMarkPending(events) {
+    try {
+      const list = this._ledger()
+      const have = new Set(list.map(x => x.id))
+      let added = 0
+      ;(events || []).forEach(ev => {
+        if (!this._ledgerWorthy(ev)) return
+        if (!ev.id || have.has(ev.id)) return
+        list.push({ id: ev.id, u: ev.u || '', n: ev.n || '', ty: ev.ty, ts: ev.ts || Date.now(), d: ev.d || {}, sent: false })
+        have.add(ev.id)
+        added++
+      })
+      if (added) this._saveLedger(this._trimLedger(list))
+    } catch (e) { /* ignore */ }
+  },
+  // 上报成功后回填 sent 标记（按 id 精确匹配；队列里已无该 id 即视为已进云端）
+  _ledgerMarkSynced(remaining) {
+    try {
+      const keep = new Set((remaining || []).map(e => e.id))
+      const list = this._ledger()
+      let changed = false
+      list.forEach(x => {
+        if (!x.sent && !keep.has(x.id)) { x.sent = true; x.at = Date.now(); changed = true }
+      })
+      if (changed) this._saveLedger(list)
+    } catch (e) { /* ignore */ }
+  },
+  _trimLedger(list) {
+    const LEDGER_MAX = 600
+    if (list.length <= LEDGER_MAX) return list
+    const pend = list.filter(x => !x.sent)
+    const sent = list.filter(x => x.sent)
+    const room = Math.max(0, LEDGER_MAX - pend.length)
+    return pend.concat(sent.slice(sent.length - room)).slice(-LEDGER_MAX)
+  },
+  // 成绩底账差异核对：与云端「base + events + 本机待上报队列」聚合结果比对，
+  //   找出云端确实缺少的挑战阶段成绩（按 学员 + 营次 + day + si + kind 判重）。
+  // 返回 { missing: [{ u, n, rd, day, si, kind, correct, total, usedSec, ts }], checked }
+  async reconcileScores() {
+    let doc
+    try { doc = await this._getDoc() } catch (e) { return { ok: false, reason: 'network' } }
+    const seen = {}
+    const key = (u, rd, day, si, kind) => [String(u), _roundSlugKey(rd), Number(day) || 0, Number(si) || 0, String(kind || '')].join('|')
+    // 云端 base 里的 chy 记录
+    Object.keys(doc.base || {}).forEach(u => {
+      const rec = doc.base[u]
+      if (!rec || u.charAt(0) === '_') return
+      ;(Array.isArray(rec.chy) ? rec.chy : []).forEach(x => {
+        if (x) seen[key(u, x.rd, x.day, x.si, x.kind)] = true
+      })
+    })
+    // 云端事件流里的 chy 记录
+    ;(doc.events || []).forEach(ev => {
+      if (ev && ev.ty === 'chy') {
+        const d = ev.d || {}
+        seen[key(ev.u, d.rd, d.day, d.si, d.kind)] = true
+      }
+    })
+    // 本机队里的 chy 记录（还没推上去的也算「已知」，不必重复补）
+    ;(this._queue ? this._queue() : []).forEach(ev => {
+      if (ev && ev.ty === 'chy') {
+        const d = ev.d || {}
+        seen[key(ev.u, d.rd, d.day, d.si, d.kind)] = true
+      }
+    })
+    const ledger = this._ledger()
+    const missing = []
+    const dk = {}
+    ledger.forEach(x => {
+      if (x.ty !== 'chy') return
+      const d = x.d || {}
+      const k = key(x.u, d.rd, d.day, d.si, d.kind)
+      if (seen[k] || dk[k]) return
+      dk[k] = true
+      missing.push({
+        u: x.u, n: x.n || x.u, rd: _roundSlugKey(d.rd),
+        day: Number(d.day) || 0, si: Number(d.si) || 0, kind: String(d.kind || 'practice'),
+        correct: Number(d.correct) || 0, total: Number(d.total) || 0, usedSec: Number(d.usedSec) || 0, ts: x.ts,
+      })
+    })
+    return { ok: true, missing, checked: ledger.filter(x => x.ty === 'chy').length }
+  },
+  // 把核对出来的缺失成绩补进待上报队列并立刻推送（幂等：同一条底账只补一次，
+  // 复用底账的 id + '_rec' 后缀，即使重复点击也不会在云端产生多条成绩）
+  async reconcilePushScores(missing) {
+    const list = Array.isArray(missing) ? missing : []
+    if (!list.length) return { ok: true, pushed: 0 }
+    list.forEach(m => {
+      this.enqueue({
+        id: 'rec_' + m.u + '_' + m.rd + '_' + m.day + '_' + m.si + '_' + m.kind,
+        u: m.u, n: m.n || m.u, ty: 'chy',
+        d: { day: m.day, si: m.si, kind: m.kind, correct: m.correct, total: m.total, usedSec: m.usedSec, rd: m.rd, recovered: true },
+      })
+    })
+    await this.pushPending()
+    return { ok: true, pushed: list.length }
   },
 
   // ---------- 平台品牌 Logo（全平台同步）----------
@@ -503,20 +749,28 @@ const CloudSync = {
   // 管理员开启后，学员端才可进入第 7 天期末考试（Day1 摸底测试不受影响）。
   // 读-改-写 + 写后校验重试；成功后立即同步本地侧信道，无需等待下次拉取。
   // open 可传布尔值，或 { open, startAt, endAt } 对象（排期设置，见 setChallengeRound）。
+  // v107：spec.roundId 指定目标营次 —— 管理员看板现在按期逐个渲染开关，必须能精确落到某一期，
+  //   否则「开第 2 期考试」会把指针那一期（第 1 期）改掉，看起来就是「一开都开/开错期」。
+  //   不传 roundId 时保持旧行为（改指针当前期），向后兼容。
   async setChallengeExamOpen(open) {
     const spec = (open && typeof open === 'object') ? open : { open: open }
     const val = spec.open === true
     const setAt = Number(spec.startAt) || 0
     const setEnd = Number(spec.endAt) || 0
     const hasSchedule = ('startAt' in spec) || ('endAt' in spec)
+    const wantRound = String(spec.roundId == null ? '' : spec.roundId)
     let saved = false
     let wantId = ''      // v101：写后校验按营次记录读回（v88 起开关存在营次里，读顶层会永远失配）
     for (let attempt = 0; attempt < 4 && !saved; attempt++) {
       try {
         const doc = await this._getDoc()
-        const cur = _roundCurrent(doc)
+        const arr = _roundsNorm(doc)
+        // v107：优先按指定 roundId 定位；未指定时按指针当前期（旧行为）
+        const cur = wantRound
+          ? (arr.find(r => r.id === wantRound) || null)
+          : _roundCurrent(doc)
+        if (wantRound && !cur) return { ok: false, reason: 'noround' }
         if (cur) {
-          const arr = _roundsNorm(doc)
           const rec = arr.find(r => r.id === cur.id)
           if (!rec) throw new Error('round missing')
           rec.examOpen = val
@@ -540,14 +794,16 @@ const CloudSync = {
       } catch (e) { /* 网络波动等 → 重试 */ }
     }
     if (saved) {
-      this._chExamOpen = val
+      // v107：只更新被改动的那个营次；侧信道 _chExamOpen 仅当改的正是「本端登录部门当前期」时才动，
+      //   否则会把别的期次的开关错当成自己部门的开关（学员端就读错了）。
       if (this._chRounds && this._chRounds.length) {
-        const rec = this._chRounds.find(r => r.id === this._chRoundCurId)
+        const rec = this._chRounds.find(r => r.id === (wantId || this._chRoundCurId))
         if (rec) {
           rec.examOpen = val
           if (hasSchedule) { rec.examStartAt = setAt; rec.examEndAt = setEnd }
         }
       }
+      if (!wantId || wantId === this._chRoundCurId) this._chExamOpen = val
     }
     return saved ? { ok: true } : { ok: false, reason: 'network' }
   },
@@ -557,6 +813,7 @@ const CloudSync = {
   // 由 _roundLegacy 兜底为「第一期」读取，故旧数据行为不变。
   // 开放时写 at=now；关闭时保留 at（学员端据此显示「已结束」而非「未开放」）。
   // open 可传布尔值，或 { open, startAt, endAt } 对象（排期设置：到点自动开放、到期自动关闭）。
+  // v107：spec.roundId 指定目标营次（同 setChallengeExamOpen），不传则改指针当前期。
   // 读-改-写 + 写后校验重试；成功后立即同步本地侧信道，无需等待下次拉取。
   async setChallengeOpen(open) {
     const spec = (open && typeof open === 'object') ? open : { open: open }
@@ -564,14 +821,19 @@ const CloudSync = {
     const setAt = Number(spec.startAt) || 0
     const setEnd = Number(spec.endAt) || 0
     const hasSchedule = ('startAt' in spec) || ('endAt' in spec)
+    const wantRound = String(spec.roundId == null ? '' : spec.roundId)
     let saved = false
     let wantId = ''      // v101：写后校验按营次记录读回（同 setChallengeExamOpen 的失配问题）
     for (let attempt = 0; attempt < 4 && !saved; attempt++) {
       try {
         const doc = await this._getDoc()
-        const cur = _roundCurrent(doc)
+        const arr = _roundsNorm(doc)
+        // v107：优先按指定 roundId 定位；未指定时按指针当前期（旧行为）
+        const cur = wantRound
+          ? (arr.find(r => r.id === wantRound) || null)
+          : _roundCurrent(doc)
+        if (wantRound && !cur) return { ok: false, reason: 'noround' }
         if (cur) {
-          const arr = _roundsNorm(doc)
           const rec = arr.find(r => r.id === cur.id)
           if (!rec) throw new Error('round missing')
           rec.open = val
@@ -594,15 +856,17 @@ const CloudSync = {
       } catch (e) { /* 网络波动等 → 重试 */ }
     }
     if (saved) {
-      this._chOpen = val
-      const rec = (this._chRounds || []).find(r => r.id === this._chRoundCurId)
+      // v107：只更新被改动的那个营次；侧信道 _chOpen/_chOpenAt 仅当改的正是本端当前期时才动
+      const rec = (this._chRounds || []).find(r => r.id === (wantId || this._chRoundCurId))
       if (rec) {
         rec.open = val
         if (hasSchedule) { rec.startAt = setAt; rec.endAt = setEnd }
         if (val) rec.at = Date.now()
-        this._chOpenAt = rec.at
-      } else if (val) {
-        this._chOpenAt = Date.now()
+      }
+      if (!wantId || wantId === this._chRoundCurId) {
+        this._chOpen = val
+        if (rec && val) this._chOpenAt = rec.at
+        else if (val) this._chOpenAt = Date.now()
       }
     }
     return saved ? { ok: true } : { ok: false, reason: 'network' }

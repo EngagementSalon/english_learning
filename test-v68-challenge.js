@@ -65,7 +65,7 @@ function makeSandbox(pre) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8'), sb)
   // challenge.js 依赖 app.js 的纯工具：提取真实实现注入（渲染类函数不被纯逻辑路径触达）
   const appSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8')
-  vm.runInContext(['shuffleOptions', 'checkAnswer', 'safeQType', 'escAttr'].map(n => extractFn(appSrc, n)).join('\n'), sb)
+  vm.runInContext(['visibleOptionIndexes', 'shuffleOptions', 'checkAnswer', 'safeQType', 'escAttr'].map(n => extractFn(appSrc, n)).join('\n'), sb)
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'challenge.js'), 'utf-8'), sb)
   return sb
 }

@@ -247,11 +247,26 @@ function autoplayListen(q) {
 // 需要选项的题型，若数据里选项不足 2 个（线下课导入的题常出现），按填空题渲染。
 // 否则学生看到的是一道「一个可点选项都没有」的题 —— 「有些题目选不了」的一类成因。
 // checkAnswer 与各渲染分支都走这里，保证「渲染成什么」与「怎么判分」一致。
+// ====== v107：选项渲染去空槽（渲染层兜底）======
+// 数据层已在写入/读取时裁掉尾部空槽（store.compactUploadedOptions / cloud-store._optCompact），
+// 这里再兜一次：任何来源（云端旧数据、别的设备推送、编辑器手填）的题，渲染前一律丢掉空选项，
+// 保证学员永远看不到「有边框、能点、但没字」的空白选项。
+// 语义：只裁尾部连续空槽，与数据层口径一致（中间空槽保留原下标，避免 q.answer 下标错位）。
+// 返回值 = 保留下来的原始下标数组，渲染时按下标取值即可（q.options[idx]），判分仍用原下标。
+function visibleOptionIndexes(options) {
+  const arr = Array.isArray(options) ? options : []
+  let end = arr.length
+  while (end > 0 && String(arr[end - 1] == null ? '' : arr[end - 1]).trim() === '') end--
+  const out = []
+  for (let i = 0; i < end; i++) out.push(i)
+  return out
+}
+// 题型自洽兜底（v87）+ 空槽兜底（v107）：需要选项的题型，若「有效选项」不足 2 个则按填空渲染。
 function safeQType(q) {
   if (!q) return ''
   const t = q.type
   if (t === 'single' || t === 'judge' || t === 'pronounce' || t === 'multiple' || t === 'listen' || t === 'voicematch') {
-    const n = Array.isArray(q.options) ? q.options.length : 0
+    const n = visibleOptionIndexes(q.options).length
     if (n < 2) return 'fill'
   }
   return t
@@ -842,7 +857,8 @@ function renderPlacementQuestion() {
   const qt = safeQType(q)
   const optionsHtml = qt === 'voicematch'
     ? vmOptionsHtml(q, ans, 'live', 'placementPick')
-    : q.options.map((opt, i) => {
+    : visibleOptionIndexes(q.options).map(i => {
+        const opt = q.options[i]
         const cls = 'option-item' + (ans === i ? ' selected' : '')
         return `<div class="${cls}" onclick="placementPick(${i})">
           <div class="option-badge">${LETTERS[i]}</div>
@@ -1189,8 +1205,13 @@ function renderPractice() {
 // 七天挑战入口卡片（v70：入口移入练习页下方，不再是独立导航项；v77 未开放/已结束时提示锁定态）
 // v88：多期营次 —— 显示当前营次名；锁定态分「未开始 / 未开放 / 已结束」三种文案。
 // v89：标题按学员所属分部门（各部门题不同、各自上传）
+// v107：按适用部门门禁 —— 只有饮食部四个二级分队（标帜/艳中/酒吧团队/客房送餐）可进；
+//       房务部/其他部门学员看到的是「不可参加」的说明卡（不可点击），不再是进去后「未开放」的死胡同。
 function challengeEntryHtml() {
   challengeLoad()
+  // v107：部门白名单门禁（管理员豁免）
+  const deptOk = typeof chDeptAllowed === 'function' ? chDeptAllowed() : true
+  if (!deptOk) return challengeEntryBlockedHtml()
   const doneDays = CHALLENGE_DAYS.filter(d => chDayDone(d.day)).length
   const locked = typeof chOpenLocked === 'function' && chOpenLocked()
   const st = typeof chRoundOpenState === 'function' ? chRoundOpenState() : { state: 'closed' }
@@ -1211,6 +1232,35 @@ function challengeEntryHtml() {
           ${lockHint}
         </div>
         <div style="font-size:22px;color:#9ca3af">›</div>
+      </div>
+    </div>`
+}
+
+// v107：不具备七天挑战部门资格时的说明卡（不可点击，非锁定态 —— 是「不适用」而非「未开放」）。
+// 列出四个适用分队，让学员清楚该找谁参加；未设部门的提示去个人资料补选。
+function challengeEntryBlockedHtml() {
+  const reason = typeof chDeptBlockReason === 'function' ? chDeptBlockReason() : 'chDeptNotEligible'
+  const slugs = (typeof CH_DEPT_SLUGS !== 'undefined' ? CH_DEPT_SLUGS : [])
+    .map(s => (typeof deptSlugName === 'function' && deptSlugName(s)) || s)
+  const list = slugs.length
+    ? `<p class="form-hint" style="margin:6px 0 0">${t('chDeptEligibleList')}</p>
+       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
+         ${slugs.map(n => `<span style="font-size:11px;background:#f3f4f6;color:#4b5563;border:1px solid #e5e7eb;border-radius:999px;padding:2px 10px">${escHtml(n)}</span>`).join('')}
+       </div>`
+    : ''
+  const cta = reason === 'chDeptNeedSet'
+    ? `<button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="event.stopPropagation();openProfileSetup()">${t('chDeptGoSet')}</button>`
+    : ''
+  return `
+    <div class="card" style="margin-top:16px;border:2px dashed #d1d5db;background:#fafafa">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="font-size:32px;opacity:.5">🏅</div>
+        <div style="flex:1;min-width:0">
+          <h3 style="margin:0 0 4px;color:#6b7280">${escHtml(t('chTitle'))}</h3>
+          <p class="form-hint" style="margin:0;color:#9ca3af">🚫 ${t(reason)}</p>
+          ${list}
+          ${cta}
+        </div>
       </div>
     </div>`
 }
@@ -1257,7 +1307,9 @@ function renderPracticeQuestion() {
   if (qt === 'voicematch') {
     optionsHtml = vmOptionsHtml(q, ans, submitted ? 'review' : 'live', 'selectOption')
   } else if (qt === 'single' || qt === 'judge' || qt === 'pronounce' || qt === 'listen') {
-    optionsHtml = q.options.map((opt, i) => {
+    // v107：只渲染有效选项（同步删除尾部空槽），判分下标仍用原始 i
+    optionsHtml = visibleOptionIndexes(q.options).map(i => {
+      const opt = q.options[i]
       let cls = 'option-item'
       if (submitted) {
         if (q.answer.includes(i)) cls += ' correct'
@@ -1272,7 +1324,8 @@ function renderPracticeQuestion() {
       </div>`
     }).join('')
   } else if (qt === 'multiple') {
-    optionsHtml = q.options.map((opt, i) => {
+    optionsHtml = visibleOptionIndexes(q.options).map(i => {
+      const opt = q.options[i]
       let cls = 'option-item'
       const selected = ans.includes(i)
       if (submitted) {
@@ -1552,7 +1605,9 @@ function renderExamQuestion() {
   if (qt === 'voicematch') {
     optionsHtml = vmOptionsHtml(q, ans, 'live', 'examSelect')
   } else if (qt === 'single' || qt === 'judge' || qt === 'pronounce' || qt === 'listen') {
-    optionsHtml = q.options.map((opt, i) => {
+    // v107：只渲染有效选项（同步删除尾部空槽）
+    optionsHtml = visibleOptionIndexes(q.options).map(i => {
+      const opt = q.options[i]
       let cls = 'option-item'
       if (ans === i) cls += ' selected'
       return `<div class="${cls}" onclick="examSelect(${i})">
@@ -1561,7 +1616,8 @@ function renderExamQuestion() {
       </div>`
     }).join('')
   } else if (qt === 'multiple') {
-    optionsHtml = q.options.map((opt, i) => {
+    optionsHtml = visibleOptionIndexes(q.options).map(i => {
+      const opt = q.options[i]
       let cls = 'option-item'
       if (Array.isArray(ans) && ans.includes(i)) cls += ' selected'
       return `<div class="${cls}" onclick="examToggle(${i})">
@@ -1725,6 +1781,49 @@ function finishExam(timeout) {
   renderExamResult()
 }
 
+// ====== v108：成绩同步状态徽章（bug5「确保以后不会再有成绩进不来」）======
+// 学员交卷后最关心的一件事是「我的成绩到底传上去了没有」。这里把 cloud-store 的
+// 队列状态直接摊开给他看：已同步 ✅ / 同步中 ⏳ / 待同步 ⚠️（自动重试中）。
+// 状态由 CloudSync.syncState() 实时计算（队列长度 + 最近一次连接结果），
+// 页面刷新后依然如实 —— 队列是 localStorage 持久化的，不会因为刷新就变「已同步」。
+function syncBadgeHtml(id) {
+  if (typeof CloudSync === 'undefined' || typeof CloudSync.syncState !== 'function') return ''
+  const s = CloudSync.syncState()
+  const map = {
+    synced: { icon: '✅', key: 'syncDone', color: '#059669', bg: '#d1fae5', bd: '#a7f3d0' },
+    pending: { icon: '⏳', key: 'syncPending', color: '#92400e', bg: '#fffbeb', bd: '#fde68a' },
+    error: { icon: '⚠️', key: 'syncError', color: '#b45309', bg: '#fef3c7', bd: '#fcd34d' },
+  }
+  const v = map[s] || map.pending
+  return `<div id="${escAttr(id)}" style="margin:14px auto 0;max-width:560px;padding:10px 14px;border-radius:10px;background:${v.bg};border:1px solid ${v.bd};color:${v.color};font-size:13px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap">
+    <span style="font-size:15px">${v.icon}</span><span>${t(v.key)}</span>
+    ${s !== 'synced' ? `<button class="btn btn-sm" style="padding:2px 10px;font-size:12px" onclick="retrySyncNow(this)">${t('syncRetryNow')}</button>` : ''}
+  </div>`
+}
+// 手动催一次上报（平时无需点，纯粹给学员一个安心按钮）
+async function retrySyncNow(btn) {
+  if (typeof CloudSync === 'undefined') return
+  if (btn) { btn.disabled = true; btn.textContent = t('syncing') }
+  try { await CloudSync.pushPending() } catch (e) { /* 状态徽章会自动反映结果 */ }
+  refreshSyncBadges()
+}
+// 就地刷新页面上所有同步徽章（不重绘整页，避免打断学员看解析）
+function refreshSyncBadges() {
+  if (typeof CloudSync === 'undefined' || typeof CloudSync.syncState !== 'function') return
+  document.querySelectorAll('[data-sync-badge]').forEach(el => {
+    const id = el.id
+    const tmp = document.createElement('div')
+    tmp.innerHTML = syncBadgeHtml(id)
+    const fresh = tmp.firstElementChild
+    if (fresh) { fresh.setAttribute('data-sync-badge', '1'); el.replaceWith(fresh) }
+  })
+}
+// 状态变化时自动刷新徽章（注册一次即可，见 init 末尾）
+function bindSyncBadgeListener() {
+  if (typeof CloudSync === 'undefined' || typeof CloudSync.onSyncState !== 'function') return
+  CloudSync.onSyncState(() => refreshSyncBadges())
+}
+
 function renderExamResult() {
   const el = document.getElementById('page-exam')
   el.innerHTML = `
@@ -1747,6 +1846,7 @@ function renderExamResult() {
         </div>
       </div>
     </div>
+    <div data-sync-badge="1">${syncBadgeHtml('syncBadgeExam')}</div>
     <h3 class="section-title">${t('reviewTitle')}</h3>
     ${examState.review.map((r, i) => {
       const q = r.q
@@ -1936,6 +2036,8 @@ function switchAdminTab(tab) {
 }
 
 function renderAdminList() {
+  // v107：进题库列表时自动清理上传库的选项空槽并推云端（管理员无需手动操作，历史数据自愈）
+  compactAndPushUploaded()
   const st = adminStates[adminTab] || adminStates.all
   const categories = Store.getCategories()
   // v89：按 tab 的 dept 集合精确筛选（支持分部门 slug）
@@ -2566,6 +2668,14 @@ function impEstimateLevel(entry) {
 }
 // 判断答案文本是否为「选项字母」形态
 const IMP_LETTER_RE = /^[a-fA-F]+$/
+// v107：裁掉选项数组尾部的空槽（模板 6 格只填 3 格留下的空位）。
+// 尾部空槽一定在答案之后，裁掉不会改动任何答案下标；中间空槽保留原下标。
+function impTrimEmptyTail(options) {
+  const arr = Array.isArray(options) ? options.slice() : []
+  let end = arr.length
+  while (end > 0 && String(arr[end - 1] == null ? '' : arr[end - 1]).trim() === '') end--
+  return arr.slice(0, end)
+}
 // 单行解析为标准化题目（不进库，仅校验+预估）。返回 { ok, err, q, est, rowNo }
 function impEntryFromCells(cells, rowNo) {
   const get = i => (cells[i] == null ? '' : String(cells[i])).trim()
@@ -2638,6 +2748,14 @@ function impEntryFromCells(cells, rowNo) {
   const difficulty = diff || 0
   est = diff || impEstimateLevel({ type, question, options })
   const q = { type: type || 'single', question, options: isText ? (options[0] ? options : [answerText]) : options, answer, explanation, difficulty }
+  // v107：选项尾部空槽 = 模板里没填的选项格（每题 6 格只填 3 格）→ 直接裁掉，
+  // 否则学员端会渲染出「有边框、能点、但没字」的空白选项（「有几道题选项有空选项」）。
+  // 裁尾槽不影响 answer 下标（被裁的都是答案之外的尾部槽位，上面已校验过答案对应选项非空）。
+  if (!isText && q.options.length > 1) {
+    let end = q.options.length
+    while (end > 0 && String(q.options[end - 1] == null ? '' : q.options[end - 1]).trim() === '') end--
+    if (end < q.options.length) q.options = q.options.slice(0, end)
+  }
   if (errs.length) return { ok: false, err: errs.join('；'), q: null, est: 0, rowNo, type, question }
   return { ok: true, err: '', q, est, rowNo }
 }
@@ -2681,10 +2799,11 @@ function impFromJsonList(list) {
     const type = impNormType(item.type || '')
     const options = Array.isArray(item.options) ? item.options : []
     const ansRaw = Array.isArray(item.answer) ? item.answer : []
+    // v107：JSON 里带来的选项数组同样要裁掉尾部空槽（AI 回传常补足 6 格）
     const q = {
       type: type || 'single',
       question: String(item.question || '').trim(),
-      options,
+      options: (type === 'fill' || type === 'translate') ? options : impTrimEmptyTail(options),
       answer: item.answerText != null ? [] : ansRaw,
       explanation: String(item.explanation || ''),
       difficulty: item.difficultyText != null ? 0 : (Number(item.difficulty) || 0)
@@ -2863,6 +2982,20 @@ function pushUploadedBankSoon() {
     _upqPushTimer = null
     try { CloudSync.setUploadedBank(Store._getUploaded()) } catch (e) { /* 静默：下次操作再推 */ }
   }, 800)
+}
+// v107：新增/编辑题目后，若该题选项尾部还有空槽（历史数据、模板导入、JSON 回传），一律先清干净再推云端。
+// 幂等：已干净时不产生写入。返回被修正的题数。
+function compactAndPushUploaded() {
+  try {
+    if (!Store.compactUploadedOptions || !Store._getUploaded) return 0
+    const before = Store._getUploaded()
+    const res = Store.compactUploadedOptions(before)
+    if (res.fixed > 0) {
+      Store._setUploaded(res.list)
+      pushUploadedBankSoon()
+    }
+    return res.fixed
+  } catch (e) { return 0 }
 }
 function importReadFile(file, done) {
   const finish = done || (text => impParseAndPreview(text))
@@ -3370,7 +3503,7 @@ async function renderDashboard() {
 
     <div id="dashRoundsPanel">${dashRoundsPanelHtml()}</div>
 
-    <div id="dashChExamGate">${dashChExamGateHtml()}</div>
+    <div id="dashChGate">${dashChGatePanelHtml()}</div>
 
     <div id="dashChallengeBlock"></div>
 
@@ -3439,36 +3572,89 @@ async function renderDashboard() {
   renderPerQBlock(rows)
 }
 
-// ====== 管理员看板：七天挑战开放开关（v77） ======
-// 挑战整体为手动开放：存云端 doc.chOpen（cloud-store setChallengeOpen），开放时写 chOpenAt；
-// 学员端经 _getDoc 侧信道 _chOpen/_chOpenAt 读取；零参与时也要显示（可提前开放）。
-function dashChOpenGateHtml() {
-  const open = typeof CloudSync !== 'undefined' && CloudSync._chOpen === true
-  const badge = open
-    ? `<span style="font-size:12px;font-weight:800;color:#059669;background:#d1fae5;border-radius:10px;padding:2px 10px">● ${t('dashChOpenOn')}</span>`
-    : `<span style="font-size:12px;font-weight:800;color:#9ca3af;background:#f3f4f6;border-radius:10px;padding:2px 10px">● ${t('dashChOpenOff')}</span>`
+// ====== 管理员看板：七天挑战开关（v77 总开关 + v76 期末考试开关；v107 改为「按营次逐个」）======
+// 背景（v107 修的 bug）：「确保考试开关出现在每个不同的营期下面，而不是一开都开」。
+//   数据层早就按期隔离了（开关存在营次的 open / examOpen 字段，见 cloud-store _roundsNorm），
+//   但界面只有一张卡、只读 CloudSync._chExamOpen / _chOpen（= 指针那一期），
+//   管理员永远只能操作「当前指针期」→ 想把第 2 期的考试打开却把第 1 期改了，看起来就是「一开都开」。
+// 现在：按营次列表逐期渲染一张卡，每期各有「开放挑战」+「开放考试」两个按钮，
+//   点击时把该期 id 作为 roundId 传给 cloud-store 精确落刀（setChallengeOpen / setChallengeExamOpen）。
+// 营次筛选：跟随看板的部门筛选（dashChDept），只列属于该部门的营次（口径同营次管理面板）。
+function dashRoundsForGate() {
+  const all = dashRoundList()
+  if (!all.length) return []
+  try { return all.filter(r => dashRoundUnderDept(r, dashChDept)) } catch (e) { return all }
+}
+// 单期开关卡。r = 营次记录；isCur = 是否本端当前期（指针）
+function dashChRoundGateCardHtml(r, isCur) {
+  const open = r.open === true
+  const examOpen = r.examOpen === true
+  const rid = escAttr(r.id)
+  const badge = (on, onKey, offKey) => on
+    ? `<span style="font-size:12px;font-weight:800;color:#059669;background:#d1fae5;border-radius:10px;padding:2px 10px">● ${t(onKey)}</span>`
+    : `<span style="font-size:12px;font-weight:800;color:#9ca3af;background:#f3f4f6;border-radius:10px;padding:2px 10px">● ${t(offKey)}</span>`
   return `
-    <div class="card" style="margin-top:16px">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
-        <div style="min-width:0">
-          <div style="font-size:15px;font-weight:700;margin-bottom:2px">🏆 ${t('dashChOpenTitle')} ${badge}</div>
-          <div style="font-size:12px;color:#6b7280">${t('dashChOpenHint')}</div>
+    <div class="card" style="margin-top:12px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <div style="min-width:0;flex:1">
+          <div style="font-size:15px;font-weight:700;margin-bottom:3px">
+            🏆 ${escHtml(r.name || r.id)}${isCur ? ` <span style="font-size:11px;font-weight:600;color:#2563eb">· ${t('dashChGateCurTag')}</span>` : ''}
+          </div>
+          <div style="font-size:12px;color:#6b7280;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+            <span>${dashRoundDeptText(r)}</span>
+            <span>${dashRoundWindowText(r)}</span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px">
+            <span style="font-size:12px;color:#374151">${t('dashChOpenTitle')} ${badge(open, 'dashChOpenOn', 'dashChOpenOff')}</span>
+            <span style="font-size:12px;color:#374151">${t('dashChExamTitle')} ${badge(examOpen, 'dashChExamOn', 'dashChExamOff')}</span>
+          </div>
         </div>
-        <button id="dashChOpenBtn" class="btn btn-sm ${open ? 'btn-danger' : 'btn-primary'}" style="flex-shrink:0" onclick="dashToggleChOpen()">${open ? t('dashChOpenCloseBtn') : t('dashChOpenOpenBtn')}</button>
+        <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
+          <button class="btn btn-sm ${open ? 'btn-danger' : 'btn-primary'}"
+            data-rid="${rid}" onclick="dashToggleChOpen(this)"
+            title="${escAttr(t('dashChOpenHint'))}">${open ? t('dashChOpenCloseBtn') : t('dashChOpenOpenBtn')}</button>
+          <button class="btn btn-sm ${examOpen ? 'btn-danger' : 'btn-primary'}"
+            data-rid="${rid}" onclick="dashToggleChExam(this)"
+            title="${escAttr(t('dashChExamHint'))}">${examOpen ? t('dashChExamCloseBtn') : t('dashChExamOpenBtn')}</button>
+        </div>
       </div>
     </div>`
 }
-async function dashToggleChOpen() {
-  const cur = typeof CloudSync !== 'undefined' && CloudSync._chOpen === true
-  const next = !cur
-  const btn = document.getElementById('dashChOpenBtn')
+function dashChGatePanelHtml() {
+  const list = dashRoundsForGate()
+  const curId = dashRoundCurId()
+  const head = `
+    <div class="card" style="margin-top:16px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:2px">🎛️ ${t('dashChGatePanelTitle')}</div>
+      <div style="font-size:12px;color:#6b7280">${t('dashChGatePanelHint')}</div>
+    </div>`
+  if (!list.length) {
+    return head + `
+    <div class="card" style="margin-top:12px">
+      <div style="font-size:13px;color:#9ca3af">${t('dashChGateNoRound')}</div>
+    </div>`
+  }
+  // 当前指针期排最前，其余按列表顺序（管理员最常操作当前期）
+  const ordered = list.slice().sort((a, b) => (a.id === curId ? -1 : b.id === curId ? 1 : 0))
+  return head + ordered.map(r => dashChRoundGateCardHtml(r, r.id === curId)).join('')
+}
+// 就地刷新开关面板（写成功后调用，避免整页 renderDashboard 打断滚动位置）
+function dashRefreshChGate() {
+  const box = document.getElementById('dashChGate')
+  if (box) box.innerHTML = dashChGatePanelHtml()
+}
+async function dashToggleChOpen(btn) {
+  const rid = (btn && btn.dataset && btn.dataset.rid) || ''
+  const rec = dashRoundList().find(r => r.id === rid)
+  if (!rec) { alert(t('dashChExamFail')); return }
+  const next = rec.open !== true
   if (btn) btn.disabled = true
   try {
-    const res = await CloudSync.setChallengeOpen(next)
+    const res = await CloudSync.setChallengeOpen({ open: next, roundId: rid })
     if (res && res.ok) {
-      CloudSync._chOpen = next
-      if (next) CloudSync._chOpenAt = Date.now()
-      renderDashboard()   // 重渲染看板刷新徽章与按钮（顺带刷新其余板块数据）
+      rec.open = next
+      if (next) rec.at = Date.now()
+      dashRefreshChGate()
     } else {
       alert(t('dashChExamFail'))
       if (btn) btn.disabled = false
@@ -3712,13 +3898,10 @@ function dashViewRound(el) {
   renderDashChallengeBlock(_perQLastRows || [])
   const p = document.getElementById('dashRoundsPanel')
   if (p) p.innerHTML = dashRoundsPanelHtml()
-  dashRefreshExamGate()   // v100：同步期末考试卡（营次切换后徽章/按钮随当前营次刷新）
+  dashRefreshChGate()   // v107：同步开关面板（每期徽章/按钮随营次列表与筛选刷新）
 }
-// v100：期末考试开关卡的就地刷新（重渲染其外层容器 handle）
-function dashRefreshExamGate() {
-  const box = document.getElementById('dashChExamGate')
-  if (box) box.innerHTML = dashChExamGateHtml()
-}
+// 兼容旧调用名（v100 起的 dashRefreshExamGate → v107 并入 dashRefreshChGate）
+function dashRefreshExamGate() { dashRefreshChGate() }
 let dashRoundView = ''   // '' = 当前营次；否则为指定营次 id（看板统计筛选）
 // v105：最近一次渲染的挑战明细行（供批量补录筛选「进度已到 Day7 但 D7 无成绩」的学员）
 let _chDashRows = []
@@ -3874,35 +4057,108 @@ function dashManualScoreBatch() {
   dashManualScoreOpen(lack, '')
 }
 
-// ====== 管理员看板：期末考试开关（v76） ======
-// 七天挑战第 7 天期末考试为手动开放：存云端 doc.chExamOpen（cloud-store setChallengeExamOpen），
-// 学员端经 _getDoc 侧信道 _chExamOpen 读取；零参与时也要显示（管理员可提前开考）。
-function dashChExamGateHtml() {
-  const open = typeof CloudSync !== 'undefined' && CloudSync._chExamOpen === true
-  const badge = open
-    ? `<span style="font-size:12px;font-weight:800;color:#059669;background:#d1fae5;border-radius:10px;padding:2px 10px">● ${t('dashChExamOn')}</span>`
-    : `<span style="font-size:12px;font-weight:800;color:#9ca3af;background:#f3f4f6;border-radius:10px;padding:2px 10px">● ${t('dashChExamOff')}</span>`
-  return `
-    <div class="card" style="margin-top:16px">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
-        <div style="min-width:0">
-          <div style="font-size:15px;font-weight:700;margin-bottom:2px">🎓 ${t('dashChExamTitle')} ${badge}</div>
-          <div style="font-size:12px;color:#6b7280">${t('dashChExamHint')}</div>
-        </div>
-        <button id="dashChExamBtn" class="btn btn-sm ${open ? 'btn-danger' : 'btn-primary'}" style="flex-shrink:0" onclick="dashToggleChExam()">${open ? t('dashChExamCloseBtn') : t('dashChExamOpenBtn')}</button>
+// ====== 管理员看板：核对成绩（v108 引入，bug5 的第三道保险）======
+// 场景：学员交了卷、界面也显示成绩，但云端没收到（早先的 bug、断网、云端写冲突都可能）。
+//   数据层修好后这种事故已经很难发生，但「再也不会」需要一道可核对的兜底 ——
+//   就是这里：以**本机成绩底账**（CloudSync._ledger，本地不可删）为线索，
+//   和云端 base + events 逐条比对，缺哪条补哪条。
+// 口径：
+//   · 底账是「本机」的 → 只能补出这台设备上产生/处理过的成绩，看板上已如实标注
+//   · 判重按 学员 + 营次 + day + si + kind（与云端 chy 记录同口径）
+//   · 补录用 chy 事件（幂等 id 'rec_<学员>_<营次>_<day>_<si>_<kind>'）→ 重复点击不会造重复成绩
+//   · 补录出的记录带 recovered:true，界面沿用「手动录入」标记，便于事后区分
+let _dashReconcileLast = null
+async function dashReconcileScores(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = t('dashChReconcileWorking') }
+  let res
+  try {
+    res = await CloudSync.reconcileScores()
+  } catch (e) {
+    res = { ok: false, reason: 'network' }
+  }
+  if (btn) { btn.disabled = false; btn.textContent = t('dashChReconcileBtn') }
+  if (!res || !res.ok) { alert(t('dashChReconcileFail')); return }
+  _dashReconcileLast = res
+  if (!res.checked) { alert(t('dashChReconcileNone')); return }
+  if (!res.missing.length) { alert(t('dashChReconcileOk', res.checked)); return }
+  dashReconcileResultOpen(res)
+}
+function dashReconcileResultOpen(res) {
+  const old = document.getElementById('dashReconcileModal')
+  if (old) old.remove()
+  const list = res.missing.slice(0, 60)
+  // 环节名：test 且 day=7 → 期末；test 且 day=1 → 摸底；其余为每日练习
+  const stageLabel = m => (m.kind === 'test' ? (Number(m.day) === 7 ? t('dashChManualDay7') : t('dashChManualDay1')) : t('dashChReconcilePractice'))
+  const box = document.createElement('div')
+  box.id = 'dashReconcileModal'
+  box.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);padding:16px'
+  box.innerHTML = `
+    <div style="background:#fff;border-radius:12px;max-width:640px;width:100%;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.2);max-height:86vh;display:flex;flex-direction:column">
+      <h3 style="margin:0 0 4px;font-size:16px">🧮 ${t('dashChReconcileTitle')}</h3>
+      <p style="margin:0 0 10px;font-size:13px;color:#6b7280">${t('dashChReconcileMissing', res.checked, res.missing.length)} ${t('dashChReconcileLocalOnly')}</p>
+      <div style="overflow:auto;border:1px solid #e5e7eb;border-radius:8px">
+        <table class="admin-table" style="font-size:12px;width:100%">
+          <thead><tr>
+            <th>${t('thUsername')}</th><th>${t('thName')}</th>
+            <th>${t('dashChThProgress')}</th>
+            <th style="text-align:center">${t('dashChThCorrect')}</th>
+          </tr></thead>
+          <tbody>
+            ${list.map(m => `<tr>
+              <td>${escHtml(m.u)}</td>
+              <td>${escHtml(m.n || '—')}</td>
+              <td style="white-space:nowrap">D${m.day} · ${stageLabel(m)} · ${m.kind === 'test' ? t('dashChReconcileExam') : t('dashChReconcilePractice')}</td>
+              <td style="text-align:center">${m.correct}/${m.total}</td>
+            </tr>`).join('')}
+            ${res.missing.length > list.length ? `<tr><td colspan="4" style="text-align:center;color:#9ca3af">…</td></tr>` : ''}
+          </tbody>
+        </table>
+      </div>
+      <p style="margin:10px 0 0;font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px">${t('dashChManualWarn')}</p>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+        <button class="btn btn-ghost" onclick="dashReconcileClose()">${t('dashChManualCancel')}</button>
+        <button class="btn btn-primary" id="dashReconcileOk">${t('dashChReconcileFix', res.missing.length)}</button>
       </div>
     </div>`
+  document.body.appendChild(box)
+  const ok = document.getElementById('dashReconcileOk')
+  if (ok) ok.onclick = () => dashReconcilePush(ok)
 }
-async function dashToggleChExam() {
-  const cur = typeof CloudSync !== 'undefined' && CloudSync._chExamOpen === true
-  const next = !cur
-  const btn = document.getElementById('dashChExamBtn')
+function dashReconcileClose() {
+  const el = document.getElementById('dashReconcileModal')
+  if (el) el.remove()
+}
+async function dashReconcilePush(btn) {
+  const res = _dashReconcileLast
+  if (!res || !res.missing || !res.missing.length) { dashReconcileClose(); return }
+  if (!confirm(t('dashChReconcileConfirm', res.missing.length))) return
+  if (btn) { btn.disabled = true; btn.textContent = t('dashChReconcileFixing') }
+  let out
+  try { out = await CloudSync.reconcilePushScores(res.missing) } catch (e) { out = { ok: false } }
+  if (!out || !out.ok) { alert(t('dashChReconcileFail')); if (btn) { btn.disabled = false; btn.textContent = t('dashChReconcileFix', res.missing.length) } return }
+  dashReconcileClose()
+  alert(t('dashChReconcileFixed', out.pushed))
+  _dashReconcileLast = null
+  renderDashboard()
+}
+
+// ====== 管理员看板：期末考试开关（v76；v107 改为按营次） ======
+// 七天挑战第 7 天期末考试为手动开放：存云端对应营次的 examOpen（cloud-store setChallengeExamOpen），
+// 学员端经 _getDoc 侧信道读取；零参与时也要显示（管理员可提前开考）。
+// v107：按钮改为按期渲染（见 dashChRoundGateCardHtml），点击时带该期 roundId 精确落刀。
+async function dashToggleChExam(btn) {
+  const rid = (btn && btn.dataset && btn.dataset.rid) || ''
+  const rec = dashRoundList().find(r => r.id === rid)
+  if (!rec) { alert(t('dashChExamFail')); return }
+  const next = rec.examOpen !== true
   if (btn) btn.disabled = true
   try {
-    const res = await CloudSync.setChallengeExamOpen(next)
+    const res = await CloudSync.setChallengeExamOpen({ open: next, roundId: rid })
     if (res && res.ok) {
-      CloudSync._chExamOpen = next
-      dashRefreshExamGate()   // v100：就地刷新考试卡（徽章 + 按钮文案）
+      rec.examOpen = next
+      // v107：只有当改的是「本端当前期」时才动侧信道，避免学员端读到别的期次的开关
+      if (rid === dashRoundCurId()) CloudSync._chExamOpen = next
+      dashRefreshChGate()   // 就地刷新开关面板（徽章 + 按钮文案）
     } else {
       alert(t('dashChExamFail'))
       if (btn) btn.disabled = false
@@ -4114,6 +4370,10 @@ function renderDashChallengeBlock(rows) {
         <span style="font-size:13px;color:#1e40af">✍️ ${t('dashChManualLack', lack7)}</span>
         <button class="btn btn-primary btn-sm" style="flex-shrink:0" onclick="dashManualScoreBatch()">${t('dashChManualBatchBtn')}</button>
       </div>` : ''}
+      <div style="margin:0 0 10px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <span style="font-size:13px;color:#166534">🧮 ${t('dashChReconcileHint')} <span style="color:#4d7c0f">${t('dashChReconcileLocalOnly')}</span></span>
+        <button class="btn btn-ghost btn-sm" style="flex-shrink:0" onclick="dashReconcileScores(this)">${t('dashChReconcileBtn')}</button>
+      </div>
       <p class="form-hint" style="margin:0 0 10px">${t('dashRoundStatHint', rdName)}</p>
       <div style="margin:4px 0 10px;padding:10px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;color:#92400e;font-size:14px;font-weight:600">🏆 ${t('dashChPrizeHint')}</div>
       <h4 style="margin:14px 0 6px">🏆 ${t('dashChRankTitle')}</h4>
@@ -4543,6 +4803,8 @@ function init() {
   if (typeof CloudSync !== 'undefined') {
     CloudSync.onStatus(updateCloudStatus)
     updateCloudStatus(CloudSync.status)
+    // v108：成绩同步状态变化 → 就地刷新结果页徽章（学员看得见「已同步」）
+    bindSyncBadgeListener()
   }
   // 课程云端从 offline 恢复时自动重新渲染看板（"本地缓存"警告自动消失）
   window.addEventListener('course-store-online', () => {

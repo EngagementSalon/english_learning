@@ -1169,6 +1169,27 @@ const Store = {
   _setUploaded(list) {
     localStorage.setItem(STORAGE_KEYS.UPLOADED, JSON.stringify(list))
   },
+  // v107：选项去空槽。批量导入的每行有 6 个选项单元格，只填前 3 个 → 后面 3 个空串，
+  // 渲染出一个「能点但没字」的空白选项（学员反馈「有几道题选项有空选项」）。
+  // 统一在「写入本地库」这一道口子上裁掉尾部空槽：导入、手工新增、编辑都经过 _setUploaded。
+  // 幂等：已干净的库再次调用不产生任何变化。返回被修正的题数。
+  compactUploadedOptions(list) {
+    const arr = Array.isArray(list) ? list : []
+    let fixed = 0
+    const out = arr.map(q => {
+      if (!q || typeof q !== 'object') return q
+      const t = String(q.type || '')
+      if (t === 'fill' || t === 'translate') return q        // 填空题 options=[参考答案]，不能裁
+      const opts = Array.isArray(q.options) ? q.options : null
+      if (!opts) return q
+      let end = opts.length
+      while (end > 0 && String(opts[end - 1] == null ? '' : opts[end - 1]).trim() === '') end--
+      if (end === opts.length) return q
+      fixed++
+      return Object.assign({}, q, { options: opts.slice(0, end) })
+    })
+    return { list: out, fixed }
+  },
   // v95：云端上传库吸收。云端同步文档的 upq 字段（管理员上传的题目，见 CloudSync.setUploadedBank）
   // 在每次拉取时经此处并入本地上传库：本设备没有的云端题补进来；上一轮来自云端、这轮云端已
   // 删除的题（管理员在别处删除后推送）从本地移除；本地自建的题永不被动删除。
@@ -1192,13 +1213,20 @@ const Store = {
     cloud.forEach(q => {
       if (!have.has(String(q.id))) { next.push(q); have.add(String(q.id)) }
     })
-    this._setUploaded(next)
+    // v107：吸收时顺带清掉选项尾部空槽（云端旧数据自带空槽 → 本机立刻干净）
+    const compacted = this.compactUploadedOptions(next)
+    this._setUploaded(compacted.list)
     try { localStorage.setItem(SEEN, JSON.stringify([...cur])) } catch (e) { /* 容量满等 → 忽略 */ }
     return true
   },
   getQuestions() {
     const derived = JSON.parse(localStorage.getItem(STORAGE_KEYS.QUESTIONS) || '[]')
-    const uploaded = this._getUploaded()
+    // v107：读取时兜底去空槽 —— 本地库是历史遗留（写入前没过滤）也能立刻正常显示，
+    // 不依赖管理员重新导入。只在真有题目被修正时才回写，避免每次都写 localStorage。
+    const rawUploaded = this._getUploaded()
+    const compacted = this.compactUploadedOptions(rawUploaded)
+    const uploaded = compacted.list
+    if (compacted.fixed > 0) this._setUploaded(uploaded)
     let qs = uploaded.length ? derived.concat(uploaded) : derived
     // v67：种子题库拼接——BANK 中 id>=12 的新分类题（如 cat=12「标帜餐厅常见词汇」）。
     // 种子题不写入本地存储（写入后会被 rebuildBankFromCourse 整体替换清掉），运行时拼接即可全平台共享；
@@ -1292,8 +1320,8 @@ const Store = {
   },
   // v52：新增题目一律入上传库（eq_uploaded，id 前缀 'u'）——不受线下课题库重建清理影响，永久保留
   addQuestion(data) {
-    const list = this._getUploaded()
-    const newQ = { ...data, id: 'u' + this.nextId() }
+    const list = this.compactUploadedOptions(this._getUploaded()).list
+    const newQ = this.compactUploadedOptions([{ ...data, id: 'u' + this.nextId() }]).list[0]
     list.push(newQ)
     this._setUploaded(list)
     return newQ
@@ -1307,8 +1335,8 @@ const Store = {
     let list = this._getUploaded()
     const ui = list.findIndex(q => String(q.id) === sid)
     if (ui >= 0) {
-      list[ui] = { ...list[ui], ...data, id: list[ui].id }
-      this._setUploaded(list)
+      list[ui] = this.compactUploadedOptions([{ ...list[ui], ...data, id: list[ui].id }]).list[0]
+      this._setUploaded(this.compactUploadedOptions(list).list)
       return list[ui]
     }
     // 派生库

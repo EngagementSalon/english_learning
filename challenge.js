@@ -490,6 +490,31 @@ function chStageUnlocked(day, si) {
   return si === 0 ? chDayUnlocked(day) : chStageDone(day, si - 1)
 }
 
+// ====== v107：七天挑战的适用部门（白名单）======
+// 业务口径：七天挑战只对饮食部下的四个二级部门开放 —— 标帜餐厅 / 艳中餐厅 / 酒吧团队 / 客房送餐。
+//   饮食部是一级部门，这四个是二级；三级（WOOBAR / WETBAR / LIQUID）只是「酒吧团队」的别名，
+//   经 deptSubAlias 归一到 'dining/bar'，不单独成队、也不单独开营。
+//   房务部（rooms）与其他部门（other）不参与七天挑战。
+const CH_DEPT_SLUGS = ['dining/sig', 'dining/yan', 'dining/bar', 'dining/ird']
+// 当前视角是否具备参加七天挑战的部门资格。
+//   管理员返回 true（管理员可在题库管理里给任一部门上传/查看，且要能在练习页切片预览各队挑战）。
+//   学员：本人所属分部门 slug 命中白名单才可进；其他部门（房务部/其他部门/未设部门）不可进。
+function chDeptAllowed() {
+  try {
+    if (typeof Store !== 'undefined' && Store.isAdmin && Store.isAdmin()) return true
+    const k = chDeptKey()
+    if (!k) return false
+    if (k === 'all') return false
+    return CH_DEPT_SLUGS.indexOf(k) >= 0
+  } catch (e) { return false }
+}
+// 不可进入时的原因文案键（i18n）：房务部/其他部门 → 提示仅饮食部四个分队；未设部门 → 提示先选部门
+function chDeptBlockReason() {
+  const k = chDeptKey()
+  if (!k || k === 'all') return 'chDeptNeedSet'
+  return 'chDeptNotEligible'
+}
+
 // v77 挑战门禁：整个七天挑战需当前营次处于开放态（自动排期结算见 cloud-store roundOpenState，
 // 经 _getDoc 侧信道 _chOpen/_chOpenLocked/_chOpenAt 到达）。云端不可达/未拉取时视为未开放。
 // v88：三态文案 —— 未开始（未到 startAt）/ 进行中 / 已结束（已过 endAt 或管理员关闭过）。
@@ -795,10 +820,40 @@ async function chLoadLeaderboard() {
   } catch (e) { /* ignore */ }
 }
 
+// v107：不具备参加资格的部门打开挑战页时的整页说明（入口卡的同口径展开版）
+function chDeptBlockedPageHtml() {
+  const reason = chDeptBlockReason()
+  const names = CH_DEPT_SLUGS.map(s => (typeof deptSlugName === 'function' && deptSlugName(s)) || s)
+  const list = names.map(n => `<span style="font-size:12px;background:#f3f4f6;color:#4b5563;border:1px solid #e5e7eb;border-radius:999px;padding:3px 12px">${escHtml(n)}</span>`).join('')
+  const cta = reason === 'chDeptNeedSet'
+    ? `<button class="btn btn-primary btn-sm" style="margin-top:14px" onclick="openProfileSetup()">${t('chDeptGoSet')}</button>`
+    : ''
+  return `
+    <div class="card" style="max-width:520px;margin:24px auto;text-align:center">
+      <div style="font-size:44px;opacity:.45">🏅</div>
+      <h2 style="margin:8px 0 6px;color:#374151">${escHtml(t('chTitle'))}</h2>
+      <p class="form-hint" style="margin:0;color:#9ca3af">🚫 ${t(reason)}</p>
+      <p class="form-hint" style="margin:16px 0 8px;color:#6b7280">${t('chDeptEligibleList')}</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center">${list}</div>
+      ${cta}
+      <div style="margin-top:18px">
+        <button class="btn btn-ghost btn-sm" onclick="navigate('practice')">${escHtml(t('backHome'))}</button>
+      </div>
+    </div>`
+}
+
 function renderChallenge() {
   const el = document.getElementById('page-challenge')
   if (!el) return
   challengeLoad()
+  // v107：部门白名单门禁 —— 必须放在最前，先于 quiz/review/result 阶段分支。
+  // 入口卡（app.js challengeEntryHtml）已拦一道；这里防「手改 URL / 旧书签 / 部门被管理员改掉」
+  // 后仍能继续作答：不适用部门一律直接给出说明页，不渲染任何挑战内容。
+  if (typeof chDeptAllowed === 'function' && !chDeptAllowed()) {
+    _chGateRendered = { open: chOpenLocked(), exam: chFinalExamLocked(), round: chCurrentRound(), dept: chDeptKey(), shape: 'blocked' }
+    el.innerHTML = chDeptBlockedPageHtml()
+    return
+  }
   if (chs && (chs.phase === 'quiz' || chs.phase === 'review' || chs.phase === 'result')) { renderChallengeQuiz(); return }
   // v77：记录本次渲染的门禁态（挑战开关 + 考试开关），拉取后变化则重渲染入口
   // v88：营次切换也会改变门禁与进度 → 一并纳入比较
@@ -1083,7 +1138,9 @@ function chOptionsHtml(q, submitted, ans, pickFn) {
     return `<input type="text" class="input-answer" placeholder="${t('answerPlaceholder')}" value="${escAttr(val)}"
       oninput="chTextInput(this.value)" ${submitted ? 'disabled' : ''} />`
   }
-  return q.options.map((opt, i) => {
+  // v107：只渲染有效选项（同步删除尾部空槽），判分下标仍用原始 i
+  return visibleOptionIndexes(q.options).map(i => {
+    const opt = q.options[i]
     let cls = 'option-item'
     if (submitted) {
       if (q.answer.includes(i)) cls += ' correct'
@@ -1339,6 +1396,7 @@ function chRenderResult() {
     <h3 class="section-title">${t('reviewTitle')}</h3>
     ${chs.review.map((r, i) => chReviewItemHtml(r, i)).join('')}` : ''
   el.innerHTML = hero + extraNote + report + review + `
+    <div data-sync-badge="1">${typeof syncBadgeHtml === 'function' ? syncBadgeHtml('syncBadgeCh') : ''}</div>
     <div style="text-align:center;margin-top:24px">
       <button class="btn btn-primary" onclick="chBack()">${t('chBackToChallenge')}</button>
     </div>`
