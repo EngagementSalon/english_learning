@@ -579,6 +579,12 @@ function chFinalExamLocked() {
     return CloudSync._chExamOpen !== true
   } catch (e) { return true }
 }
+// v99 期末考试提前开放：考试开关（营次 examOpen / 侧信道 _chExamOpen）开着时，
+// 第七天期末考试对未完成 Day1-6 的学员也直接开放——跳过 v71 天锁与阶段链锁，仅限考试阶段本身
+//（Day7 每日练习仍按正常进度解锁）；v77 挑战全局门禁不在豁免范围（挑战未开放仍全拦）。
+function chExamEarlyOpen() {
+  try { return !chFinalExamLocked() } catch (e) { return false }
+}
 // v78 积分权重：第七天期末考试（day 7 的 test）答对每题按 3 倍计分，其余环节 1 倍。
 // 看板 app.js dashChStageWeight 与之同口径（test-v78 断言两侧对同一输入得分一致）；管理员不参加排名。
 function chLbStageWeight(day, kind) {
@@ -618,7 +624,9 @@ function chStartStage(day, si) {
     alert(t('chNotOpenAlert'))
     return
   }
-  if (!chStageUnlocked(day, si)) return
+  // v99：期末考试开关开启时，未走完 Day1-6 的学员也可直接参加第七天期末考试（豁免天锁/阶段锁）
+  const examEarly = chIsFinalExam(day, si) && !chStageDone(day, si) && chExamEarlyOpen()
+  if (!chStageUnlocked(day, si) && !examEarly) return
   // v76：期末考试需管理员开启（入口已锁，此处二次拦截防控制台/旧 DOM 调用）
   if (chIsFinalExam(day, si) && !chStageDone(day, si) && chFinalExamLocked()) {
     alert(t('chExamLockedAlert'))
@@ -675,9 +683,10 @@ function chProgressHtml() {
   const cells = CHALLENGE_DAYS.map(d => {
     const done = chDayDone(d.day)
     const unlocked = chDayUnlocked(d.day)
-    const bg = done ? '#059669' : unlocked ? '#f59e0b' : '#e5e7eb'
-    const fg = done || unlocked ? '#fff' : '#9ca3af'
-    const top = done ? '✓' : unlocked ? String(d.day) : '🔒'
+    const examOpenCell = d.day === 7 && !done && !unlocked && chExamEarlyOpen()   // v99：期末考试已开放给未走到的学员
+    const bg = done ? '#059669' : unlocked ? '#f59e0b' : examOpenCell ? '#10b981' : '#e5e7eb'
+    const fg = done || unlocked || examOpenCell ? '#fff' : '#9ca3af'
+    const top = done ? '✓' : unlocked ? String(d.day) : examOpenCell ? '🎓' : '🔒'
     return `<div style="flex:1;min-width:0">
       <div style="height:34px;border-radius:8px;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800">${top}</div>
       <div style="font-size:11px;color:#6b7280;text-align:center;margin-top:3px;white-space:nowrap">${t('chDay', d.day)}</div>
@@ -920,6 +929,9 @@ function chStageRowHtml(day, si, s) {
     } else {
       right = `<button class="btn btn-primary btn-sm" onclick="chStartStage(${day},${si})" style="flex-shrink:0">${t('chStart')}</button>`
     }
+  } else if (chIsFinalExam(day, si) && chExamEarlyOpen()) {
+    // v99：考试已开放但学员尚未走到 Day7（天锁/阶段锁未满足）→ 直接给入口 + 开放标记
+    right = `<button class="btn btn-primary btn-sm" onclick="chStartStage(${day},${si})" style="flex-shrink:0">${t('chStart')}</button>`
   } else {
     // 锁定文案：阶段锁（si>0）= 完成上方环节；天锁 = 前置天未完成 → chLocked，已完成但未到次日 → chTomorrow
     const lockText = si > 0 ? t('chStageLocked')
@@ -934,6 +946,7 @@ function chStageRowHtml(day, si, s) {
         <span style="font-size:13px;color:#6b7280">${t('questionsUnit', s.count)}</span>
         ${rec && !isTest ? `<span style="font-size:12px;color:#059669;margin-left:8px">✓ ${rec.correct}/${rec.total}</span>` : ''}
         ${chStageCleared(day, si) ? `<span style="font-size:12px;color:#6366f1;margin-left:8px">🔁 ${t('chResetExamRetake')}</span>` : ''}
+        ${!done && isTest && day === 7 && chExamEarlyOpen() ? `<span style="font-size:12px;color:#059669;margin-left:8px">${t('chExamEarlyTag')}</span>` : ''}
       </div>
       ${right}
     </div>`

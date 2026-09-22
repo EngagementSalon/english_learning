@@ -49,6 +49,19 @@ function renderDash(rows) {
   vm.runInContext(extractFn(APP, 'dashRoundList'), sb)
   vm.runInContext(extractFn(APP, 'dashRoundCurId'), sb)
   vm.runInContext(extractFn(APP, 'dashRoundSlug'), sb)
+  // v89：看板挑战统计的部门筛选（dashChDept / normDept）——沙箱按「全部部门」口径，行为与 v88 一致
+  vm.runInContext('let dashChDept = "all"', sb)
+  vm.runInContext(extractFn(APP, 'normDept'), sb)
+  vm.runInContext(extractFn(APP, 'normDeptSub'), sb)
+  vm.runInContext(extractFn(APP, '_deptSubIndex'), sb)
+  vm.runInContext(extractFn(APP, 'deptTree'), sb)
+  vm.runInContext('const DEPT_MAJOR_KEYS = ["dining", "rooms", "other"]', sb)
+  vm.runInContext('const DEPT_CANON = { dining: ["标帜餐厅", "艳中餐厅", "酒吧团队", "客房送餐"], rooms: ["迎宾前台", "礼宾部", "随时随需", "客房造型", "健身及水疗中心"] }', sb)
+  vm.runInContext('const DEPT_SUB_SLUGS = { dining: { "标帜餐厅": "sig", "艳中餐厅": "yan", "酒吧团队": "bar", "客房送餐": "ird" }, rooms: { "迎宾前台": "fo", "礼宾部": "concierge", "随时随需": "ww", "客房造型": "styling", "健身及水疗中心": "spa" } }', sb)
+  vm.runInContext('const DEPT_SUB_BY_SLUG = (() => { const o = {}; Object.keys(DEPT_SUB_SLUGS).forEach(mk => Object.keys(DEPT_SUB_SLUGS[mk]).forEach(s => { o[mk + "/" + DEPT_SUB_SLUGS[mk][s]] = s })); return o })()', sb)
+  vm.runInContext(extractFn(APP, 'deptSlug'), sb)
+  vm.runInContext(extractFn(APP, 'deptSlugName'), sb)
+  vm.runInContext(extractFn(APP, 'deptGroupKey'), sb)
 
   vm.runInContext('const TYPE_LABELS = new Proxy({}, { get: (_, k) => k })', sb)
   vm.runInContext('const Store = { getQuestions: () => [] }', sb)
@@ -87,7 +100,7 @@ function makeChSandbox(state, examOpen) {
   vm.runInContext('function challengeSave() {}', sb)
   ;['challengeStageMeta', 'challengeStageInfo', 'challengeKindOf', 'chStageRec', 'chStageDone', 'chStageCleared',
     'chStageCounted', 'chDayDone', 'chDayLastDoneAt', 'chDayUnlocked', 'chStageUnlocked', 'chStageScore',
-    'chIsFinalExam', 'chFinalExamLocked', 'chOpenLocked', 'chOpenEverOpened', 'chStageRowHtml', 'chClearExamStageRecs',
+    'chIsFinalExam', 'chFinalExamLocked', 'chExamEarlyOpen', 'chOpenLocked', 'chOpenEverOpened', 'chStageRowHtml', 'chClearExamStageRecs',
     'chRecordStage'].forEach(f => vm.runInContext(extractFn(CH, f), sb))
   return sb
 }

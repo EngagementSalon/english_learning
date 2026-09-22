@@ -200,8 +200,14 @@ const DAY = 86400000
     assert('Day1 测试已完成 → chStartStage(1,0) 拒绝', vm.runInContext('chs === null', sb))
     vm.runInContext('chStartStage(4,0)', sb)
     assert('Day4 未解锁 → chStartStage(4,0) 拒绝', vm.runInContext('chs === null', sb))
+    // v68：阶段锁拒绝；v99：考试开关开着时期末考试豁免天锁/阶段锁（管理员提前开考）—— 两种口径都验
+    vm.runInContext('CloudSync._chExamOpen = false', sb)
     vm.runInContext('chStartStage(7,1)', sb)
-    assert('Day7 测试未解锁 → 拒绝', vm.runInContext('chs === null', sb))
+    assert('Day7 测试未解锁 + 考试未开放 → 拒绝', vm.runInContext('chs === null', sb))
+    vm.runInContext('CloudSync._chExamOpen = true', sb)
+    vm.runInContext('chStartStage(7,1)', sb)
+    assert('v99：Day7 未解锁但考试开关开着 → 可直接开考（期末考试提前开放）', vm.runInContext('chs && chs.day === 7 && chs.si === 1 && chs.kind === "test"', sb))
+    vm.runInContext('chs = null', sb)
     vm.runInContext('chStartStage(2,0)', sb)
     assert('Day2 解锁 → 开会话 30 题 practice（前日无错题记录 → 无额外）',
       vm.runInContext('chs && chs.kind === "practice" && chs.questions.length === 30 && chs.extraCount === 0', sb))
@@ -508,13 +514,15 @@ const DAY = 86400000
     assert('防作弊启动（test 阶段 AntiCheat.start）', chSrc.includes('AntiCheat.start({ maxViolations: 3, onSubmit: chCheatSubmit })'))
     assert('防作弊强制交卷 chCheatSubmit', chSrc.includes('function chCheatSubmit'))
     assert('交卷/退出 AntiCheat.stop', (chSrc.match(/AntiCheat\.stop\(\)/g) || []).length >= 3)
-    assert('chy 上报 reportChallengeStage（含 usedSec）', chSrc.includes('Store.reportChallengeStage(chs.day, chs.si, chs.kind, correct, total, usedSec)'))
+    // v88：上报增加第 7 参 round（营次 id），看板按营次统计与隔离重置都依赖它
+    assert('chy 上报 reportChallengeStage（含 usedSec + round）', chSrc.includes('Store.reportChallengeStage(chs.day, chs.si, chs.kind, correct, total, usedSec, chCurrentRound())'))
     assert('chy startedAt 记录（chStartStage）', chSrc.includes('startedAt: Date.now()'))
     assert('chy usedSec 净用时计算', chSrc.includes('Math.round((Date.now() - chs.startedAt) / 1000)'))
     assert('addProgress 带 challenge:true（练习+回顾+测试 = 3 处）', (chSrc.match(/challenge: true/g) || []).length === 3, `got ${(chSrc.match(/challenge: true/g) || []).length}`)
     assert('stage 记录含 wrong 字段', chSrc.includes('wrong: (wrongQids || []).map(String)'))
     const storeSrc = fs.readFileSync(path.join(__dirname, 'store.js'), 'utf-8')
-    assert('store.reportChallengeStage 定义（6 参含 usedSec）', storeSrc.includes('reportChallengeStage(day, si, kind, correct, total, usedSec)'))
+    // v88：第 6 参仍为 usedSec，第 7 参新增 round（缺省时内部回落到当前营次）
+    assert('store.reportChallengeStage 定义（7 参含 usedSec + round）', storeSrc.includes('reportChallengeStage(day, si, kind, correct, total, usedSec, round)'))
     assert('store chy 事件携带 usedSec', storeSrc.includes('usedSec: usedSec || 0'))
     assert('perq 只报挑战错题（省空间）', storeSrc.includes('if (!record.correct) this.reportPerQuestion(record.question_id, false, true)'))
     const cloudSrc = fs.readFileSync(path.join(__dirname, 'cloud-store.js'), 'utf-8')
