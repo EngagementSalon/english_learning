@@ -779,6 +779,47 @@ function chLbFill(top) {
   const el = document.getElementById('chLbBody')
   if (el) el.innerHTML = chLbRowsHtml(top)
 }
+// ====== v108：云端手动补录的考试成绩 → 同步进本地进度 ======
+// 管理员看板手动录入的成绩（chy 事件 manual:true）是真实发生的成绩（多为同步事故的救济）。
+// 看板/积分榜从云端 chy 实时推导，天然作数；但学员端进度/打卡/报告 100% 读本地 challengeState
+// （localStorage），云端补录对学员完全不可见 —— 学员自己打开挑战页仍是「未完成」。
+// 这里在积分榜拉取（挑战页周期执行）时把**本人**的 manual 考试记录合并进本地进度：
+//   · 本地已有真实完成记录（done 且非 manual）→ 不覆盖（学员自己考出的成绩优先）
+//   · 本地已吸收过（manual）→ 用云端覆盖（管理员 chyfix 改分后学员端同步；at 相同时内容一致 = 幂等）
+//   · 本地是重置存根（cleared）→ 覆盖恢复成绩（与 chyfix v108「清除 cleared」同口径）
+//   · 只吸收当前营次的 test 记录；practice 无 manual 补录形态，防御性跳过
+function chAbsorbManualScores(rows) {
+  const uid = challengeUid()
+  let me = null
+  ;(rows || []).forEach(r => { if (r && r.username === uid) me = r })
+  if (!me || !Array.isArray(me.chy) || !challengeState || !challengeState.days) return false
+  let wantSlug = ''
+  try { wantSlug = chRoundSlug(chCurrentRound()) } catch (e) { return false }
+  let changed = false
+  me.chy.forEach(x => {
+    if (!x || !x.manual || x.kind !== 'test' || x.cleared) return
+    if (chRoundSlug(String((x && x.rd) || '')) !== wantSlug) return
+    const day = Number(x.day) || 0, si = Number(x.si) || 0
+    if (!day || si < 0) return
+    if (!challengeState.days[day]) challengeState.days[day] = { stages: {} }
+    const d = challengeState.days[day]
+    if (!d.stages) d.stages = {}
+    const rec = d.stages[si]
+    if (rec && rec.done && !rec.manual) return   // 学员真实成绩优先，永不覆盖
+    d.stages[si] = {
+      done: true, at: Number(x.at) || Date.now(),
+      correct: Number(x.correct) || 0, total: Number(x.total) || 0,
+      wrong: [], manual: true,
+    }
+    changed = true
+  })
+  if (!changed) return false
+  challengeSave()
+  // 仅在非答题会话时重渲染（renderChallenge 对 quiz 会话另有保护，仍显式跳过更稳）
+  try { if (!chs || chs.phase !== 'quiz') renderChallenge() } catch (e) { /* ignore */ }
+  return true
+}
+
 async function chLoadLeaderboard() {
   const now = Date.now()
   if (_chLbCache.top && now - _chLbCache.at < 60000) {
@@ -790,7 +831,10 @@ async function chLoadLeaderboard() {
   let top = null
   try {
     if (typeof CloudSync !== 'undefined' && CloudSync.getDashboardData) {
-      top = chLbAggregate(await CloudSync.getDashboardData(), chCurrentRound())
+      const rows = await CloudSync.getDashboardData()
+      top = chLbAggregate(rows, chCurrentRound())
+      // v108：手动补录的考试成绩同步进本地进度（完成情况/打卡/报告作数）
+      try { chAbsorbManualScores(rows) } catch (e) { /* 吸收失败不阻断积分榜 */ }
     }
   } catch (e) { /* 网络失败保留旧缓存或显示空态 */ }
   if (top) _chLbCache = { at: now, top }

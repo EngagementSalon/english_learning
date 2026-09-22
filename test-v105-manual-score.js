@@ -239,7 +239,7 @@ console.log('\n=== 组 8：chyfix 的边界（不碰 practice / 无目标不造�
   assert('同一条 chyfix 重放两次结果相同（幂等）', JSON.stringify(map1['李梦园'].chy) === once)
 }
 
-console.log('\n=== 组 9：chyfix 不复活被重置（cleared）的成绩 ===')
+console.log('\n=== 组 9：chyfix 覆盖补录可恢复被重置（cleared）的成绩（v108 语义）===')
 {
   const doc = realDoc()
   const sb = makeCloudSandbox(doc)
@@ -253,10 +253,11 @@ console.log('\n=== 组 9：chyfix 不复活被重置（cleared）的成绩 ===')
   sb.CloudSync._apply(map, { u: '李梦园', n: '李梦园', ty: 'chreset', ts: 1790100000000, d: { mode: 'exam', round: 'r1' } })
   const before = map['李梦园'].chy.filter(x => x.day === 7 && x.kind === 'test')[0]
   assert('重置后成绩已清零并标记 cleared', before && before.cleared === true && before.correct === 0, JSON.stringify(before))
-  // 再对已 cleared 的记录做 chyfix
+  // v108：再对已 cleared 的记录做 chyfix → 覆盖补录 = 以管理员录入为准 → 恢复成绩（清 cleared）
   sb.CloudSync._apply(map, { u: '李梦园', n: '李梦园', ty: 'chyfix', ts: 1790110000000, d: { day: 7, si: 1, rd: 'r1', correct: 20, total: 20, usedSec: 0, manual: true } })
   const after = map['李梦园'].chy.filter(x => x.day === 7 && x.kind === 'test')[0]
-  assert('已重置的成绩不会被 chyfix 复活', after && after.correct === 0 && after.cleared === true, JSON.stringify(after))
+  assert('覆盖补录恢复成绩（cleared 已清、分数生效）',
+    after && after.correct === 20 && after.total === 20 && !after.cleared && after.manual === true, JSON.stringify(after))
 }
 
 console.log('\n=== 组 10：源码级护栏与看板接线（v100 教训：函数存在 ≠ 功能存在）===')

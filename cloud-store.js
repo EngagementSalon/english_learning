@@ -1295,9 +1295,13 @@ const CloudSync = {
         break
       case 'chyfix':
         // v105：管理员修正已录入的挑战成绩（补录录错后改数）。按 (day, si, rd) 定位该营次该阶段
-        // **最近一条** kind==='test' 且未被 cleared 的记录并覆写 correct/total/usedSec。
+        // **最近一条** kind==='test' 的记录并覆写 correct/total/usedSec。
+        // v108：允许命中「已重置存根」（cleared），且覆写时**清除 cleared** ——
+        //   手动覆盖补录的语义就是「以管理员录入为准」：学员被重置过、或成绩在早先事故中未同步时，
+        //   补录必须真正计入完成情况与积分（看板 s7 与积分口径都跳过 cleared 记录，
+        //   保留 cleared 会让补录永远不作数）。学员端 challenge.js chAbsorbManualScores 同口径。
         // 幂等：重复应用同一条 chyfix 结果相同（都是覆写同一目标）。只动 test，绝不碰 practice。
-        // 找不到目标（记录不存在 / 已被重置降级为 cleared）→ 静默忽略，不凭空造记录。
+        // 找不到任何 test 记录 → 静默忽略，不凭空造记录（全新学员请用非覆盖补录，走 chy 事件）。
         {
           const rd = _roundSlugKey(d.round != null ? d.round : d.rd)
           const dayN = Number(d.day) || 0, siN = Number(d.si) || 0
@@ -1305,7 +1309,7 @@ const CloudSync = {
           let hit = -1
           for (let i = list.length - 1; i >= 0; i--) {
             const x = list[i]
-            if (!x || x.kind !== 'test' || x.cleared) continue
+            if (!x || x.kind !== 'test') continue
             if ((Number(x.day) || 0) !== dayN || (Number(x.si) || 0) !== siN) continue
             if (_roundSlugKey(x.rd) !== rd) continue
             hit = i; break
@@ -1317,7 +1321,6 @@ const CloudSync = {
               correct: Number(d.correct) || 0, total: Number(d.total) || 0,
               usedSec: Number(d.usedSec) || 0, at: x.at, rd: _roundSlugKey(x.rd),
               manual: true,
-              ...(x.cleared ? { cleared: true } : {}),
             }
             r.chy = list
           }
