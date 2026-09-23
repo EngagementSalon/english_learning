@@ -113,8 +113,13 @@ function makeChSandbox(chOpen, chOpenAt) {
   //   chDeptKey() 返回 '' → 会被判定为「不可参加」，整页走说明卡，横幅断言全崩。
   //   这里把该套件的视角固定为「标帜餐厅」（七天挑战的正式适用部门），使测试聚焦回开关逻辑。
   vm.runInContext('function chDeptKey(){ return "dining/sig" }', sb)
+  // v110：challengeEntryHtml 新增依赖 challengeEntryRoundPreviewHtml（内嵌「本部门下设 N 期挑战」预览）。
+  //   本套件测的是挑战开关/考试开关门禁，与营次列表无关 → 注入空实现（等价「无预览」分支）。
+  vm.runInContext('function challengeEntryRoundPreviewHtml() { return "" }', sb)
   // challengeEntryHtml（app.js）单独提取注入（依赖 challengeLoad/chOpenLocked/t，沙箱已齐备）
   vm.runInContext(extractFn(appSrc, 'challengeEntryHtml'), sb)
+  // 断言口径：alert 收集数组须在沙箱内显式定义（v110 起不再依赖宿主 window 注入）
+  vm.runInContext('var __alerts = []; window.__alerts = __alerts; window.alert = function (m) { __alerts.push(String(m)) }', sb)
   // 预置进度：Day1（两阶段）/ Day2-6 昨天 done；Day7 巩固刚 done
   vm.runInContext(
     'challengeLoad();' +

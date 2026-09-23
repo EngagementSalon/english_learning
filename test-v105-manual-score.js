@@ -250,11 +250,16 @@ console.log('\n=== 组 9：chyfix 覆盖补录可恢复被重置（cleared）的
   doc.events.forEach(ev => sb.CloudSync._apply(map, ev))
   assert('重放后 base 里已有补录的 18/20', map['李梦园'].chy.some(x => x.kind === 'test' && x.correct === 18))
   // 管理员重置该营次考试成绩 → 成绩变 cleared 存根
-  sb.CloudSync._apply(map, { u: '李梦园', n: '李梦园', ty: 'chreset', ts: 1790100000000, d: { mode: 'exam', round: 'r1' } })
+  // ⚠️ 时间戳必须相对「现在」派生，不能写死绝对值：
+  //   setChallengeManualScore 用的是真实 Date.now()，而 chreset 的幂等守卫是「只清 at <= ev.ts 的记录」。
+  //   写死 ts（如 1790100000000 = 2026-09-22 18:00Z）时，一旦真实时间越过该点，补录记录就变成
+  //   「重置之后产生的新成绩」而被正确跳过 → 断言失败。这是**用例时效性**问题，不是产品缺陷。
+  const resetTs = Date.now() + 1000
+  sb.CloudSync._apply(map, { u: '李梦园', n: '李梦园', ty: 'chreset', ts: resetTs, d: { mode: 'exam', round: 'r1' } })
   const before = map['李梦园'].chy.filter(x => x.day === 7 && x.kind === 'test')[0]
   assert('重置后成绩已清零并标记 cleared', before && before.cleared === true && before.correct === 0, JSON.stringify(before))
   // v108：再对已 cleared 的记录做 chyfix → 覆盖补录 = 以管理员录入为准 → 恢复成绩（清 cleared）
-  sb.CloudSync._apply(map, { u: '李梦园', n: '李梦园', ty: 'chyfix', ts: 1790110000000, d: { day: 7, si: 1, rd: 'r1', correct: 20, total: 20, usedSec: 0, manual: true } })
+  sb.CloudSync._apply(map, { u: '李梦园', n: '李梦园', ty: 'chyfix', ts: resetTs + 1000, d: { day: 7, si: 1, rd: 'r1', correct: 20, total: 20, usedSec: 0, manual: true } })
   const after = map['李梦园'].chy.filter(x => x.day === 7 && x.kind === 'test')[0]
   assert('覆盖补录恢复成绩（cleared 已清、分数生效）',
     after && after.correct === 20 && after.total === 20 && !after.cleared && after.manual === true, JSON.stringify(after))

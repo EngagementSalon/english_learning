@@ -169,11 +169,13 @@ console.log('=== 组 1：chyfix 覆盖补录恢复被重置（cleared）的成�
   assert('补录后 s7=90', v.s7 === 90, JSON.stringify(v))
   assert('补录后积分计入 D7 考试 3 倍权重', v.pts === 18 * 100 * 3 + 10 * 100 + 30 * 100 + 18 * 100, String(v.pts))
   // 管理员重置 → cleared 存根（exam 模式只清 test；practice 仍计分：30*100 + 10*100 = 4000）
-  sb.CloudSync._apply(map, { u: '李梦园', n: '李梦园', ty: 'chreset', ts: 1790100000000, d: { mode: 'exam', round: 'r1' } })
+  // ⚠️ 时间戳相对「现在」派生（详见 test-v105 同名注释）：写死绝对值会随时间失效。
+  const resetTs = Date.now() + 1000
+  sb.CloudSync._apply(map, { u: '李梦园', n: '李梦园', ty: 'chreset', ts: resetTs, d: { mode: 'exam', round: 'r1' } })
   v = dashView(map['李梦园'].chy)
   assert('重置后 s7 归空、考试积分归零（存根不计分，练习照常）', v.s7 === null && v.pts === 4000, JSON.stringify(v))
   // chyfix 覆盖补录 → 恢复成绩
-  sb.CloudSync._apply(map, { u: '李梦园', n: '李梦园', ty: 'chyfix', ts: 1790110000000, d: { day: 7, si: 1, rd: 'r1', correct: 20, total: 20, usedSec: 0, manual: true } })
+  sb.CloudSync._apply(map, { u: '李梦园', n: '李梦园', ty: 'chyfix', ts: resetTs + 1000, d: { day: 7, si: 1, rd: 'r1', correct: 20, total: 20, usedSec: 0, manual: true } })
   const rec = map['李梦园'].chy.find(x => x.kind === 'test' && x.day === 7)
   assert('chyfix 命中 cleared 存根并清除 cleared', rec && !rec.cleared && rec.manual === true && rec.correct === 20, JSON.stringify(rec))
   v = dashView(map['李梦园'].chy)
@@ -217,9 +219,11 @@ console.log('=== 组 4：非覆盖补录（chy 事件）对被重置学员作数
   await sb.CloudSync.setChallengeManualScore(['李梦园'], { day: 7, si: 1, correct: 18, total: 20 })
   const map = JSON.parse(JSON.stringify(doc.base))
   doc.events.forEach(ev => sb.CloudSync._apply(map, ev))
-  sb.CloudSync._apply(map, { u: '李梦园', n: '李梦园', ty: 'chreset', ts: 1790100000000, d: { mode: 'exam', round: 'r1' } })
+  // 时间戳相对「现在」派生（同上）：重置在前、新记录在后，语义才是「重置后重考/新补录仍计分」。
+  const resetTs2 = Date.now() + 1000
+  sb.CloudSync._apply(map, { u: '李梦园', n: '李梦园', ty: 'chreset', ts: resetTs2, d: { mode: 'exam', round: 'r1' } })
   // 非覆盖再补一条（chy 事件 push 新记录，不动存根）
-  sb.CloudSync._apply(map, { u: '李梦园', n: '李梦园', ty: 'chy', ts: 1790120000000, d: { day: 7, si: 1, kind: 'test', correct: 17, total: 20, usedSec: 100, rd: 'r1', manual: true } })
+  sb.CloudSync._apply(map, { u: '李梦园', n: '李梦园', ty: 'chy', ts: resetTs2 + 1000, d: { day: 7, si: 1, kind: 'test', correct: 17, total: 20, usedSec: 100, rd: 'r1', manual: true } })
   const v = dashView(map['李梦园'].chy)
   assert('存根跳过、新记录计入 → s7=85', v.s7 === 85, JSON.stringify(v))
   const t7count = map['李梦园'].chy.filter(x => x.kind === 'test' && x.day === 7).length

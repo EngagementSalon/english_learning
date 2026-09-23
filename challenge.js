@@ -148,13 +148,74 @@ function chRoundRecForDept() {
 }
 // 学员端当前营次 id（'' 表示云端未拉取到营次信息 → 视同第一期）
 // v97：优先取按视角部门实时解析的营次（管理员切片联动），无营次数据时回落云端侧信道
+// ⚠️ v110：本函数只反映**视角内的主营次**（单一）。大部门视角下可能有多个分部门营次并存，
+//   需要完整列表请用 chRoundListForView()；本函数取该列表的最后一项（最新一期）作代表。
 function chCurrentRound() {
   try {
-    const rec = chRoundRecForDept()
-    if (rec && rec.id) return String(rec.id)
+    // ⚠️ v110 教训：每级回落都必须是「函数存在才调用」而不是「直接调用 + 外层 try 兜底」。
+    //   若 chRoundListForView 缺失（部分加载 / 旧缓存片段 / extractFn 沙箱），直接调用会抛
+    //   ReferenceError 被外层 catch 吞掉 → **整函数**回落 '第一期'，连后面的侧信道都不再读，
+    //   表现为「学员营次莫名变回第一期」。守卫后可继续走下一级回落。
+    if (typeof chRoundRecForDept === 'function') {
+      const rec = chRoundRecForDept()
+      if (rec && rec.id) return String(rec.id)
+    }
+    if (typeof chRoundListForView === 'function') {
+      const list = chRoundListForView()
+      if (list && list.length) return String(list[list.length - 1].id)
+    }
     const id = (typeof CloudSync !== 'undefined' && CloudSync._chRoundCurId)
     return id ? String(id) : '第一期'
   } catch (e) { return '第一期' }
+}
+// ====== v110：视角营次列表（一级部门视角汇总其下所有分部门的挑战）======
+// 用户口径：「饮食部点开来应该能看到所有饮食部下属部门的挑战」。
+//   · 分部门视角（'dining/sig'）→ 本部门适用营次（与 chRoundRecForDept 同口径，最多一个）
+//   · 大部门视角（'dining'）    → 其下所有分部门各自适用的营次，逐个列出（标帜第一期 + 艳中第一期…）
+//   · 全库视角（'' / 'all'，管理员）→ 全部营次
+// 与 chRoundRecForDept 的关系：后者是「单一主营次」（存档键/上报 rd 用），本函数是「视角内营次全集」
+//   （列表展示/看板过滤用）。两者必须同源 —— 分部门视角下后者含前者，大部门视角下前者为 null 而本函数非空。
+// ⚠️ 不要用 roundDeptMatch(r, 'dining') 判断大部门归属（它语义是「学员适用」，大部门视角不匹配挂分部门的营次），
+//   必须显式展开子部门 slug 逐个匹配 —— 这是 v109「暂无挑战」卡的病根。
+function chRoundViewSlugs() {
+  try {
+    const k = chDeptKey()
+    if (!k) return null                            // 空 = 全库视角（默认）：null = 不过滤
+    if (k === 'all') return []                      // v110：'all' = 仅通用题切片（v92 语义），无下属分队 → 无营次可汇总
+    if (k.indexOf('/') >= 0) return [k]           // 分部门视角：只本部门
+    // 大部门视角：展开其下全部分部门 slug（DEPT_SUB_SLUGS 键为显示名、值为 slug）
+    const m = (typeof DEPT_SUB_SLUGS !== 'undefined') && DEPT_SUB_SLUGS[k]
+    if (!m) return [k]
+    return Object.keys(m).map(name => k + '/' + m[name])
+  } catch (e) { return null }
+}
+// 视角内营次列表（保持云端数组原顺序；同一营次不会重复入列）
+function chRoundListForView() {
+  try {
+    if (typeof CloudSync === 'undefined' || !Array.isArray(CloudSync._chRounds) || !CloudSync._chRounds.length) return []
+    if (typeof roundDeptMatch !== 'function') return []
+    const slugs = chRoundViewSlugs()
+    const arr = CloudSync._chRounds
+    if (slugs === null) return arr.filter(r => r && r.id)      // 全库视角：全部营次
+    if (!slugs.length) return []                               // 'all'（仅通用题）：无分队可汇总
+    const seen = {}
+    const out = []
+    arr.forEach(r => {
+      if (!r || !r.id || seen[r.id]) return
+      // 任一子部门匹配即归属本视角（这解决了「饮食部看不到下属部门挑战」）
+      if (slugs.some(s => roundDeptMatch(r, s))) { seen[r.id] = 1; out.push(r) }
+    })
+    return out
+  } catch (e) { return [] }
+}
+// 视角营次集合的稳定标识：并入「已装载营次」判定 → 大部门视角下营次增减能触发重载/重渲染
+function chRoundViewKey() {
+  try {
+    const list = (typeof chRoundListForView === 'function') ? chRoundListForView() : []
+    if (list.length) return list.map(r => r.id).join(',')
+    const k = (typeof chDeptKey === 'function') ? chDeptKey() : ''
+    return k ? 'none:' + k : 'all'
+  } catch (e) { return 'all' }
 }
 // 当前营次存档键：第一期沿用 CHALLENGE_KEY（兼容旧存档），其余期加后缀
 function chStorageKeyFor(round) {
@@ -179,9 +240,12 @@ function chSeenRoundsAdd(round) {
   }
 }
 // 管理员在云端切换当前营次后：把学员端本地进度指针切到新营次（换键重新装载）
+// v110：装载标识从「单一主营次 id」改为「视角营次集合 chRoundViewKey()」——
+//   大部门视角（饮食部）下主营次不随分部门营次增减而变，只比 id 会漏掉这类变化。
 function chEnsureRound() {
   const id = chCurrentRound()
-  if (_chRoundLoaded === id) return false
+  const vk = (typeof chRoundViewKey === 'function') ? chRoundViewKey() : ''
+  if (_chRoundLoaded === id && _chRoundViewLoaded === vk) return false
   chSeenRoundsAdd(id)
   const uid = challengeUid()
   let st = null
@@ -192,10 +256,12 @@ function chEnsureRound() {
   }
   challengeState = st
   _chRoundLoaded = id
+  _chRoundViewLoaded = vk
   _chLbCache = { at: 0, top: null }   // 营次变了 → 积分榜缓存作废
   return true
 }
 let _chRoundLoaded = ''    // 已装载的营次 id（切换判断用）
+let _chRoundViewLoaded = '' // v110：已装载时的视角营次集合标识（大部门视角下营次增减也要重载）
 
 // v79：练习题序种子 = CHALLENGE_SEED + FNV-1a(登录用户名)。
 // 不同用户名 → 不同序列（人人题目不同）；未登录/测试环境兜底 'anon'（行为与 v78 固定种子一致）。
@@ -559,22 +625,32 @@ function chRoundOpenState() {
 }
 // v89：本部门是否压根没有适用营次 → 显示「本部门暂无开营」
 // v97：本地实时判定（管理员切片立即生效）；无营次数据时回退云端侧信道 _chNoRound
+// v110：判定改用「视角营次列表」—— 大部门视角（饮食部）其下分部门有营次即算有营次
+//   （v109 及以前用 chRoundRecForDept()，大部门视角恒为 null → 饮食部被误判「暂无挑战」，正是用户报的问题）
 function chNoRoundForDept() {
   try {
     if (typeof CloudSync === 'undefined') return false
     if (typeof roundDeptMatch === 'function' && Array.isArray(CloudSync._chRounds) && CloudSync._chRounds.length) {
       const k = chDeptKey()
-      if (k) return !chRoundRecForDept()
+      if (k) return (typeof chRoundListForView === 'function' ? chRoundListForView() : []).length === 0
       return false      // 全库视角（管理员「全部部门」/无部门）指针必命中，不存在「无营次」
     }
     return CloudSync._chNoRound === true
   } catch (e) { return false }
 }
 // 当前营次名称（横幅显示，如「第一期」）；优先按视角部门实时解析，云端未拉取时兜底「第一期」
+// v110：大部门视角（饮食部）无单一主营次 → 回落到视角营次列表里最新一期（代表名），并从本期起展示子部门营次列表
 function chRoundName() {
   try {
-    const rec = chRoundRecForDept()
-    if (rec && rec.name) return String(rec.name)
+    // v110：与 chCurrentRound 同口径 —— 函数不存在则跳过该级回落，不要被外层 catch 吞掉整函数
+    if (typeof chRoundRecForDept === 'function') {
+      const rec = chRoundRecForDept()
+      if (rec && rec.name) return String(rec.name)
+    }
+    if (typeof chRoundListForView === 'function') {
+      const list = chRoundListForView()
+      for (let i = list.length - 1; i >= 0; i--) if (list[i] && list[i].name) return String(list[i].name)
+    }
     if (typeof CloudSync !== 'undefined' && CloudSync._chRoundCurName) return String(CloudSync._chRoundCurName)
   } catch (e) {}
   return '第一期'
@@ -740,10 +816,22 @@ function chProgressHtml() {
 // 重练不刷分），积分 = Σ(答对×100×环节权重) − Σ用时秒；v78：第七天期末考试 3 倍权重，管理员不参加排名。
 // v84：被管理员重置成绩的测试记录（cleared 存根）不计分——重考后的新记录才计入。
 // v88：只看当前营次的记录（rd 缺省 = 第一期/单期制旧数据）；round 省略时用当前营次。
-// v88：只看当前营次的记录（rd 缺省 = 第一期/单期制旧数据）；round 省略时用当前营次。
+// v110：round 省略且视角下有多个营次（大部门视角）→ 汇总这些营次的全部记录（与「饮食部能看到下属部门挑战」一致）；
+//   显式传入 round（如看板指定期）或视角只有单个营次时，行为与 v88 完全一致。
 function chLbAggregate(rows, round) {
+  let wantList = null
+  if (round == null) {
+    try {
+      const list = (typeof chRoundListForView === 'function') ? chRoundListForView() : []
+      if (list.length > 1) wantList = list.map(r => chRoundSlug(String(r.id || '')))
+    } catch (e) { wantList = null }
+  }
   const want = String(round == null ? chCurrentRound() : round)
-  const matchRound = x => chRoundSlug(String((x && x.rd) || '')) === chRoundSlug(want)
+  const wantSlug = chRoundSlug(want)
+  const matchRound = x => {
+    const s = chRoundSlug(String((x && x.rd) || ''))
+    return wantList ? wantList.indexOf(s) >= 0 : s === wantSlug
+  }
   // v78：管理员账号不参加排名（学员端前三同样剔除）
   const list = (rows || []).filter(r => r && r.role !== 'admin' && r.chy && r.chy.length).map(r => {
     const first = {}
@@ -858,7 +946,7 @@ async function chLoadLeaderboard() {
       const recNow = chRoundRecForDept()
       const idNow = recNow && recNow.id ? String(recNow.id) : ''
       const noRound = chNoRoundForDept()
-      const shape = idNow + '|' + (noRound ? '1' : '0')
+      const shape = idNow + '|' + (noRound ? '1' : '0') + '|' + chRoundViewKey()
       if (cur.open !== _chGateRendered.open || cur.exam !== _chGateRendered.exam
         || cur.dept !== _chGateRendered.dept || shape !== _chGateRendered.shape) { renderChallenge(); return }
       if (cur.round !== _chGateRendered.round) { chEnsureRound(); renderChallenge(); return }
@@ -945,7 +1033,8 @@ function renderChallenge() {
   _chGateRendered = {
     open: chOpenLocked(), exam: chFinalExamLocked(), round: chCurrentRound(),
     dept: chDeptKey(),
-    shape: ((chRoundRecForDept() || {}).id || '') + '|' + (chNoRoundForDept() ? '1' : '0'),
+    // v110：shape 追加视角营次集合 —— 大部门视角下主营次可能不变而下属营次增减 → 也要重渲染
+    shape: ((chRoundRecForDept() || {}).id || '') + '|' + (chNoRoundForDept() ? '1' : '0') + '|' + chRoundViewKey(),
   }
   // v89：题源/标题按本部门题库（各分部门一套题、各自上传）
   const bankN = chBankCount()
@@ -1001,6 +1090,7 @@ function renderChallenge() {
     : ''
   el.innerHTML = `
     ${chResetBanner}
+    ${chRoundListHtml()}
     ${chRoundBar}
     ${chClosedBanner}
     ${chProgressHtml()}
@@ -1032,7 +1122,12 @@ function chRoundMetaText() {
   try {
     if (typeof CloudSync === 'undefined' || !Array.isArray(CloudSync._chRounds)) return ''
     // v97：按视角部门实时解析（管理员切片联动）
-    const rec = chRoundRecForDept()
+    // v110：大部门视角无单一主营次 → 取视角营次列表最后一项（最新一期）的排期作代表
+    let rec = (typeof chRoundRecForDept === 'function') ? chRoundRecForDept() : null
+    if (!rec && typeof chRoundListForView === 'function') {
+      const list = chRoundListForView()
+      rec = list.length ? list[list.length - 1] : null
+    }
     if (!rec) return ''
     const s = Number(rec.startAt) || 0
     const e = Number(rec.endAt) || 0
@@ -1042,6 +1137,52 @@ function chRoundMetaText() {
     if (e) return t('chRoundEndAt', f(e))
   } catch (err) { /* ignore */ }
   return ''
+}
+// ====== v110：视角营次列表卡（一级部门视角汇总展示其下各分部门的挑战）======
+// 用户口径：「饮食部点开来应该能看到所有饮食部下属部门的挑战」。
+//   · 单营次视角（分部门/全库）→ 不渲染本卡（避免与上方营次标识条重复）
+//   · 多营次视角（大部门，其下多个分部门各有营次）→ 卡片列出每一期：部门标签 + 期名 + 开放态 + 起止
+// 说明：列表内营次仅供查看（当前存档/进度/上报仍按本视角主营次 chCurrentRound()），
+//   管理员要看某队挑战的进度，用练习页「题目部门」切片切到该分队即可（v97 联动）。
+function chRoundListHtml() {
+  try {
+    const list = chRoundListForView()
+    if (list.length < 2) return ''
+    const rows = list.map(r => {
+      const st = (typeof roundOpenState === 'function') ? roundOpenState(r, Date.now()) : { state: 'closed' }
+      const depts = (Array.isArray(r && r.depts) ? r.depts : [])
+        .map(d => (typeof deptSlugName === 'function' && deptSlugName(d)) || d)
+        .filter(Boolean)
+      const tags = depts.length
+        ? depts.map(n => `<span style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:999px;padding:1px 8px">🏷️ ${escHtml(n)}</span>`).join(' ')
+        : `<span style="font-size:11px;background:#f3f4f6;color:#4b5563;border:1px solid #e5e7eb;border-radius:999px;padding:1px 8px">${t('chRoundAllDepts')}</span>`
+      const stateTag = st.state === 'open'
+        ? `<span style="font-size:11px;color:#059669;font-weight:700">● ${t('chRoundOpenTag')}</span>`
+        : st.state === 'upcoming'
+          ? `<span style="font-size:11px;color:#b45309;font-weight:700">⏳ ${t('chRoundUpcomingTag')}</span>`
+          : st.state === 'ended'
+            ? `<span style="font-size:11px;color:#6b7280;font-weight:700">🏁 ${t('chEnded')}</span>`
+            : `<span style="font-size:11px;color:#9ca3af;font-weight:700">🔒 ${t('chNotOpen')}</span>`
+      const s = Number(r.startAt) || 0, e = Number(r.endAt) || 0
+      const f = ts => new Date(ts).toLocaleString(LANG === 'en' ? 'en-US' : 'zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+      const meta = (s && e) ? t('chRoundWindow', f(s), f(e)) : (s ? t('chRoundStartAt', f(s)) : (e ? t('chRoundEndAt', f(e)) : ''))
+      return `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid #f3f4f6">
+          <span style="font-weight:700;font-size:13px">${escHtml(String(r.name || r.id || ''))}</span>
+          ${stateTag}
+          ${tags}
+          ${meta ? `<span style="font-size:11px;color:#9ca3af">${meta}</span>` : ''}
+        </div>`
+    }).join('')
+    return `
+      <div class="card" style="margin-bottom:16px;border:2px solid #bfdbfe">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+          <h3 style="margin:0">📋 ${t('chRoundListTitle', list.length)}</h3>
+        </div>
+        <div>${rows}</div>
+        <p class="form-hint" style="margin:6px 0 0">${t('chRoundListHint')}</p>
+      </div>`
+  } catch (e) { return '' }
 }
 
 function chDayBlockHtml(cfg) {
