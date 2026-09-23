@@ -1050,6 +1050,18 @@ async function chLoadLeaderboard() {
   } catch (e) { /* ignore */ }
 }
 
+// v114：学员侧「部门没同步过来」的自助修复。
+//   事故现场：本机记录/会话里的部门丢了（早期版本残留、换设备、云端建号后本机只落了空值），
+//   于是被判「不在七天挑战白名单」，页面只给一句「还未设置所属部门」，学员无从下手。
+//   流程：云端重拉（含把云端部门回填本机账号记录）→ 按资料缓存回填会话 → 把 slug 推给 CloudSync → 重渲染。
+//   修不好也没关系：仍是同一张说明页，只是顺带多了一次尝试。
+async function chResyncDept() {
+  try { if (typeof Store !== 'undefined' && Store.pullCloudChanges) await Store.pullCloudChanges() } catch (e) {}
+  try { if (typeof Store !== 'undefined' && Store.repairSessionDept) Store.repairSessionDept() } catch (e) {}
+  try { if (typeof Store !== 'undefined' && Store.syncDeptSlug) Store.syncDeptSlug() } catch (e) {}
+  renderChallenge()
+}
+
 // v107：不具备参加资格的部门打开挑战页时的整页说明（入口卡的同口径展开版）
 function chDeptBlockedPageHtml() {
   const reason = chDeptBlockReason()
@@ -1058,6 +1070,15 @@ function chDeptBlockedPageHtml() {
   const cta = reason === 'chDeptNeedSet'
     ? `<button class="btn btn-primary btn-sm" style="margin-top:14px" onclick="openProfileSetup()">${t('chDeptGoSet')}</button>`
     : ''
+  // v114：把「本机记录 vs 资料缓存」的部门并排显示 —— 自助修复失败时，这张截图就能定位到底丢在哪一层
+  let diag = ''
+  try {
+    const localDept = (typeof Store !== 'undefined' && Store.getSessionDept) ? (Store.getSessionDept() || '') : ''
+    let profDept = ''
+    try { profDept = ((typeof Store !== 'undefined' && Store.getUser && Store.getUser()) || {}).dept || '' } catch (e) {}
+    const none = t('chDeptDiagNone')
+    diag = `<p class="form-hint" style="margin:12px 0 0;font-size:11px;color:#9ca3af">${t('chDeptDiagLocal')}：${escHtml(localDept || none)} ｜ ${t('chDeptDiagProfile')}：${escHtml(profDept || none)}</p>`
+  } catch (e) { diag = '' }
   return `
     <div class="card" style="max-width:520px;margin:24px auto;text-align:center">
       <div style="font-size:44px;opacity:.45">🏅</div>
@@ -1066,6 +1087,10 @@ function chDeptBlockedPageHtml() {
       <p class="form-hint" style="margin:16px 0 8px;color:#6b7280">${t('chDeptEligibleList')}</p>
       <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center">${list}</div>
       ${cta}
+      <div style="margin-top:10px">
+        <button class="btn btn-ghost btn-sm" onclick="chResyncDept()">🔄 ${escHtml(t('chDeptResync'))}</button>
+      </div>
+      ${diag}
       <div style="margin-top:18px">
         <button class="btn btn-ghost btn-sm" onclick="navigate('practice')">${escHtml(t('backHome'))}</button>
       </div>

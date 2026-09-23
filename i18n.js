@@ -694,6 +694,11 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     chDeptNeedSet: '还未设置所属部门，请先在个人资料里选择部门后再查看。',
     chDeptEligibleList: '可参加的分队：',
     chDeptGoSet: '去设置部门',
+    // v114：七天挑战「部门没同步过来」的自助修复（重新同步按钮 + 本机/资料部门对照自检）
+    chDeptResync: '重新同步部门',
+    chDeptDiagLocal: '本机记录的部门',
+    chDeptDiagProfile: '资料中保存的部门',
+    chDeptDiagNone: '未设置',
     chDeptNoRound: '本部门暂无挑战营次，敬请期待下一期。',
     chDeptNoRoundList: '当前开设营次的部门：',
     chEnded: '挑战已结束',
@@ -1509,6 +1514,11 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     chDeptNeedSet: 'You have not set your department yet. Please choose one in your profile first.',
     chDeptEligibleList: 'Eligible teams:',
     chDeptGoSet: 'Set my department',
+    // v114：七天挑战「部门没同步过来」的自助修复（重新同步按钮 + 本机/资料部门对照自检）
+    chDeptResync: 'Re-sync department',
+    chDeptDiagLocal: 'Department on this device',
+    chDeptDiagProfile: 'Department in profile',
+    chDeptDiagNone: 'Not set',
     chDeptNoRound: 'No challenge round for this department yet. Stay tuned for the next one.',
     chDeptNoRoundList: 'Departments with an active round:',
     chEnded: 'Challenge ended',

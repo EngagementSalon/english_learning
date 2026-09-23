@@ -283,7 +283,7 @@ const Store = {
 
   // 跨设备用户/权限云同步：拉云端 events 应用到本地 users 表
   // 处理：register / role / rename / delete / dept + 平台 Logo
-  // 返回 { ok, applied: { roleChanged, renamed, deleted, added, deptChanged, sessionRoleSync, sessionDeptSync, logoUpdated }, ts }
+  // 返回 { ok, applied: { roleChanged, renamed, deleted, added, deptChanged, deptFilled, sessionRoleSync, sessionDeptSync, logoUpdated }, ts }
   async pullCloudChanges() {
     if (typeof CloudSync === 'undefined' || !CloudSync.fetchSyncSummary) return { ok: false, reason: 'no-cloudsync' }
     let summary
@@ -303,7 +303,7 @@ const Store = {
     const events = ((summary.doc && summary.doc.events) || []).slice().sort((a, b) => (a.ts || 0) - (b.ts || 0))
     const lastTsKey = 'eq_cloud_pull_ts'
     const lastTs = JSON.parse(localStorage.getItem(lastTsKey) || '0')
-    const applied = { roleChanged: [], renamed: [], deleted: [], added: [], deptChanged: [], sessionRoleSync: false, sessionDeptSync: false }
+    const applied = { roleChanged: [], renamed: [], deleted: [], added: [], deptChanged: [], deptFilled: false, sessionRoleSync: false, sessionDeptSync: false }
     let users = this.getUsers()
     let dirty = false
     let maxTs = lastTs
@@ -365,6 +365,29 @@ const Store = {
       localStorage.setItem(STORAGE_KEYS.COUNTER, JSON.stringify(newId))
       applied.added.push(username); dirty = true
     })
+
+    // 2.5) v114：本机账号记录的部门为空/无法识别，而云端有 → 用云端补全（**只补空，不覆盖本人已选**）。
+    //   事故：管理员在别处给学员设过部门、或本机账号记录是早期版本残留的空部门时，
+    //   第 3 步比较的是「本机记录 vs 会话」——两者都空 → 永远补不回来，
+    //   学员点进七天挑战只看到「还未设置所属部门」（被白名单判为不可参加），
+    //   而管理员在看板上看到的部门却是正确的 —— 现场极易误判成「功能坏了」。
+    //   放在 saveUsers 之前：第 3 步读的是本机存储，必须先落盘才能被它读到。
+    {
+      const s0 = this.getSession()
+      const cu = (s0 && s0.username) ? cloudMap[s0.username] : null
+      const idx0 = (s0 && s0.username) ? users.findIndex(u => u && u.username === s0.username) : -1
+      if (idx0 >= 0 && cu && cu.dept) {
+        const localDept = users[idx0].dept
+        const localOk = (typeof normDept === 'function')
+          ? !!normDept(localDept)
+          : !!String(localDept == null ? '' : localDept).trim()
+        if (!localOk) {
+          users[idx0] = Object.assign({}, users[idx0], { dept: String(cu.dept) })
+          applied.deptFilled = true
+          dirty = true
+        }
+      }
+    }
 
     // 3) 当前 session：以云端 map 的最终态为准（角色 + 部门）
     const s = this.getSession()
@@ -761,6 +784,31 @@ const Store = {
   getSessionDept() {
     const s = this.getSession()
     return (s && s.dept) || ''
+  },
+  // v114：会话部门缺失/无法识别时，依次从「个人资料缓存（eq_user）」「本机账号表（eq_users）」回填会话。
+  //   与 pullCloudChanges 第 2.5 步配套：云端 → 本机账号记录 → 会话，三级都补一遍。
+  //   为什么需要它：会话部门为空时 chDeptAllowed() 判为「不可参加七天挑战」，
+  //   学员看到的是一句「还未设置所属部门」，但本人其实早就选过部门 —— 只是那台设备上的记录丢了。
+  //   只补空，不覆盖已有值（学员自己改过部门时不动）。返回回填后的部门字符串（'' = 无可回填来源）。
+  repairSessionDept() {
+    try {
+      const s = this.getSession()
+      if (!s || !s.username) return ''
+      const ok = v => (typeof normDept === 'function')
+        ? !!normDept(v)
+        : !!String(v == null ? '' : v).trim()
+      if (ok(s.dept)) return String(s.dept || '')
+      const me = this.getUsers().find(x => x && x.username === s.username)
+      const prof = this.getUser()
+      const cands = [(prof && prof.dept) || '', (me && me.dept) || '']
+      for (let i = 0; i < cands.length; i++) {
+        if (ok(cands[i])) {
+          try { localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(Object.assign({}, s, { dept: cands[i] }))) } catch (e) {}
+          return String(cands[i])
+        }
+      }
+      return ''
+    } catch (e) { return '' }
   },
   logout() {
     // —— 退出前累计本次会话时长 ——
