@@ -123,8 +123,9 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   assert('不包含数据明细分组表头', !usersHtml.includes('col-group-online'))
   assert('不包含登录时长数据列', !usersHtml.includes('登录时长'))
 
-  // 2. 数据看板页（分「线上培训 / 线下课」两个标签；v112 由「线上数据 / 线下课程」改名）
-  console.log('\n2️⃣  renderDashboard（数据看板·线上培训/线下课标签）')
+  // 2. 数据看板页（三分标签：线上培训 / 线下课 / 七天挑战）
+  //    v112 由「线上数据 / 线下课程」改名；v113 把「七天挑战」从线上培训里拆出独立成标签
+  console.log('\n2️⃣  renderDashboard（数据看板·线上培训/线下课/七天挑战三标签）')
   await vm.runInContext('renderDashboard()', sandbox)
   const dashHtml = getEl('page-dashboard').innerHTML
   assert('包含汇总卡片', dashHtml.includes('dashboard-summary'))
@@ -132,10 +133,22 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   //    按钮 id 保持不变（dashSwitchTab 依赖），所以仍断言 id + 新文案。
   assert('包含「线上培训」标签按钮', dashHtml.includes('线上培训') && dashHtml.includes('dashTabBtnOnline'))
   assert('包含「线下课」标签按钮', dashHtml.includes('线下课') && dashHtml.includes('dashTabBtnOffline'))
+  // ⚠️ v113：七天挑战升为第三个平级标签（独立块容器 dashChallengeTabBlock），
+  //    挑战三面板（营次管理 / 开关 / 成绩统计）从线上块搬到这里。标签顺序：线上培训 → 线下课 → 七天挑战。
+  assert('包含「七天挑战」标签按钮', dashHtml.includes('七天挑战') && dashHtml.includes('dashTabBtnChallenge'))
   assert('包含线上块容器', dashHtml.includes('dashOnlineBlock'))
   assert('包含线下块容器', dashHtml.includes('dashOfflineBlock'))
-  assert('默认线上块无隐藏内联样式', !dashHtml.includes('id="dashOnlineBlock" style'))
+  assert('包含七天挑战块容器', dashHtml.includes('dashChallengeTabBlock'))
+  {
+    const iOn = dashHtml.indexOf('id="dashTabBtnOnline"')
+    const iOff = dashHtml.indexOf('id="dashTabBtnOffline"')
+    const iCh = dashHtml.indexOf('id="dashTabBtnChallenge"')
+    assert('三标签顺序：线上培训 → 线下课 → 七天挑战', iOn >= 0 && iOff > iOn && iCh > iOff, `on=${iOn} off=${iOff} ch=${iCh}`)
+  }
+  // ⚠️ v113：线上块现在恒带 style 属性（三块统一写法），但要确认默认渲染为「显示」。
+  assert('默认线上块显示（无 display:none）', !dashHtml.includes('id="dashOnlineBlock" style="display:none"'))
   assert('默认线下块隐藏', dashHtml.includes('id="dashOfflineBlock" style="display:none"'))
+  assert('默认七天挑战块隐藏', dashHtml.includes('id="dashChallengeTabBlock" style="display:none"'))
 
   // 线上块内容（mock 不解析子元素，按字符串区间截取）
   console.log('\n2.1  线上培训块内容')
@@ -145,8 +158,11 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
     const j = html.indexOf(end, i + start.length)
     return j > i ? html.slice(i + start.length, j) : ''
   }
-  const onlineHtml = sliceBetween(dashHtml, '<div id="dashOnlineBlock">', '<div id="dashOfflineBlock"')
-  const offlineHtml = sliceBetween(dashHtml, 'style="display:none">', '<p class="form-hint"')
+  const onlineHtml = sliceBetween(dashHtml, '<div id="dashOnlineBlock"', '<div id="dashOfflineBlock"')
+  const offlineHtml = sliceBetween(dashHtml, '<div id="dashOfflineBlock"', '<div id="dashChallengeTabBlock"')
+  // ⚠️ 切片终点必须用「挑战块之后仍存在的标记」，不能用 <p class="form-hint"。
+  //    挑战三面板自身也是 card，hint 段落（dashChGatePanelHint 等）会先命中 → 切出来是空串（本轮踩过）。
+  const challengeHtml = sliceBetween(dashHtml, '<div id="dashChallengeTabBlock"', '</div>\n    <p class="form-hint"')
   assert('线上块：总用户数统计', onlineHtml.includes('总用户数'))
   assert('线上块：学员数据明细标题', onlineHtml.includes('学员数据明细'))
   assert('线上块：分类进度区块', onlineHtml.includes('dashCatBlock'))
@@ -156,6 +172,10 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   assert('线上块：学员行（张三/李四）', onlineHtml.includes('张三') && onlineHtml.includes('李四'))
   assert('线上块：不含线下完成列', !onlineHtml.includes('线下完成'))
   assert('线上块：不含课程矩阵', !onlineHtml.includes('课程成绩矩阵'))
+  // ⚠️ v113：挑战三面板已从线上块移出（这是本次拆分的核心，反向断言防回退）
+  assert('线上块：不含营次管理面板', !onlineHtml.includes('dashRoundsPanel'))
+  assert('线上块：不含挑战开关面板', !onlineHtml.includes('dashChGate'))
+  assert('线上块：不含挑战统计占位', !onlineHtml.includes('dashChallengeBlock'))
 
   // 线下块内容
   console.log('\n2.2  线下课块内容')
@@ -167,14 +187,33 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   assert('线下块：不含登录时长列', !offlineHtml.includes('登录时长'))
   assert('线下块：不含 perQ 区块', !offlineHtml.includes('perQBlock'))
 
-  // 2.3 标签切换
-  console.log('\n2.3  标签切换')
+  // 七天挑战块内容（v113 新增）
+  console.log('\n2.3  七天挑战块内容')
+  assert('挑战块：营次管理面板', challengeHtml.includes('dashRoundsPanel'))
+  assert('挑战块：挑战开关面板', challengeHtml.includes('dashChGate'))
+  assert('挑战块：挑战统计占位', challengeHtml.includes('dashChallengeBlock'))
+  assert('挑战块：不含线上明细', !challengeHtml.includes('登录时长') && !challengeHtml.includes('perQBlock'))
+  assert('挑战块：不含线下明细', !challengeHtml.includes('课程成绩矩阵'))
+
+  // 2.4 标签切换
+  console.log('\n2.4  标签切换')
   vm.runInContext("dashSwitchTab('offline')", sandbox)
   assert('切到线下：线上块隐藏', getEl('dashOnlineBlock').style.display === 'none')
   assert('切到线下：线下块显示', getEl('dashOfflineBlock').style.display === '')
+  assert('切到线下：挑战块隐藏', getEl('dashChallengeTabBlock').style.display === 'none')
+  vm.runInContext("dashSwitchTab('challenge')", sandbox)
+  assert('切到挑战：挑战块显示', getEl('dashChallengeTabBlock').style.display === '')
+  assert('切到挑战：线上块隐藏', getEl('dashOnlineBlock').style.display === 'none')
+  assert('切到挑战：线下块隐藏', getEl('dashOfflineBlock').style.display === 'none')
+  // 按钮高亮跟随当前标签
+  assert('切到挑战：挑战按钮高亮', getEl('dashTabBtnChallenge').className.includes('btn-primary'))
+  assert('切到挑战：线上按钮降级', getEl('dashTabBtnOnline').className.includes('btn-ghost'))
+  assert('切到挑战：线下按钮降级', getEl('dashTabBtnOffline').className.includes('btn-ghost'))
   vm.runInContext("dashSwitchTab('online')", sandbox)
   assert('切回线上：线上块显示', getEl('dashOnlineBlock').style.display === '')
   assert('切回线上：线下块隐藏', getEl('dashOfflineBlock').style.display === 'none')
+  assert('切回线上：挑战块隐藏', getEl('dashChallengeTabBlock').style.display === 'none')
+  assert('切回线上：线上按钮高亮', getEl('dashTabBtnOnline').className.includes('btn-primary'))
 
   assert('不包含新建账号按钮', !dashHtml.includes('openUserModal'))
   assert('不包含重置密码操作', !dashHtml.includes('resetUserPassword'))

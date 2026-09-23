@@ -643,7 +643,8 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     usersPageTitle: '账号管理',
     usersPageHint: '在此新建 / 重置密码 / 改名 / 删除学员账号；完整学习数据请查看「数据看板」页。',
     dashDetailTitle: '学员数据明细',
-    dashTabOnline: '线上培训', dashTabOffline: '线下课',
+    // v113：看板拆三个标签 —— 七天挑战升为与线上培训 / 线下课并列的独立标签
+    dashTabOnline: '线上培训', dashTabOffline: '线下课', dashTabChallenge: '七天挑战',
     dashOfflineDetail: '学员线下明细',
     dashOfflineEmpty: '暂无线下班级与作业数据，可到「📖 线下课」创建班级并布置作业后查看。',
     allAccountsData: '全部注册账号及学习数据', newAccount: '新增账号',
@@ -1458,7 +1459,7 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     usersPageTitle: 'Account Management',
     usersPageHint: 'Create / reset / rename / delete student accounts here. Full learning data is on the Dashboard page.',
     dashDetailTitle: 'Student Data Details',
-    dashTabOnline: 'Online Training', dashTabOffline: 'Offline Courses',
+    dashTabOnline: 'Online Training', dashTabOffline: 'Offline Courses', dashTabChallenge: '7-Day Challenge',
     dashOfflineDetail: 'Student Offline Details',
     dashOfflineEmpty: 'No offline classes or assignments yet. Create classes in the 📖 Course page.',
     allAccountsData: 'All registered accounts and learning data', newAccount: 'New Account',

@@ -1230,12 +1230,14 @@ function renderPractice() {
 //       房务部/其他部门学员看到的是「不可参加」的说明卡（不可点击），不再是进去后「未开放」的死胡同。
 // v109：营次动态门禁 —— 有资格但本部门在当前营次列表没有专属营次（如酒吧团队/客房送餐，
 //       目前只有标帜/艳中开了营）时，显示「本部门暂无挑战」卡，不再渲染「本部门标题 + 别队营次名」的错位卡。
+// v110：一级部门视角（饮食部）汇总展示其下所有分部门的挑战 —— 卡片列出本视角各期（部门标签 + 期名 + 开放态）。
 function challengeEntryHtml() {
   challengeLoad()
   // v107：部门白名单门禁（管理员豁免）
   const deptOk = typeof chDeptAllowed === 'function' ? chDeptAllowed() : true
   if (!deptOk) return challengeEntryBlockedHtml()
   // v109：本部门暂无专属营次 → 说明卡（管理员切片到无营次部门时同样生效）
+  // v110：判定已按「视角营次列表」——大部门视角其下分部门有营次即不拦（修复「饮食部看不到下属部门挑战」）
   if (typeof chNoRoundForDept === 'function' && chNoRoundForDept()) return challengeEntryNoRoundHtml()
   const doneDays = CHALLENGE_DAYS.filter(d => chDayDone(d.day)).length
   const locked = typeof chOpenLocked === 'function' && chOpenLocked()
@@ -1258,7 +1260,39 @@ function challengeEntryHtml() {
         </div>
         <div style="font-size:22px;color:#9ca3af">›</div>
       </div>
+      ${challengeEntryRoundPreviewHtml()}
     </div>`
+}
+
+// v110：一级部门视角下，入口卡内嵌「下属各部门挑战」预览（两期以上才渲染，与挑战页 chRoundListHtml 同源口径）。
+// 让用户在练习页就能看到「饮食部下有标帜第一期、艳中第一期」而无需进挑战页。
+function challengeEntryRoundPreviewHtml() {
+  try {
+    const list = (typeof chRoundListForView === 'function') ? chRoundListForView() : []
+    if (list.length < 2) return ''
+    const rows = list.map(r => {
+      const st = (typeof roundOpenState === 'function') ? roundOpenState(r, Date.now()) : { state: 'closed' }
+      const depts = (Array.isArray(r && r.depts) ? r.depts : [])
+        .map(d => (typeof deptSlugName === 'function' && deptSlugName(d)) || d)
+        .filter(Boolean)
+      const tags = depts.length
+        ? depts.map(n => `<span style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:999px;padding:1px 8px">🏷️ ${escHtml(n)}</span>`).join(' ')
+        : ''
+      const stateTag = st.state === 'open'
+        ? `<span style="font-size:11px;color:#059669;font-weight:700">● ${t('chRoundOpenTag')}</span>`
+        : st.state === 'upcoming'
+          ? `<span style="font-size:11px;color:#b45309;font-weight:700">⏳ ${t('chRoundUpcomingTag')}</span>`
+          : st.state === 'ended'
+            ? `<span style="font-size:11px;color:#6b7280;font-weight:700">🏁 ${t('chEnded')}</span>`
+            : `<span style="font-size:11px;color:#9ca3af;font-weight:700">🔒 ${t('chNotOpen')}</span>`
+      return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:5px 0">
+        <span style="font-weight:700;font-size:12px">${escHtml(String(r.name || r.id || ''))}</span>${stateTag}${tags}</div>`
+    }).join('')
+    return `<div style="margin-top:10px;padding-top:8px;border-top:1px dashed #fde68a">
+      <p class="form-hint" style="margin:0 0 2px;font-weight:700">📋 ${t('chRoundListTitle', list.length)}</p>
+      ${rows}
+    </div>`
+  } catch (e) { return '' }
 }
 
 // v107：不具备七天挑战部门资格时的说明卡（不可点击，非锁定态 —— 是「不适用」而非「未开放」）。
@@ -3487,20 +3521,24 @@ async function renderUsers() {
 }
 
 // ====== 数据看板页（管理员）======
-// 职责：数据分「线上数据 / 线下课程」两个标签页
-//   线上：登录时长 / 刷题 / 考试 / 定级 / 分类进度 / 每道题正确率
-//   线下：班级作业完成率 / 学员线下明细 / 课程成绩矩阵
-let dashTab = 'online'   // 'online' 线上数据 | 'offline' 线下课程
+// 职责：数据分三个标签页（v113：七天挑战从「线上培训」里拆出来独立成标签）
+//   线上培训：登录时长 / 刷题 / 考试 / 定级 / 分类进度 / 每道题正确率
+//   线下课：班级作业完成率 / 学员线下明细 / 课程成绩矩阵
+//   七天挑战：营次管理 / 开关面板 / 挑战成绩统计（原属线上，v113 拆出）
+let dashTab = 'online'   // 'online' 线上培训 | 'offline' 线下课 | 'challenge' 七天挑战
+const DASH_TABS = [
+  { v: 'online',    btn: 'dashTabBtnOnline',    block: 'dashOnlineBlock',    ico: '🌐', label: 'dashTabOnline' },
+  { v: 'offline',   btn: 'dashTabBtnOffline',   block: 'dashOfflineBlock',   ico: '🏫', label: 'dashTabOffline' },
+  { v: 'challenge', btn: 'dashTabBtnChallenge', block: 'dashChallengeTabBlock', ico: '🏅', label: 'dashTabChallenge' },
+]
 function dashSwitchTab(v) {
   dashTab = v
-  const ob = document.getElementById('dashOnlineBlock')
-  const fb = document.getElementById('dashOfflineBlock')
-  if (ob) ob.style.display = v === 'online' ? '' : 'none'
-  if (fb) fb.style.display = v === 'offline' ? '' : 'none'
-  const bo = document.getElementById('dashTabBtnOnline')
-  const bf = document.getElementById('dashTabBtnOffline')
-  if (bo) bo.className = 'btn btn-sm ' + (v === 'online' ? 'btn-primary' : 'btn-ghost')
-  if (bf) bf.className = 'btn btn-sm ' + (v === 'offline' ? 'btn-primary' : 'btn-ghost')
+  DASH_TABS.forEach(c => {
+    const b = document.getElementById(c.block)
+    if (b) b.style.display = (c.v === v) ? '' : 'none'
+    const btn = document.getElementById(c.btn)
+    if (btn) btn.className = 'btn btn-sm ' + (c.v === v ? 'btn-primary' : 'btn-ghost')
+  })
 }
 // v75：云端存储用量指示条（共享用户数据文档 / 1MB 上限，数据看板顶部）
 function dashStorageBarHtml() {
@@ -3558,12 +3596,6 @@ async function renderDashboard() {
 
     <div id="dashCatBlock"></div>
 
-    <div id="dashRoundsPanel">${dashRoundsPanelHtml()}</div>
-
-    <div id="dashChGate">${dashChGatePanelHtml()}</div>
-
-    <div id="dashChallengeBlock"></div>
-
     <h2 style="margin:24px 0 12px;font-size:18px">📊 ${t('dashDetailTitle')}</h2>
     <div class="card" style="padding:0;overflow-x:auto">
       <table class="admin-table dash-table">
@@ -3612,15 +3644,24 @@ async function renderDashboard() {
          <div>${_courseMatrices(courseDoc, _userInfoMapFromRows(rows))}</div>`
       : `<div class="card" style="padding:32px;text-align:center;color:#9ca3af;margin-top:16px">${t('dashOfflineEmpty')}</div>`}`
 
+  // ---- 七天挑战块（v113：原在「线上培训」内，现独立成标签；三个面板保持原相对顺序）----
+  //   顺序「营次管理 → 开关面板 → 挑战成绩统计」被 v76 / v77 / v107 的历史断言约束，不要调换。
+  const challengeHtml = `
+    <div id="dashRoundsPanel">${dashRoundsPanelHtml()}</div>
+
+    <div id="dashChGate">${dashChGatePanelHtml()}</div>
+
+    <div id="dashChallengeBlock"></div>`
+
   el.innerHTML = `
     ${adminWarnCards(cloudRows, courseS, hadChanges, sessionChanged)}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
-      <button class="btn btn-sm ${dashTab === 'online' ? 'btn-primary' : 'btn-ghost'}" id="dashTabBtnOnline" onclick="dashSwitchTab('online')">🌐 ${t('dashTabOnline')}</button>
-      <button class="btn btn-sm ${dashTab === 'offline' ? 'btn-primary' : 'btn-ghost'}" id="dashTabBtnOffline" onclick="dashSwitchTab('offline')">🏫 ${t('dashTabOffline')}</button>
+      ${DASH_TABS.map(c => `<button class="btn btn-sm ${dashTab === c.v ? 'btn-primary' : 'btn-ghost'}" id="${c.btn}" onclick="dashSwitchTab('${c.v}')">${c.ico} ${t(c.label)}</button>`).join('\n      ')}
     </div>
     ${dashStorageBarHtml()}
-    <div id="dashOnlineBlock">${onlineHtml}</div>
+    <div id="dashOnlineBlock" style="${dashTab === 'online' ? '' : 'display:none'}">${onlineHtml}</div>
     <div id="dashOfflineBlock" style="${dashTab === 'offline' ? '' : 'display:none'}">${offlineHtml}</div>
+    <div id="dashChallengeTabBlock" style="${dashTab === 'challenge' ? '' : 'display:none'}">${challengeHtml}</div>
     <p class="form-hint" style="margin-top:12px">${t('dashHint')}</p>
   `
   renderDashCatBlock()

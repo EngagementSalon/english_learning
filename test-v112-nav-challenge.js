@@ -27,7 +27,68 @@ const htmlSrc = fs.readFileSync(path.join(D, 'index.html'), 'utf-8')
 const appSrc = fs.readFileSync(path.join(D, 'app.js'), 'utf-8')
 const i18nSrc = fs.readFileSync(path.join(D, 'i18n.js'), 'utf-8')
 
+// ---------- 独立整载沙箱：真跑 renderDashboard，取看板渲染结果 ----------
+// ⚠️ 为什么不复用上面的轻量沙箱：轻量沙箱只载 i18n，没有 Store / app.js，
+//    重复 runInContext(app.js) 会撞上「已声明同名 const」而报错。两个沙箱各管各的。
+// ⚠️ renderDashboard 是 async，且内部有 await。lll 不能在同步循环里空转等它 ——
+//    空转会阻塞事件循环，await 的后续永远不执行，拿到的是只有一句「加载中」的 146 字节
+//    （本轮踩过）。正确做法：把整段断言包进 async 主流程里 await 它。
+let dashRenderedHtml = ''
+async function buildDashRenderedHtml() {
+  const els = {}
+  const mk = () => ({
+    innerHTML: '', style: {}, dataset: {},
+    textContent: '', className: '', title: '', placeholder: '', value: '', readOnly: false, disabled: false,
+    addEventListener() {}, removeEventListener() {},
+    querySelector() { return null }, querySelectorAll() { return [] },
+    classList: { toggle() {}, add() {}, remove() {} },
+    appendChild() {}, remove() {},
+  })
+  const getE = id => els[id] || (els[id] = mk())
+  const rows = [
+    { username: 'admin', name: '管理员', dept: '', role: 'admin', loginCount: 5, loginSec: 3600,
+      practiceCount: 10, practiceCorrect: 8, practiceTotal: 10, examCount: 2, examScoreSum: 180,
+      examBest: 95, examPassCount: 2, placementLevel: null, lastActive: Date.now(), perQ: {} },
+  ]
+  const sb = {
+    localStorage: {
+      store: { eq_course_only_v43: '1' },
+      getItem(k) { return this.store[k] || null },
+      setItem(k, v) { this.store[k] = String(v) },
+      removeItem(k) { delete this.store[k] },
+    },
+    console,
+    window: { addEventListener() {}, scrollTo() {}, speechSynthesis: { cancel() {}, speak() {} }, SpeechSynthesisUtterance: function () {} },
+    document: { getElementById: getE, querySelector: () => null, querySelectorAll: () => [], createElement: () => mk(), body: { appendChild() {} }, title: '', addEventListener() {} },
+    alert() {}, confirm() { return true }, prompt() { return null },
+    setTimeout, clearTimeout, setInterval, clearInterval,
+    Date, JSON, Math, String, Number, Array, Object, Boolean,
+    CloudSync: { status: 'online', onStatus() {}, enqueue() {}, recalcCloudPlacementLevels: async () => ({}), getDashboardData: async () => JSON.parse(JSON.stringify(rows)) },
+    CourseStore: { status: 'online', getDoc: async () => ({ v: 1, classes: [] }) },
+    courseMemberCell: u => `<strong>${u}</strong>`,
+  }
+  sb.globalThis = sb
+  vm.createContext(sb)
+  try {
+    vm.runInContext(i18nSrc, sb)
+    vm.runInContext(fs.readFileSync(path.join(D, 'bank-data.js'), 'utf-8'), sb)
+    vm.runInContext(fs.readFileSync(path.join(D, 'store.js'), 'utf-8'), sb)
+    vm.runInContext(appSrc, sb)
+    const S = vm.runInContext('Store', sb)
+    S.getSession = () => ({ id: 1, username: 'admin', name: '管理员', role: 'admin' })
+    S.getUser = () => ({ name: '管理员', dept: '' })
+    S.pullCloudChanges = async () => ({ ok: true, applied: { roleChanged: [], renamed: [], deleted: [], added: [], sessionRoleSync: false } })
+    await vm.runInContext('renderDashboard()', sb)
+    return getE('page-dashboard').innerHTML
+  } catch (e) {
+    console.log('  ⚠️ 整载沙箱渲染失败（不影响其他断言）：', e.message)
+    return ''
+  }
+}
+
 // ---------- 沙箱：只载 i18n（取 t() 与 renderStaticText） ----------
+// ⚠️ v113 起本套件额外需要「看板渲染结果」（断言按钮 id 真被渲染出来），
+//    所以下面再建一个【独立】的整载沙箱，不污染这个轻量沙箱（避免重复声明）。
 const elements = {}
 function mkEl() {
   return {
@@ -68,6 +129,8 @@ sandbox.globalThis = sandbox
 vm.createContext(sandbox)
 vm.runInContext(i18nSrc, sandbox)
 const run = code => vm.runInContext(code, sandbox)
+
+;(async () => {
 
 console.log('\n1. 顶栏结构（index.html）')
 {
@@ -153,8 +216,17 @@ console.log('\n5. 源码护栏：「线上数据 / 线下课程」标签已彻�
   assert('i18n 不再有 dashTabOffline: \'线下课程\''.replace(/'$/, ''), !/dashTabOffline:\s*'线下课程'/.test(i18nSrc))
   assert('i18n 不再有 dashTabOnline: \'Online Data\'', !/dashTabOnline:\s*'Online Data'/.test(i18nSrc))
   // 看板按钮 id 保持不变（改名不影响接线，dashSwitchTab 依赖这两个 id）
-  assert('看板按钮 id dashTabBtnOnline 仍在', appSrc.includes('id="dashTabBtnOnline"'))
-  assert('看板按钮 id dashTabBtnOffline 仍在', appSrc.includes('id="dashTabBtnOffline"'))
+  // ⚠️ v113 反转：v112 时这是 id 字面量，可从 appSrc 直接 includes 检出；
+  //    v113 把标签泛化成 DASH_TABS 配置数组后，按钮 id 只出现在配置里（渲染期才拼进 HTML），
+  //    实现细节变了，但「id 契约不变」这层语义必须继续守住。
+  //    因此改为两段式断言：① DASH_TABS 里声明了这两个 id（配置层）
+  //                      ② renderDashboard 渲染结果里确实带出这两个 id（行为层，真跑）
+  const tabsCfg = (appSrc.match(/const DASH_TABS = \[[\s\S]{0,700}?\]/) || [''])[0]
+  assert('DASH_TABS 声明 dashTabBtnOnline', tabsCfg.includes("btn: 'dashTabBtnOnline'"))
+  assert('DASH_TABS 声明 dashTabBtnOffline', tabsCfg.includes("btn: 'dashTabBtnOffline'"))
+  dashRenderedHtml = await buildDashRenderedHtml()
+  assert('看板渲染出 dashTabBtnOnline 按钮', dashRenderedHtml.includes('id="dashTabBtnOnline"'), 'len=' + dashRenderedHtml.length)
+  assert('看板渲染出 dashTabBtnOffline 按钮', dashRenderedHtml.includes('id="dashTabBtnOffline"'))
   assert('dashSwitchTab 仍切两个 block', appSrc.includes('dashOnlineBlock') && appSrc.includes('dashOfflineBlock'))
 }
 
@@ -182,3 +254,9 @@ console.log('\n7. 挑战页对无资格部门仍给出说明（不会因新增�
 
 if (testFailed) { console.log('\n❌ 存在失败断言'); process.exit(1) }
 console.log('\n✅ 全部通过')
+// ⚠️ 必须显式 process.exit(0)：本套件把断言包在 async IIFE 里，而整载沙箱注入的
+//    setInterval/setTimeout 等句柄会让事件循环一直活着 → 进程不退出 → 被 60s SIGTERM 杀掉，
+//    在 _run-all.js（execFileSync）眼里就是「失败」，尽管断言全过（本轮踩过这个坑）。
+process.exit(0)
+
+})()
