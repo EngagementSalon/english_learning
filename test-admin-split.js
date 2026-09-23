@@ -123,20 +123,22 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   assert('不包含数据明细分组表头', !usersHtml.includes('col-group-online'))
   assert('不包含登录时长数据列', !usersHtml.includes('登录时长'))
 
-  // 2. 数据看板页（分「线上数据 / 线下课程」两个标签）
-  console.log('\n2️⃣  renderDashboard（数据看板·线上/线下标签）')
+  // 2. 数据看板页（分「线上培训 / 线下课」两个标签；v112 由「线上数据 / 线下课程」改名）
+  console.log('\n2️⃣  renderDashboard（数据看板·线上培训/线下课标签）')
   await vm.runInContext('renderDashboard()', sandbox)
   const dashHtml = getEl('page-dashboard').innerHTML
   assert('包含汇总卡片', dashHtml.includes('dashboard-summary'))
-  assert('包含「线上数据」标签按钮', dashHtml.includes('线上数据') && dashHtml.includes('dashTabBtnOnline'))
-  assert('包含「线下课程」标签按钮', dashHtml.includes('线下课程') && dashHtml.includes('dashTabBtnOffline'))
+  // ⚠️ v112：标签文案由「线上数据」改为「线上培训」（与「线下课」形成对照）。
+  //    按钮 id 保持不变（dashSwitchTab 依赖），所以仍断言 id + 新文案。
+  assert('包含「线上培训」标签按钮', dashHtml.includes('线上培训') && dashHtml.includes('dashTabBtnOnline'))
+  assert('包含「线下课」标签按钮', dashHtml.includes('线下课') && dashHtml.includes('dashTabBtnOffline'))
   assert('包含线上块容器', dashHtml.includes('dashOnlineBlock'))
   assert('包含线下块容器', dashHtml.includes('dashOfflineBlock'))
   assert('默认线上块无隐藏内联样式', !dashHtml.includes('id="dashOnlineBlock" style'))
   assert('默认线下块隐藏', dashHtml.includes('id="dashOfflineBlock" style="display:none"'))
 
   // 线上块内容（mock 不解析子元素，按字符串区间截取）
-  console.log('\n2.1  线上数据块内容')
+  console.log('\n2.1  线上培训块内容')
   function sliceBetween(html, start, end) {
     const i = html.indexOf(start)
     if (i < 0) return ''
@@ -156,7 +158,7 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   assert('线上块：不含课程矩阵', !onlineHtml.includes('课程成绩矩阵'))
 
   // 线下块内容
-  console.log('\n2.2  线下课程块内容')
+  console.log('\n2.2  线下课块内容')
   assert('线下块：班级数汇总卡', offlineHtml.includes('班级数'))
   assert('线下块：学员线下明细标题', offlineHtml.includes('学员线下明细'))
   assert('线下块：线下完成列', offlineHtml.includes('线下完成'))

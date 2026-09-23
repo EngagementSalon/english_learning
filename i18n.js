@@ -72,6 +72,8 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     // 导航
     navHome: '首页', navPlacement: '🎯 水平测试', navPractice: '练习', navExam: '考试',
     navProgress: '进度', navAdmin: '题库管理', navUsers: '👥 账号管理', navDashboard: '📊 数据看板', navTraining: '🍽️ 培训测试',
+    // v112：七天挑战升为顶栏独立分栏（与线上培训 / 线下课并列）
+    navChallengeCh: '🏅 七天挑战',
     roleStudent: '学员', roleAdmin: '管理员', notSet: '未设置',
     logout: '退出', confirmLogout: '确定退出登录吗？',
     currentLevelTitle: '当前等级：',
@@ -641,7 +643,7 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     usersPageTitle: '账号管理',
     usersPageHint: '在此新建 / 重置密码 / 改名 / 删除学员账号；完整学习数据请查看「数据看板」页。',
     dashDetailTitle: '学员数据明细',
-    dashTabOnline: '线上数据', dashTabOffline: '线下课程',
+    dashTabOnline: '线上培训', dashTabOffline: '线下课',
     dashOfflineDetail: '学员线下明细',
     dashOfflineEmpty: '暂无线下班级与作业数据，可到「📖 线下课」创建班级并布置作业后查看。',
     allAccountsData: '全部注册账号及学习数据', newAccount: '新增账号',
@@ -893,6 +895,7 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
 
     navHome: 'Home', navPlacement: '🎯 Placement', navPractice: 'Practice', navExam: 'Exam',
     navProgress: 'Progress', navAdmin: 'Question Bank', navUsers: '👥 Accounts', navDashboard: '📊 Dashboard', navTraining: '🍽️ Training',
+    navChallengeCh: '🏅 7-Day Challenge',
     roleStudent: 'Student', roleAdmin: 'Admin', notSet: 'Not set',
     logout: 'Log out', confirmLogout: 'Are you sure you want to log out?',
     currentLevelTitle: 'Current level: ',
@@ -1455,7 +1458,7 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     usersPageTitle: 'Account Management',
     usersPageHint: 'Create / reset / rename / delete student accounts here. Full learning data is on the Dashboard page.',
     dashDetailTitle: 'Student Data Details',
-    dashTabOnline: 'Online Data', dashTabOffline: 'Offline Courses',
+    dashTabOnline: 'Online Training', dashTabOffline: 'Offline Courses',
     dashOfflineDetail: 'Student Offline Details',
     dashOfflineEmpty: 'No offline classes or assignments yet. Create classes in the 📖 Course page.',
     allAccountsData: 'All registered accounts and learning data', newAccount: 'New Account',
@@ -1692,6 +1695,8 @@ function renderStaticText() {
   setTitle('authHint', 'adminHint')
   setTitle('brandText', 'appTitle')
   setTitle('navHome', 'navHome')
+  // v112：七天挑战升为顶栏独立分栏（键名 navChallengeCh，避免与旧 navTraining 混淆）
+  setTitle('navChallenge', 'navChallengeCh')
   setTitle('navPlacement', 'navPlacement')
   setTitle('navPractice', 'navPractice')
   setTitle('navExam', 'navExam')

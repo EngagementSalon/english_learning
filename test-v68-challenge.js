@@ -463,8 +463,11 @@ const DAY = 86400000
       keys.filter(k => !new RegExp('\\b' + k + '\\s*:').test(zhPart)).join(','))
     assert(`挑战+看板 ${keys.length} 键 en 区全部存在`, keys.every(k => new RegExp('\\b' + k + '\\s*:').test(enPart)),
       keys.filter(k => !new RegExp('\\b' + k + '\\s*:').test(enPart)).join(','))
-    assert('navChallenge 键已删除（zh/en）', !/\bnavChallenge\s*:/.test(zhPart) && !/\bnavChallenge\s*:/.test(enPart))
-    assert("setTitle('navChallenge') 行已删除", !i18nSrc.includes("setTitle('navChallenge'"))
+    // ⚠️ v112 反转：v70 曾把「挑战不再是独立导航项」写进契约（navChallenge 键删除、setTitle 删除）。
+    //    用户 2026-09-23 要求「七天挑战在最顶上单独开一个分栏目」→ 该契约作废。
+    //    现在断言的是**新契约**：顶栏确有独立分栏，且 i18n 键为 navChallengeCh（与旧键名区分）。
+    assert('v112：navChallengeCh 键 zh/en 成对存在', /\bnavChallengeCh\s*:/.test(zhPart) && /\bnavChallengeCh\s*:/.test(enPart))
+    assert("v112：setTitle('navChallenge') 接线已就位", i18nSrc.includes("setTitle('navChallenge'"))
     assert('t("chTomorrow") 含「明日」', vm.runInContext('t("chTomorrow")', sb).includes('明日'))
     assert('t("chProgressQ",60) 含 /210', vm.runInContext('t("chProgressQ", 60)', sb).includes('210'))
     assert('t("chReviewRound",2) 可调用', vm.runInContext('t("chReviewRound", 2)', sb).includes('2'))
@@ -487,7 +490,12 @@ const DAY = 86400000
   console.log('\n[8] 静态接线')
   {
     const idx = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf-8')
-    assert('nav 已无挑战独立项', !idx.includes('data-page="challenge"'))
+    // ⚠️ v112 反转：原为「nav 已无挑战独立项」（v70 契约）。用户要求挑战升为顶栏独立分栏 → 契约作废。
+    //    新契约：顶栏有 data-page="challenge" 的 nav-item，且位于首页之后（"最顶上"）。
+    const iHome = idx.indexOf('id="navHome"')
+    const iCh = idx.indexOf('data-page="challenge"')
+    assert('v112：nav 有挑战独立项', iCh > 0)
+    assert('v112：挑战项排在首页之后（最顶上）', iHome >= 0 && iCh > iHome, `home=${iHome} ch=${iCh}`)
     assert('page-challenge 容器存在', idx.includes('id="page-challenge"'))
     assert('challenge.js 已引入', idx.includes('<script src="challenge.js?v='))
     const appSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8')
