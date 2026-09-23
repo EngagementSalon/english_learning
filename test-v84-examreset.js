@@ -98,6 +98,9 @@ function makeChSandbox(state, examOpen) {
   vm.runInContext('let chs = null', sb)
   vm.runInContext(`const Store = { trackPractice() {}, reportChallengeStage() {} }`, sb)
   vm.runInContext('function challengeSave() {}', sb)
+  // v111：chStageRowHtml 新增 chIsHardRound() 依赖（进阶期标签）→ 沙箱同步注入
+  //（chIsHardRound 读 chRoundSlug/chCurrentRound，本沙箱无营次 → 自然回落 false = 第一期行为）
+  vm.runInContext('function chIsHardRound() { return false }', sb)
   ;['challengeStageMeta', 'challengeStageInfo', 'challengeKindOf', 'chStageRec', 'chStageDone', 'chStageCleared',
     'chStageCounted', 'chDayDone', 'chDayLastDoneAt', 'chDayUnlocked', 'chStageUnlocked', 'chStageScore',
     'chIsFinalExam', 'chFinalExamLocked', 'chExamEarlyOpen', 'chOpenLocked', 'chOpenEverOpened', 'chStageRowHtml', 'chClearExamStageRecs',

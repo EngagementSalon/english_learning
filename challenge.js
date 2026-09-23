@@ -41,12 +41,22 @@ const CHALLENGE_DAYS = [
 // 挑战总题量（不含次日额外错题复习；进度条分母）
 const CHALLENGE_TOTAL = CHALLENGE_DAYS.reduce((s, d) => s + d.stages.reduce((x, y) => x + y.count, 0), 0)   // 210
 // 练习序列难度配比 [难度1, 难度2, 难度3]，与各天 practice 阶段一一对应（10/30/30/30/30/30/10，共 170 题）。
-// 合计 82/82/6，均在题库容量 408/252/24 内；Day1 均值 1.0 → Day7 均值 2.2，难度逐日递增。
+// 第一期合计 82/82/6，均在题库容量 374/235/24 内；Day1 均值 1.0 → Day7 均值 2.2，难度逐日递增。
 const CHALLENGE_DIFF_PLAN = [
   [10, 0, 0], [24, 6, 0], [19, 11, 0], [14, 16, 0], [9, 20, 1], [5, 23, 2], [1, 6, 3],
 ]
+// v111：第二期及以后的练习配比 —— 第一期是「摸底巩固」，第二期起是「进阶复训」，
+// 难度2/3 占比显著提高（逐日均值 1.30 → 2.30，对比第一期 1.00 → 2.20），且保持逐日递增。
+// 合计 37/127/6 = 170，仍在本部门题库容量 374/235/24 内。
+// 注意：Day1 只留 3 道难度1（30%），学员开营第一天就要直面难度2；Day6 起不再出难度1。
+const CHALLENGE_DIFF_PLAN_HARD = [
+  [7, 3, 0], [14, 16, 0], [9, 21, 0], [5, 25, 0], [2, 27, 1], [0, 28, 2], [0, 7, 3],
+]
 // 水平测试分层随机配比：难度1×10 + 难度2×7 + 难度3×3 = 20 题（保证测试覆盖全部难度）
 const CHALLENGE_TEST_PLAN = [10, 7, 3]
+// v111：第二期及以后的考试配比 —— 难度1 减半、难度2/3 加倍（均值 1.65 → 2.35）。
+// 合计 20 题不变（考试题量恒定，只调难度结构），仍在本部门题库容量内。
+const CHALLENGE_TEST_PLAN_HARD = [5, 10, 5]
 
 // v89：当前学员所属分部门（'dining/bar' 等 slug）；管理员/其他部门返回 ''（=不限部门，看全库）
 // v97：管理员跟随练习页「题目部门」切片 —— 切艳中即以艳中视角看挑战（标题/题库/营次/进度整体切换），
@@ -91,6 +101,26 @@ function chBankIdSet() {
   const set = new Set()
   chBankQuestions().forEach(q => set.add(String(q.id)))
   return set
+}
+
+// ====== v111：按营次区分难度档（第二期及以后「略难」）======
+// 判定口径与 chUserSeed 同源：chRoundSlug(chCurrentRound()) !== '第一期' 即视为进阶期。
+// 只读营次、不引入新依赖 → 可安全被 challengePool / challengeStratifiedDraw 调用。
+// 缺函数兜底（extractFn 沙箱 / 部分加载）→ 回落第一期基础档，行为与 v110 完全一致。
+function chIsHardRound() {
+  try {
+    if (typeof chRoundSlug !== 'function') return false        // 沙箱缺函数 → 视作第一期（保守）
+    const rid = (typeof chCurrentRound === 'function') ? chCurrentRound() : '第一期'
+    return chRoundSlug(rid) !== '第一期'
+  } catch (e) { return false }
+}
+// v111：练习序列难度配比（按营次取）
+function chDiffPlan() {
+  return chIsHardRound() ? CHALLENGE_DIFF_PLAN_HARD : CHALLENGE_DIFF_PLAN
+}
+// v111：考试（水平测试 / 期末考试）分层配比（按营次取）
+function chTestPlan() {
+  return chIsHardRound() ? CHALLENGE_TEST_PLAN_HARD : CHALLENGE_TEST_PLAN
 }
 
 // v89：挑战标题 —— 有分部门时用「<部门>七天英文挑战」，否则回退通用标题
@@ -305,8 +335,10 @@ function challengePool() {
   })
   const out = []
   const cur = { 1: 0, 2: 0, 3: 0 }
-  for (const plan of CHALLENGE_DIFF_PLAN) {
-    ;[[plan[0], 1], [plan[1], 2], [plan[2], 3]].forEach(([n, d]) => {
+  // v111：配比按营次取（第二期及以后用 CHALLENGE_DIFF_PLAN_HARD，难度2/3 占比更高）
+  const plan = (typeof chDiffPlan === 'function') ? chDiffPlan() : CHALLENGE_DIFF_PLAN
+  for (const p of plan) {
+    ;[[p[0], 1], [p[1], 2], [p[2], 3]].forEach(([n, d]) => {
       for (let k = 0; k < n; k++) {
         const q = buckets[d][cur[d]++]
         if (q) out.push(q)
@@ -331,8 +363,9 @@ function challengeStageMeta() {
 function challengeStageInfo(day, si) {
   return challengeStageMeta().find(x => x.day === day && x.si === si)
 }
-// 分层随机抽题核心（v80 重构）：从给定题源按 CHALLENGE_TEST_PLAN 分层随机（难度1×10 + 难度2×7 + 难度3×3）
-// 抽 total 题（id 去重，库存不足时自动少抽），选项重洗。
+// 分层随机抽题核心（v80 重构）：从给定题源按分层配比随机抽 total 题
+//（v111：配比按营次取 —— 第一期 难度1×10 + 难度2×7 + 难度3×3；
+//  第二期及以后 难度1×5 + 难度2×10 + 难度3×5，明显更偏难）。id 去重，库存不足时自动少抽，选项重洗。
 function challengeStratifiedDraw(source, total) {
   const seen = new Set()
   const buckets = { 1: [], 2: [], 3: [] }
@@ -345,13 +378,14 @@ function challengeStratifiedDraw(source, total) {
     }
   }
   const out = []
+  const plan = (typeof chTestPlan === 'function') ? chTestPlan() : CHALLENGE_TEST_PLAN
   ;[1, 2, 3].forEach((d, i) => {
     const b = buckets[d].slice()
     for (let k = b.length - 1; k > 0; k--) {
       const j = Math.floor(Math.random() * (k + 1))
       const tmp = b[k]; b[k] = b[j]; b[j] = tmp
     }
-    for (let k = 0; k < CHALLENGE_TEST_PLAN[i] && out.length < total && k < b.length; k++) out.push(b[k])
+    for (let k = 0; k < plan[i] && out.length < total && k < b.length; k++) out.push(b[k])
   })
   return out.map(shuffleOptions)
 }
@@ -363,14 +397,19 @@ function challengeRandomQuestions(total) {
 // v80：考试题目出自本人已刷过的练习题——题源 = 个人练习序列中「已完成练习阶段」覆盖的前缀
 //（线性解锁 → 已完成阶段恰为个人序列的前缀），从中分层随机抽 20 题；
 // Day1 摸底时还没有已刷题（前缀不足一场考试）→ 回退全库随机。
+// v111：第二期及以后的考试**先塞入本人第一期的错题**（challengeTestWithWrongQuestions），
+//   再用上述题源补齐到 20 题 —— 用户口径「每个人要有自己第一期的错题在里面」。
+//   第一期行为完全不变（仍是纯分层随机），保证老学员第一期成绩可复现。
 function challengeTestQuestions() {
   const pool = challengePool()
   let k = 0
   challengeStageMeta().forEach(m => {
     if (m.kind === 'practice' && chStageDone(m.day, m.si)) k = Math.max(k, m.start + m.count)
   })
+  const source = (k < 20) ? chBankQuestions() : pool.slice(0, k)
+  if (chIsHardRound()) return challengeTestWithWrongQuestions(source, 20)
   if (k < 20) return challengeRandomQuestions(20)
-  return challengeStratifiedDraw(pool.slice(0, k), 20)
+  return challengeStratifiedDraw(source, 20)
 }
 // 前一天所有环节的错题（v72）：汇总 stages[].wrong（qid 去重）→ 取回题目 → 选项重洗。
 // 旧进度记录无 wrong 字段时返回空数组（兼容 v71 及更早的已完成阶段）。
@@ -395,7 +434,63 @@ function chPrevDayWrongQuestions(prevDay) {
   })
   return out
 }
-// 第 N 天第 si 阶段题目：
+// v111：读取**上一营次（第一期）**的全部错题 —— 第二期考试的「专属错题」来源。
+// 与 chPrevDayWrongQuestions 的区别：后者读**当前营次**进度里前一天的 stages[].wrong；
+//   本函数读**另一营次的存档键**（第一期固定 eq_challenge_v2），与当前营次进度互不干扰。
+// 口径：
+//   · 汇总第一期存档里每一天每个阶段的 stages[].wrong（qid 去重）
+//   · 按当前部门题库过滤（换部门后旧错题不再复现，与 v89 一致）
+//   · 用 Store.getQuestion 取回题干，选项重洗（答案位置不固定）
+//   · 旧存档无 wrong 字段 / 未参加过第一期 / 存档缺失 → 返回 []（第二期照常可考，只是无专属错题）
+function chPrevRoundWrongQuestions() {
+  const out = []
+  try {
+    let raw = null
+    try { raw = JSON.parse(localStorage.getItem(CHALLENGE_KEY) || 'null') } catch (e) { raw = null }
+    if (!raw || typeof raw !== 'object' || !raw.days) return out
+    const bankIds = chBankIdSet()
+    const seen = new Set()
+    Object.keys(raw.days).forEach(dayK => {
+      const d = raw.days[dayK]
+      if (!d || !d.stages) return
+      Object.keys(d.stages).forEach(siK => {
+        const r = d.stages[siK]
+        const ws = r && Array.isArray(r.wrong) ? r.wrong : []
+        ws.forEach(qid => {
+          const k = String(qid)
+          if (seen.has(k)) return
+          if (bankIds.size && !bankIds.has(k)) return   // 已不属于本部门题库 → 跳过
+          seen.add(k)
+          const q = Store.getQuestion(Number(k)) || Store.getQuestion(k)
+          if (q) out.push(shuffleOptions(q))
+        })
+      })
+    })
+  } catch (e) { return [] }
+  return out
+}
+// v111：第二期考试题源 = 本人第一期错题 + 分层随机补齐，凑满一场考试的题量。
+// 目标：让每个人第二期的考试**一定包含自己第一期的错题**（用户口径：「每个人要有自己第一期的错题在里面」）。
+//   · 错题全部前置（学员一进考场就遇到自己的薄弱题）
+//   · 不足 total 题时用当前营次分层随机题补齐（题源 = 本人已刷题前缀，同 v80 口径）
+//   · 错题数已 ≥ total 时只取前 total 道（避免考试无限长）；错题为空 → 退化为纯分层随机
+//   · qid 去重（错题与补齐题可能撞题）
+function challengeTestWithWrongQuestions(source, total) {
+  const wrong = chPrevRoundWrongQuestions()
+  const out = []
+  const seen = new Set()
+  const push = q => {
+    const k = String(q && q.id)
+    if (!k || k === 'undefined' || seen.has(k)) return
+    seen.add(k)
+    out.push(q)
+  }
+  wrong.forEach(push)
+  if (out.length < total) {
+    challengeStratifiedDraw(source || chBankQuestions(), total).forEach(push)
+  }
+  return out.slice(0, total)
+}
 //   test → 从本人已刷题（v80；Day1 摸底尚无已刷题时回退全库）分层随机抽 20 题；
 //   practice → 本人专属序列切片（v79 人手一套）+ （Day N≥2 首环节）追加前一天错题（额外，不占配额）。
 //   选项顺序每次进入重洗，答案位置不固定。
@@ -1091,6 +1186,7 @@ function renderChallenge() {
   el.innerHTML = `
     ${chResetBanner}
     ${chRoundListHtml()}
+    ${chHardRoundHtml()}
     ${chRoundBar}
     ${chClosedBanner}
     ${chProgressHtml()}
@@ -1185,6 +1281,46 @@ function chRoundListHtml() {
   } catch (e) { return '' }
 }
 
+// ====== v111：进阶期提示卡（第二期及以后）======
+// 用户口径：「第二期难度比第一期略难 + 每个人要有自己第一期的错题在里面」。
+// 学员需要**看见**这件事，否则会以为题目出错了。卡片说明：难度结构变化 + 已纳入的第一期错题数。
+//   · 仅进阶期（chIsHardRound）渲染；第一期返回 ''（老学员界面零变化）
+//   · 错题数实时从 localStorage 第一期存档统计（与 challengeTestWithWrongQuestions 同源）
+//   · 未参加过第一期 / 无错题 → 仍显示「难度提升」说明，但隐藏错题条数
+function chHardRoundHtml() {
+  try {
+    if (typeof chIsHardRound !== 'function' || !chIsHardRound()) return ''
+    // 展示营次**名称**（'第二期'）而非 id（'r2'）：学员看得懂的是名称。
+    // 优先取本部门当前营次记录的 name，取不到时回落 id，再回落空。
+    let cur = ''
+    try {
+      const rec = (typeof chRoundRecForDept === 'function') ? chRoundRecForDept() : null
+      if (rec && (rec.name || rec.id)) cur = String(rec.name || rec.id)
+      if (!cur && typeof chRoundListForView === 'function') {
+        const list = chRoundListForView()
+        if (list.length) {
+          const last = list[list.length - 1]
+          cur = String((last && (last.name || last.id)) || '')
+        }
+      }
+      if (!cur && typeof chCurrentRound === 'function') cur = String(chCurrentRound())
+    } catch (e) { cur = '' }
+    const n = (typeof chPrevRoundWrongQuestions === 'function') ? chPrevRoundWrongQuestions().length : 0
+    const wrongLine = n > 0
+      ? `<div style="font-size:12px;color:#b45309;font-weight:700;margin-top:4px">${t('chRound1WrongTitle', n)}</div>`
+      : ''
+    return `
+      <div class="card" style="margin-bottom:16px;border:2px solid #fcd34d;background:#fffbeb">
+        <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+          <h3 style="margin:0">🔥 ${t('chHardRoundTitle')}</h3>
+          ${cur ? `<span style="font-size:11px;background:#fef3c7;color:#b45309;border:1px solid #fde68a;border-radius:999px;padding:1px 8px">${escHtml(cur)}</span>` : ''}
+        </div>
+        <p class="form-hint" style="margin:6px 0 0">${t('chHardRoundHint')}</p>
+        ${wrongLine}
+      </div>`
+  } catch (e) { return '' }
+}
+
 function chDayBlockHtml(cfg) {
   const done = chDayDone(cfg.day)
   const unlocked = chDayUnlocked(cfg.day)
@@ -1245,6 +1381,7 @@ function chStageRowHtml(day, si, s) {
         ${rec && !isTest ? `<span style="font-size:12px;color:#059669;margin-left:8px">✓ ${rec.correct}/${rec.total}</span>` : ''}
         ${chStageCleared(day, si) ? `<span style="font-size:12px;color:#6366f1;margin-left:8px">🔁 ${t('chResetExamRetake')}</span>` : ''}
         ${!done && isTest && day === 7 && chExamEarlyOpen() ? `<span style="font-size:12px;color:#059669;margin-left:8px">${t('chExamEarlyTag')}</span>` : ''}
+        ${!done && isTest && chIsHardRound() ? `<span style="font-size:12px;color:#b45309;margin-left:8px;font-weight:700">${t('chHardRoundTag', 20)}</span>` : ''}
       </div>
       ${right}
     </div>`
