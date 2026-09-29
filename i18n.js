@@ -771,6 +771,8 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     dashRoundNameLabel: '名称',
     dashRoundWindowLabel: '开放时间',
     dashRoundStatusLabel: '状态',
+    // v118：开关并入营次表后的列头说明（列名复用既有 dashChOpenTitle/dashChExamTitle）
+    dashRoundSwitchHint: '「挑战」「考试」两列为每个营次各自的开关，互不影响。顺序：先「设为当前」→ 再「开放挑战」→ 学员才能答题；第 7 天考试再单独「开放考试」。',
     dashRoundOpsLabel: '操作',
     dashRoundOpenTag: '进行中',
     dashRoundUpcomingTag: '未开始',
@@ -1620,6 +1622,8 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     dashRoundNameLabel: 'Name',
     dashRoundWindowLabel: 'Window',
     dashRoundStatusLabel: 'Status',
+    // v118: hint for the two switch columns merged into the rounds table (headers reuse dashChOpenTitle/dashChExamTitle)
+    dashRoundSwitchHint: 'The "Challenge" and "Exam" columns are per-round switches and are fully independent. Order: first "Set current" → then "Open challenge" → students can answer; the Day-7 exam is opened separately with "Open exam".',
     dashRoundOpsLabel: 'Actions',
     dashRoundOpenTag: 'Ongoing',
     dashRoundUpcomingTag: 'Not started',

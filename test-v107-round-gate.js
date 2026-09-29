@@ -3,10 +3,14 @@
 // 根因：数据层早已按期隔离（开关存营次的 open / examOpen 字段），但界面只有一张卡，
 //       只读写 CloudSync._chExamOpen / _chOpen（= 指针那一期）→ 管理员永远只能操作当前指针期。
 // 修法：① cloud-store setChallengeOpen / setChallengeExamOpen 支持 spec.roundId 精确落刀；
-//       ② 看板按营次列表逐期渲染一张卡，每期各带「开放挑战」+「开放考试」。
+//       ② 看板按营次列表逐期渲染开关，每期各带「开放挑战」+「开放考试」。
+//       【v118 反转】②的呈现形态变了：原为**独立卡片区**（#dashChGate），
+//       现改为**营次管理表的两列**（dashChOpenCellHtml / dashChExamCellHtml）——
+//       见第六段顶部注释（信息割裂 + 卡片区跟随部门筛选导致「其他餐厅看不到」的错觉）。
+//       数据层与传参方式（roundId）未变，断言随呈现形态改写。
 // 覆盖：① setChallengeExamOpen({open, roundId}) 只改目标期；② 同理 setChallengeOpen；
 //      ③ 不改指针期时侧信道不被污染（学员端不会读错）；④ 未指定 roundId 保持旧的指针期行为；
-//      ⑤ roundId 不存在时返回 noround 且不动数据；⑥ UI 逐期渲染 + 两个按钮 + roundId 传参。
+//      ⑤ roundId 不存在时返回 noround 且不动数据；⑥ UI 按期渲染（v118：并入营次表两列）+ 两个按钮 + roundId 传参。
 const fs = require('fs')
 const path = require('path')
 const vm = require('vm')
@@ -168,24 +172,47 @@ const roundOf = (sb, id) => (getDoc(sb).chRounds || []).find(r => r.id === id)
     eq(JSON.stringify(getDoc(sb).chRounds), before, '数据仍未改动')
   }
 
-  console.log('=== 六、看板 UI：按期逐卡 + roundId 传参 ===')
-  ok(appSrc.includes('function dashChGatePanelHtml'), 'dashChGatePanelHtml 定义')
-  ok(appSrc.includes('function dashChRoundGateCardHtml'), 'dashChRoundGateCardHtml 定义（单期卡）')
-  ok(appSrc.includes('function dashRoundsForGate'), 'dashRoundsForGate 定义（按期读取）')
-  // 逐期渲染：面板对 list 做 map
-  ok(/dashChGatePanelHtml\(\)[\s\S]{0,900}?ordered\.map\(r => dashChRoundGateCardHtml/.test(appSrc),
-    '面板按营次列表逐期出卡（ordered.map → dashChRoundGateCardHtml）')
-  // 每期卡带两个按钮 + roundId
-  const card = (appSrc.match(/function dashChRoundGateCardHtml\(r, isCur\)[\s\S]*?\n\}/) || [''])[0]
-  ok(card.length > 0, '能取到单期卡函数体')
-  ok(card.includes('dashToggleChOpen(this)'), '单期卡含「开放挑战」按钮')
-  ok(card.includes('dashToggleChExam(this)'), '单期卡含「开放考试」按钮')
-  ok(card.includes('data-rid="${rid}"'), '两个按钮都带 data-rid（目标营次）')
-  // 徽章文案经 badge(on, onKey, offKey) 间接取键 → 断言键名做参数传入
-  ok(card.includes("badge(open, 'dashChOpenOn', 'dashChOpenOff')"), '挑战开关徽章文案齐备（开/关两态）')
-  ok(card.includes("badge(examOpen, 'dashChExamOn', 'dashChExamOff')"), '考试开关徽章文案齐备（开/关两态）')
-  ok(card.includes('dashRoundDeptText(r)'), '单期卡显示适用部门')
-  ok(card.includes('dashRoundWindowText(r)'), '单期卡显示起止时间')
+  console.log('=== 六、看板 UI：按期渲染开关（v118 起并入营次表两列）+ roundId 传参 ===')
+  // ⚠️ 契约反转（v118 推翻 v107 的形态，改写本段；反转原因见 app.js 顶部 v118 注释）：
+  //   v107 把两个开关做成**独立卡片区**（dashChGatePanelHtml 逐期出卡，挂在 #dashChGate）。
+  //   实测问题：① 同一营次要跨两个面板看（表里看排期、卡里看开关），信息割裂；
+  //             ② 卡片区**跟随看板部门筛选**（dashRoundsForGate 按 dashChDept 过滤），
+  //                管理员切到「标帜餐厅」后只看到标帜那一期，误以为「其他餐厅的开关没了」。
+  //   v118 把「挑战」「考试」各作一列并进**营次管理表**（全集视图，不随部门筛选），
+  //   故断言随之改写为「单元格函数 + 列接线 + 不再存在独立卡片区」。
+  ok(appSrc.includes('function dashChOpenCellHtml'), 'dashChOpenCellHtml 定义（挑战列单元格）')
+  ok(appSrc.includes('function dashChExamCellHtml'), 'dashChExamCellHtml 定义（考试列单元格）')
+  // 单元格函数体：两个按钮 + roundId + 徽章两态
+  const cellOpen = (appSrc.match(/function dashChOpenCellHtml\(r\)[\s\S]*?\n\}/) || [''])[0]
+  const cellExam = (appSrc.match(/function dashChExamCellHtml\(r\)[\s\S]*?\n\}/) || [''])[0]
+  ok(cellOpen.length > 0 && cellExam.length > 0, '能取到两个单元格函数体')
+  ok(cellOpen.includes('dashToggleChOpen(this)'), '挑战列含「开放挑战」按钮')
+  ok(cellExam.includes('dashToggleChExam(this)'), '考试列含「开放考试」按钮')
+  ok(cellOpen.includes('data-rid="${rid}"'), '挑战按钮带 data-rid（目标营次）')
+  ok(cellExam.includes('data-rid="${rid}"'), '考试按钮带 data-rid（目标营次）')
+  ok(cellOpen.includes("t('dashChOpenOn')") && cellOpen.includes("t('dashChOpenOff')"),
+    '挑战开关徽章文案齐备（开/关两态）')
+  ok(cellExam.includes("t('dashChExamOn')") && cellExam.includes("t('dashChExamOff')"),
+    '考试开关徽章文案齐备（开/关两态）')
+  ok(cellOpen.includes("t('dashChOpenHint')") && cellExam.includes("t('dashChExamHint')"),
+    '两个按钮各带自己的 tooltip（复用既有 hint 键）')
+  // 营次表接线：表头 7 列 + 行 7 个单元格，开关列在「开放时间」之后、「操作」之前
+  // 函数体取到 dashRoundEmpty 那行结尾（该套件在函数体下方紧跟「收集新建表单里勾选的适用部门」注释）
+  const panel = (appSrc.match(/function dashRoundsPanelHtml\(\)[\s\S]*?\(t\('dashRoundEmpty'\)\)[\s\S]{0,120}?\n\}\n/) ||
+    [appSrc.slice(appSrc.indexOf('function dashRoundsPanelHtml'), appSrc.indexOf('function dashPickedDepts'))])[0]
+  ok(panel.length > 0, '能取到 dashRoundsPanelHtml 函数体')
+  const iOpenCol = panel.indexOf("t('dashChOpenTitle')")
+  const iExamCol = panel.indexOf("t('dashChExamTitle')")
+  ok(iOpenCol > 0 && iExamCol > iOpenCol, '表头含「挑战」「考试」两列且挑战在前')
+  ok(panel.indexOf("t('dashRoundWindowLabel')") < iOpenCol, '开关列在「开放时间」之后')
+  ok(iExamCol < panel.indexOf("t('dashRoundOpsLabel')"), '开关列在「操作」之前')
+  ok(/\$\{dashChOpenCellHtml\(r\)\}[\s\S]{0,80}?\$\{dashChExamCellHtml\(r\)\}/.test(panel),
+    '行内两个开关单元格顺序与表头一致（挑战 → 考试）')
+  // 说明文案：含 v117 的「设为当前」说明 + v118 的开关列说明，且都在表格之前
+  ok(panel.includes("t('dashRoundCurHint')"), '营次表保留「设为当前」说明（v117）')
+  ok(panel.includes("t('dashRoundSwitchHint')"), '营次表含开关列说明（v118）')
+  ok(panel.indexOf("t('dashRoundSwitchHint')") < panel.indexOf('<table class="admin-table"'),
+    '开关列说明位于表格之前')
   // 处理函数传 roundId
   const tOpen = (appSrc.match(/async function dashToggleChOpen\(btn\)[\s\S]*?\n\}/) || [''])[0]
   const tExam = (appSrc.match(/async function dashToggleChExam\(btn\)[\s\S]*?\n\}/) || [''])[0]
@@ -193,25 +220,33 @@ const roundOf = (sb, id) => (getDoc(sb).chRounds || []).find(r => r.id === id)
   ok(tOpen.includes('setChallengeOpen({ open: next, roundId: rid })'), 'dashToggleChOpen 传 roundId')
   ok(tExam.includes('btn.dataset.rid'), 'dashToggleChExam 从 data-rid 取营次')
   ok(tExam.includes('setChallengeExamOpen({ open: next, roundId: rid })'), 'dashToggleChExam 传 roundId')
-  ok(tOpen.includes('dashRefreshChGate()'), '挑战开关成功后就地刷新面板')
-  ok(tExam.includes('dashRefreshChGate()'), '考试开关成功后就地刷新面板')
+  ok(tOpen.includes('dashRefreshRoundsPanel()'), '挑战开关成功后就地重绘营次表')
+  ok(tExam.includes('dashRefreshRoundsPanel()'), '考试开关成功后就地重绘营次表')
   // 只在改指针期时动侧信道
   ok(/if \(rid === dashRoundCurId\(\)\) CloudSync\._chExamOpen = next/.test(tExam),
     '仅当改的是当前指针期时才同步 _chExamOpen（避免学员端读错期）')
-  // 视图插入
-  ok(/<div id="dashChGate">\$\{dashChGatePanelHtml\(\)\}<\/div>/.test(appSrc), '看板插入 dashChGate 面板')
-  ok(appSrc.indexOf('${dashChGatePanelHtml()}') > appSrc.indexOf('${dashRoundsPanelHtml()}'), '面板在营次管理之后')
-  ok(appSrc.indexOf('${dashChGatePanelHtml()}') < appSrc.indexOf('<div id="dashChallengeBlock"></div>'), '面板在挑战统计之前')
-  // 旧单卡已彻底移除
+  // 正反双向断言：新家有 / 老家没（v112/v113 纪律）
+  ok(appSrc.includes('function dashRefreshRoundsPanel'), '新刷新函数 dashRefreshRoundsPanel 已定义')
+  ok(/id="dashRoundsPanel"/.test(appSrc), '营次表容器 #dashRoundsPanel 仍是刷新目标')
+  ok(!appSrc.includes('function dashChGatePanelHtml'), '独立开关面板 dashChGatePanelHtml 已移除')
+  ok(!appSrc.includes('function dashChRoundGateCardHtml'), '独立单期卡 dashChRoundGateCardHtml 已移除')
+  ok(!appSrc.includes('function dashRoundsForGate'), '按部门过滤的 dashRoundsForGate 已移除')
+  ok(!/id="dashChGate"/.test(appSrc), '独立容器 id dashChGate 已移除')
+  ok(!/\$\{dashChGatePanelHtml\(\)\}/.test(appSrc), '模板中不再调用 dashChGatePanelHtml')
+  // 兼容入口保留（别名链不报错）：dashRefreshExamGate → dashRefreshChGate → dashRefreshRoundsPanel
+  ok(appSrc.includes('function dashRefreshExamGate() { dashRefreshChGate() }'),
+    '保留兼容入口 dashRefreshExamGate → dashRefreshChGate')
+  ok(appSrc.includes('function dashRefreshChGate() { dashRefreshRoundsPanel() }'),
+    '保留兼容入口 dashRefreshChGate → dashRefreshRoundsPanel')
   ok(!appSrc.includes('function dashChExamGateHtml'), '旧单卡 dashChExamGateHtml 已移除')
   ok(!appSrc.includes('function dashChOpenGateHtml'), '旧单卡 dashChOpenGateHtml 已移除')
   ok(!appSrc.includes('id="dashChExamGate"'), '旧容器 id dashChExamGate 已移除')
-  ok(appSrc.includes('function dashRefreshExamGate() { dashRefreshChGate() }'), '保留兼容入口 dashRefreshExamGate → dashRefreshChGate')
 
   console.log('=== 七、i18n 键成对 ===')
   const i18nSrc = read('i18n.js')
   ;['dashChGatePanelTitle', 'dashChGatePanelHint', 'dashChGateCurTag', 'dashChGateNoRound',
-    'dashChOpenTitle', 'dashChExamTitle', 'dashChOpenOn', 'dashChOpenOff', 'dashChExamOn', 'dashChExamOff'].forEach(k => {
+    'dashChOpenTitle', 'dashChExamTitle', 'dashChOpenOn', 'dashChOpenOff', 'dashChExamOn', 'dashChExamOff',
+    'dashRoundSwitchHint'].forEach(k => {
     eq((i18nSrc.match(new RegExp('\\b' + k + ':', 'g')) || []).length, 2, `i18n ${k} 中英成对`)
   })
 

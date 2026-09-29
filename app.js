@@ -3645,11 +3645,10 @@ async function renderDashboard() {
       : `<div class="card" style="padding:32px;text-align:center;color:#9ca3af;margin-top:16px">${t('dashOfflineEmpty')}</div>`}`
 
   // ---- 七天挑战块（v113：原在「线上培训」内，现独立成标签；三个面板保持原相对顺序）----
-  //   顺序「营次管理 → 开关面板 → 挑战成绩统计」被 v76 / v77 / v107 的历史断言约束，不要调换。
+  //   顺序「营次管理 → 挑战成绩统计」被 v76 / v77 / v107 的历史断言约束，不要调换。
+  //   v118：原独立的「🎛️ 七天挑战开关」卡片区（#dashChGate）已并入营次管理表两列，容器随之下线。
   const challengeHtml = `
     <div id="dashRoundsPanel">${dashRoundsPanelHtml()}</div>
-
-    <div id="dashChGate">${dashChGatePanelHtml()}</div>
 
     <div id="dashChallengeBlock"></div>`
 
@@ -3670,77 +3669,58 @@ async function renderDashboard() {
   renderPerQBlock(rows)
 }
 
-// ====== 管理员看板：七天挑战开关（v77 总开关 + v76 期末考试开关；v107 改为「按营次逐个」）======
+// ====== 管理员看板：七天挑战开关（v77 总开关 + v76 期末考试开关；v107 按营次逐个；v118 并入营次表）======
 // 背景（v107 修的 bug）：「确保考试开关出现在每个不同的营期下面，而不是一开都开」。
 //   数据层早就按期隔离了（开关存在营次的 open / examOpen 字段，见 cloud-store _roundsNorm），
 //   但界面只有一张卡、只读 CloudSync._chExamOpen / _chOpen（= 指针那一期），
 //   管理员永远只能操作「当前指针期」→ 想把第 2 期的考试打开却把第 1 期改了，看起来就是「一开都开」。
-// 现在：按营次列表逐期渲染一张卡，每期各有「开放挑战」+「开放考试」两个按钮，
-//   点击时把该期 id 作为 roundId 传给 cloud-store 精确落刀（setChallengeOpen / setChallengeExamOpen）。
-// 营次筛选：跟随看板的部门筛选（dashChDept），只列属于该部门的营次（口径同营次管理面板）。
-function dashRoundsForGate() {
-  const all = dashRoundList()
-  if (!all.length) return []
-  try { return all.filter(r => dashRoundUnderDept(r, dashChDept)) } catch (e) { return all }
-}
-// 单期开关卡。r = 营次记录；isCur = 是否本端当前期（指针）
-function dashChRoundGateCardHtml(r, isCur) {
+// v107 起：按营次逐期渲染，点击时把该期 id 作为 roundId 传给 cloud-store 精确落刀
+//   （setChallengeOpen / setChallengeExamOpen）。
+// v118 起（反转 v107 的「独立卡片区」形态）：原本另起一个 🎛️ 卡片区逐期列卡，问题是
+//   ① 同一个营次要跨两个面板看（营次表里看排期、开关区里看开关），信息被割裂；
+//   ② 开关卡片区曾**跟随看板部门筛选**（老 dashRoundsForGate 按 dashChDept 过滤），
+//      管理员切成「标帜餐厅」后只看到标帜那一期，误以为「别的餐厅的开关没有了」。
+//   现在把「挑战」「考试」各作一列并进**营次管理表**：一期一行，状态与开关同屏，且
+//   营次表始终列全部营次（不跟随部门筛选）→ 不会再出现「其他餐厅看不到」的错觉。
+// 注意：营次表**不按部门筛选**是有意为之——它是全集视图；看板挑战统计卡另有 dashChDept 筛选。
+// 单期「挑战」列单元格。r = 营次记录
+function dashChOpenCellHtml(r) {
   const open = r.open === true
+  const rid = escAttr(r.id)
+  const badge = open
+    ? `<span style="font-size:12px;font-weight:800;color:#059669;background:#d1fae5;border-radius:10px;padding:2px 10px">● ${t('dashChOpenOn')}</span>`
+    : `<span style="font-size:12px;font-weight:800;color:#9ca3af;background:#f3f4f6;border-radius:10px;padding:2px 10px">● ${t('dashChOpenOff')}</span>`
+  return `
+      <td style="white-space:nowrap;text-align:center">
+        <div style="margin-bottom:5px">${badge}</div>
+        <button class="btn btn-sm ${open ? 'btn-danger' : 'btn-primary'}" style="padding:3px 8px;font-size:12px"
+          data-rid="${rid}" onclick="dashToggleChOpen(this)"
+          title="${escAttr(t('dashChOpenHint'))}">${open ? t('dashChOpenCloseBtn') : t('dashChOpenOpenBtn')}</button>
+      </td>`
+}
+// 单期「考试」列单元格。r = 营次记录（与 dashChOpenCellHtml 同型，文案/字段各自独立）
+function dashChExamCellHtml(r) {
   const examOpen = r.examOpen === true
   const rid = escAttr(r.id)
-  const badge = (on, onKey, offKey) => on
-    ? `<span style="font-size:12px;font-weight:800;color:#059669;background:#d1fae5;border-radius:10px;padding:2px 10px">● ${t(onKey)}</span>`
-    : `<span style="font-size:12px;font-weight:800;color:#9ca3af;background:#f3f4f6;border-radius:10px;padding:2px 10px">● ${t(offKey)}</span>`
+  const badge = examOpen
+    ? `<span style="font-size:12px;font-weight:800;color:#059669;background:#d1fae5;border-radius:10px;padding:2px 10px">● ${t('dashChExamOn')}</span>`
+    : `<span style="font-size:12px;font-weight:800;color:#9ca3af;background:#f3f4f6;border-radius:10px;padding:2px 10px">● ${t('dashChExamOff')}</span>`
   return `
-    <div class="card" style="margin-top:12px">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px">
-        <div style="min-width:0;flex:1">
-          <div style="font-size:15px;font-weight:700;margin-bottom:3px">
-            🏆 ${escHtml(r.name || r.id)}${isCur ? ` <span style="font-size:11px;font-weight:600;color:#2563eb">· ${t('dashChGateCurTag')}</span>` : ''}
-          </div>
-          <div style="font-size:12px;color:#6b7280;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-            <span>${dashRoundDeptText(r)}</span>
-            <span>${dashRoundWindowText(r)}</span>
-          </div>
-          <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px">
-            <span style="font-size:12px;color:#374151">${t('dashChOpenTitle')} ${badge(open, 'dashChOpenOn', 'dashChOpenOff')}</span>
-            <span style="font-size:12px;color:#374151">${t('dashChExamTitle')} ${badge(examOpen, 'dashChExamOn', 'dashChExamOff')}</span>
-          </div>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
-          <button class="btn btn-sm ${open ? 'btn-danger' : 'btn-primary'}"
-            data-rid="${rid}" onclick="dashToggleChOpen(this)"
-            title="${escAttr(t('dashChOpenHint'))}">${open ? t('dashChOpenCloseBtn') : t('dashChOpenOpenBtn')}</button>
-          <button class="btn btn-sm ${examOpen ? 'btn-danger' : 'btn-primary'}"
-            data-rid="${rid}" onclick="dashToggleChExam(this)"
-            title="${escAttr(t('dashChExamHint'))}">${examOpen ? t('dashChExamCloseBtn') : t('dashChExamOpenBtn')}</button>
-        </div>
-      </div>
-    </div>`
+      <td style="white-space:nowrap;text-align:center">
+        <div style="margin-bottom:5px">${badge}</div>
+        <button class="btn btn-sm ${examOpen ? 'btn-danger' : 'btn-primary'}" style="padding:3px 8px;font-size:12px"
+          data-rid="${rid}" onclick="dashToggleChExam(this)"
+          title="${escAttr(t('dashChExamHint'))}">${examOpen ? t('dashChExamCloseBtn') : t('dashChExamOpenBtn')}</button>
+      </td>`
 }
-function dashChGatePanelHtml() {
-  const list = dashRoundsForGate()
-  const curId = dashRoundCurId()
-  const head = `
-    <div class="card" style="margin-top:16px">
-      <div style="font-size:15px;font-weight:700;margin-bottom:2px">🎛️ ${t('dashChGatePanelTitle')}</div>
-      <div style="font-size:12px;color:#6b7280">${t('dashChGatePanelHint')}</div>
-    </div>`
-  if (!list.length) {
-    return head + `
-    <div class="card" style="margin-top:12px">
-      <div style="font-size:13px;color:#9ca3af">${t('dashChGateNoRound')}</div>
-    </div>`
-  }
-  // 当前指针期排最前，其余按列表顺序（管理员最常操作当前期）
-  const ordered = list.slice().sort((a, b) => (a.id === curId ? -1 : b.id === curId ? 1 : 0))
-  return head + ordered.map(r => dashChRoundGateCardHtml(r, r.id === curId)).join('')
+// 就地刷新营次表（开关写成功后调用，避免整页 renderDashboard 打断滚动位置）。
+// v118 前叫 dashRefreshChGate（刷独立的 #dashChGate 卡片区）；现开关就在营次表里，故改刷 #dashRoundsPanel。
+function dashRefreshRoundsPanel() {
+  const box = document.getElementById('dashRoundsPanel')
+  if (box) box.innerHTML = dashRoundsPanelHtml()
 }
-// 就地刷新开关面板（写成功后调用，避免整页 renderDashboard 打断滚动位置）
-function dashRefreshChGate() {
-  const box = document.getElementById('dashChGate')
-  if (box) box.innerHTML = dashChGatePanelHtml()
-}
+// 兼容旧调用名（v107 起的 dashRefreshChGate；v118 开关并入营次表后保留别名，防外部/旧代码引用报错）
+function dashRefreshChGate() { dashRefreshRoundsPanel() }
 async function dashToggleChOpen(btn) {
   const rid = (btn && btn.dataset && btn.dataset.rid) || ''
   const rec = dashRoundList().find(r => r.id === rid)
@@ -3752,7 +3732,7 @@ async function dashToggleChOpen(btn) {
     if (res && res.ok) {
       rec.open = next
       if (next) rec.at = Date.now()
-      dashRefreshChGate()
+      dashRefreshRoundsPanel()   // v118：开关在营次表里，就地重绘该表
     } else {
       alert(t('dashChExamFail'))
       if (btn) btn.disabled = false
@@ -3862,6 +3842,8 @@ function dashRoundsPanelHtml() {
       <td style="white-space:nowrap">${dashRoundStateTag(st)}</td>
       <td>${dashRoundDeptText(r)}</td>
       <td style="white-space:nowrap;font-size:12px;color:#6b7280">${dashRoundWindowText(r)}</td>
+      ${dashChOpenCellHtml(r)}
+      ${dashChExamCellHtml(r)}
       <td style="white-space:nowrap;text-align:center">
         ${viewed ? '' : `<button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:12px;margin-right:4px" data-rid="${escAttr(r.id)}" onclick="dashViewRound(this)">${t('dashRoundView')}</button>`}
         ${isCur ? '' : `<button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:12px;margin-right:4px" data-rid="${escAttr(r.id)}" onclick="dashSetRoundCur(this)">${t('dashRoundMakeCur')}</button>`}
@@ -3880,6 +3862,7 @@ function dashRoundsPanelHtml() {
       </div>
       <p class="form-hint" style="margin-bottom:12px">${t('dashRoundHint')}</p>
       <p class="form-hint" style="margin:-6px 0 12px">${t('dashRoundCurHint')}</p>
+      <p class="form-hint" style="margin:-6px 0 12px">🎛️ ${t('dashRoundSwitchHint')}</p>
       <div id="dashRoundForm" style="display:none;border:1px dashed #c7d2fe;background:#f8faff;border-radius:10px;padding:14px;margin-bottom:14px">
         <div style="font-weight:700;font-size:14px;margin-bottom:10px">🆕 ${t('dashRoundNewTitle')}</div>
         <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px">
@@ -3906,6 +3889,8 @@ function dashRoundsPanelHtml() {
             <th>${t('dashRoundStatusLabel')}</th>
             <th>${t('roundDeptLabel')}</th>
             <th>${t('dashRoundWindowLabel')}</th>
+            <th style="text-align:center">${t('dashChOpenTitle')}</th>
+            <th style="text-align:center">${t('dashChExamTitle')}</th>
             <th style="text-align:center">${t('dashRoundOpsLabel')}</th>
           </tr></thead>
           <tbody>${rows}</tbody>
@@ -3997,8 +3982,7 @@ function dashViewRound(el) {
   dashRoundView = (el && el.dataset && el.dataset.rid) || ''
   renderDashChallengeBlock(_perQLastRows || [])
   const p = document.getElementById('dashRoundsPanel')
-  if (p) p.innerHTML = dashRoundsPanelHtml()
-  dashRefreshChGate()   // v107：同步开关面板（每期徽章/按钮随营次列表与筛选刷新）
+  if (p) p.innerHTML = dashRoundsPanelHtml()   // v118：营次表内含开关列，重绘即同步
 }
 // 兼容旧调用名（v100 起的 dashRefreshExamGate → v107 并入 dashRefreshChGate）
 function dashRefreshExamGate() { dashRefreshChGate() }
@@ -4245,7 +4229,8 @@ async function dashReconcilePush(btn) {
 // ====== 管理员看板：期末考试开关（v76；v107 改为按营次） ======
 // 七天挑战第 7 天期末考试为手动开放：存云端对应营次的 examOpen（cloud-store setChallengeExamOpen），
 // 学员端经 _getDoc 侧信道读取；零参与时也要显示（管理员可提前开考）。
-// v107：按钮改为按期渲染（见 dashChRoundGateCardHtml），点击时带该期 roundId 精确落刀。
+// v107：按钮改为按期渲染，点击时带该期 roundId 精确落刀。
+// v118：渲染位置由独立开关卡片改为**营次管理表**的「考试」列（见 dashChExamCellHtml）。
 async function dashToggleChExam(btn) {
   const rid = (btn && btn.dataset && btn.dataset.rid) || ''
   const rec = dashRoundList().find(r => r.id === rid)
@@ -4258,7 +4243,7 @@ async function dashToggleChExam(btn) {
       rec.examOpen = next
       // v107：只有当改的是「本端当前期」时才动侧信道，避免学员端读到别的期次的开关
       if (rid === dashRoundCurId()) CloudSync._chExamOpen = next
-      dashRefreshChGate()   // 就地刷新开关面板（徽章 + 按钮文案）
+      dashRefreshRoundsPanel()   // v118：就地重绘营次表（徽章 + 按钮文案）
     } else {
       alert(t('dashChExamFail'))
       if (btn) btn.disabled = false
