@@ -255,10 +255,12 @@ const CONFIRM_KEY = '[t:courseExamStartConfirm]'
 
   // ---------------- 五、index.html 版本号 ----------------
   {
-    const n115 = (HTML.match(/\?v=115/g) || []).length
-    const n114 = (HTML.match(/\?v=114/g) || []).length
-    assert('index.html 全部 ?v=115（12 处）', n115 === 12)
-    assert('index.html 无 ?v=114 残留', n114 === 0)
+    // v116 反转：原断言写死「?v=115 × 12」——每 bump 一次版本号旧套件就得手改一遍（v115→v116 实撞）。
+    // 契约本意是「全站统一版本号」，改为弹性断言：唯一版本号 × 12 处，且 ≥ 116。
+    const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
+    const uniq = Array.from(new Set(vms))
+    assert('index.html 版本号统一：唯一值 × 12 处', vms.length === 12 && uniq.length === 1)
+    assert('index.html 版本号 ≥ 116', uniq.length === 1 && uniq[0] >= 116)
   }
 
   console.log(failed ? '✗ v115 gate FAILED ' + failed : '✅ v115 course exam gate all pass')

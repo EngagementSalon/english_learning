@@ -4270,6 +4270,60 @@ async function dashToggleChExam(btn) {
 // ====== 管理员看板：七天挑战统计（v71） ======
 // 数据来源：chy 事件（阶段完成：参与名单 / 进度 / 每阶段分数 / Day1-Day7 测试分）
 //          + perq 的 ch 标记（chQ[qid] = { correct:0, total:错次 }，错题排行）
+// v116：七天挑战成绩导出（Excel，双 sheet：成绩明细 + 积分榜）。
+// 数据口径与看板完全一致：直接吃 renderDashChallengeBlock 算好的 _chDashRows
+//（已是当前部门 + 营次筛选结果）——「所见即所得」，看板上是什么就导出什么。
+function dashChExportSheets(list) {
+  const rows0 = Array.isArray(list) ? list : []
+  const chk = c => (c === 2 ? t('dashChChkFull') : c === 1 ? t('dashChChkHalf') : '—')
+  const sc = (s, manual) => (s == null ? '—' : String(s) + (manual ? '(' + t('dashChManualBadge') + ')' : ''))
+  // 积分榜口径与看板一致：管理员不参加排名；同分用时短者在前，再比答对数（v73/v78）
+  const lb = rows0.filter(p => p.role !== 'admin').slice()
+    .sort((a, b) => (b.lbScore - a.lbScore) || (a.lbT - b.lbT) || (b.lbC - a.lbC))
+  const detailRows = [[
+    t('thUsername'), t('thName'), t('thDept'), t('dashChThMaxDay'), t('dashChThStages'),
+    t('dashChThAns'), t('dashChThAcc'), t('dashChThDay1'), t('dashChThDay7'),
+    t('dashChThScore'), t('dashChThCorrect'), t('dashChThUseSec'),
+    'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7'
+  ]]
+  rows0.forEach(p => {
+    const ck = p.checkin || []
+    const chkRow = []
+    for (let d = 1; d <= 7; d++) chkRow.push(chk(ck[d - 1]))
+    detailRows.push([
+      p.username || '', p.name || '', p.dept || '',
+      p.maxDay || 0, p.stagesDone || 0,
+      p.q || 0, (p.acc || 0) + '%',
+      sc(p.s1, p.m1), sc(p.s7, p.m7),
+      p.lbScore || 0, p.lbC || 0, p.lbT || 0
+    ].concat(chkRow))
+  })
+  const rankRows = [[
+    t('dashChThRank'), t('thUsername'), t('thName'), t('thDept'),
+    t('dashChThScore'), t('dashChThCorrect'), t('dashChThUseSec')
+  ]]
+  lb.forEach((p, i) => {
+    rankRows.push([i + 1, p.username || '', p.name || '', p.dept || '',
+      p.lbScore || 0, p.lbC || 0, p.lbT || 0])
+  })
+  return [
+    { name: t('dashChSheetDetail'), rows: detailRows },
+    { name: t('dashChSheetRank'), rows: rankRows }
+  ]
+}
+function dashChExportScores() {
+  const list = _chDashRows || []
+  if (!list.length) { alert(t('dashChExportEmpty')); return }
+  if (typeof impXlsxFromSheets !== 'function' || typeof impDownloadBlob !== 'function') {
+    alert(t('dashChExportNoXlsx')); return
+  }
+  const bytes = impXlsxFromSheets(dashChExportSheets(list))
+  if (!bytes) { alert(t('dashChExportNoXlsx')); return }
+  const d = new Date()
+  const pad = n => String(n).padStart(2, '0')
+  const fname = t('dashChExportFile') + '_' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '.xlsx'
+  impDownloadBlob(bytes, fname, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+}
 // v78 积分权重：第七天期末考试（day 7 的 test）答对每题 3 倍，其余 1 倍；管理员不参加排名。
 function dashChStageWeight(day, kind) {
   if (typeof chLbStageWeight === 'function') return chLbStageWeight(day, kind)   // 优先复用 challenge.js 同口径实现
@@ -4456,7 +4510,10 @@ function renderDashChallengeBlock(rows) {
     + (manual && s != null ? `<span title="${escAttr(t('dashChManualBadgeHint'))}" style="margin-left:4px;font-size:10px;color:#92400e;background:#fef3c7;border-radius:6px;padding:1px 5px;vertical-align:middle">${t('dashChManualBadge')}</span>` : '')
   el.innerHTML = `
     <div class="card" style="margin-top:16px">
-      <h3 style="margin-bottom:8px">🏅 ${t('dashChTitle')} · <span style="color:#2563eb">${escHtml(rdName)}</span></h3>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+        <h3 style="margin:0">🏅 ${t('dashChTitle')} · <span style="color:#2563eb">${escHtml(rdName)}</span></h3>
+        <button class="btn btn-primary btn-sm" style="flex-shrink:0" onclick="dashChExportScores()">⬇️ ${t('dashChExportBtn')}</button>
+      </div>
       ${deptBar}
       ${filterBar}
       <div class="dashboard-summary" style="margin-bottom:12px">
