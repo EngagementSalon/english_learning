@@ -90,7 +90,11 @@ function mkSandbox(doc) {
   sb.window = sb
   vm.createContext(sb)
   // 注入真实函数（course-app.js）
-  ;['courseUser', 'courseFind', 'courseFindAssign', 'courseIsOffline', 'courseStart', 'courseGateRecheck',
+  // v120：闸门逻辑收口到辅助函数（courseGateRequired / courseGateOpenedFor / courseGateLocked），
+  // 放行按钮改为接收 DOM 元素（el.dataset 取参，避免用户名拼进内联 onclick 的 v85 引号陷阱）。
+  ;['courseUser', 'courseFind', 'courseFindAssign', 'courseIsOffline',
+    'courseIsFinal', 'courseGateRequired', 'courseGateOpenedFor', 'courseOnceOnly', 'courseGateLocked',
+    'courseGateElArgs', 'courseStart', 'courseGateRecheck',
     'courseExamGateOpen', 'courseExamGateRevoke'].forEach(n => {
     vm.runInContext(extractFn(APP, n), sb)
   })
@@ -162,16 +166,16 @@ const CONFIRM_KEY = '[t:courseExamStartConfirm]'
     const { sb, calls } = mkSandbox(mkDoc({ examGate: true, examOpened: { stu1: { at: 1, by: 'boss' } } }))
     sb.__sess.username = 'admin1'
     sb.__confirmYes = true
-    await vm.runInContext("courseExamGateOpen('c1','a1','stu2')", sb)
+    await vm.runInContext("courseExamGateOpen({dataset:{c:'c1',a:'a1',u:'stu2'}})", sb)
     const a = sb.courseState.doc.classes[0].assignments[0]
     assert('放行写入 examOpened[stu2]', !!(a.examOpened && a.examOpened.stu2))
     assert('放行记录含时间戳与操作管理员', typeof a.examOpened.stu2.at === 'number' && a.examOpened.stu2.by === 'admin1')
     assert('放行后刷新详情页', calls.renderDetail.some(x => x[0] === 'c1' && x[1] === 'a1'))
     const atBefore = a.examOpened.stu2.at
-    await vm.runInContext("courseExamGateOpen('c1','a1','stu2')", sb)
+    await vm.runInContext("courseExamGateOpen({dataset:{c:'c1',a:'a1',u:'stu2'}})", sb)
     assert('重复放行幂等（mutate 回调返回 false、时间戳不变）',
       calls.mutateRet[calls.mutateRet.length - 1] === false && a.examOpened.stu2.at === atBefore)
-    await vm.runInContext("courseExamGateRevoke('c1','a1','stu2')", sb)
+    await vm.runInContext("courseExamGateRevoke({dataset:{c:'c1',a:'a1',u:'stu2'}})", sb)
     assert('撤销放行移除 examOpened[stu2]', !a.examOpened.stu2)
     assert('撤销放行不清理其他学员', !!(a.examOpened && a.examOpened.stu1))
   }
@@ -181,7 +185,8 @@ const CONFIRM_KEY = '[t:courseExamStartConfirm]'
   {
     const b = g('courseStart')
     assert('courseStart 签名带 _recheck', b.indexOf('function courseStart(cid, aid, _recheck)') === 0)
-    assert('courseStart 判 examGate + examOpened[me]', b.indexOf("a.examGate && !((a.examOpened || {})[me])") >= 0)
+    // v120 反转：闸门判定从内联表达式收口到 courseGateLocked()（最终考试与测评共用，名单各自独立）
+    assert('courseStart 判闸门走 courseGateLocked(a, me, res)', b.indexOf('courseGateLocked(a, me, res)') >= 0)
     assert('courseStart 锁定时走 courseGateRecheck', b.indexOf('courseGateRecheck(cid, aid)') >= 0)
     assert('courseStart 复检路径只弹提示不递归', b.indexOf('if (_recheck)') >= 0)
     const rb = g('courseGateRecheck')
@@ -190,6 +195,7 @@ const CONFIRM_KEY = '[t:courseExamStartConfirm]'
   {
     const b = g('courseExamGateOpen')
     assert('放行函数幂等守卫（已放行 return false）', b.indexOf('if (a.examOpened[u]) return false') >= 0)
+    assert('v120：放行函数改为从 DOM dataset 取参（不再收三参数）', b.indexOf('courseGateElArgs(el)') >= 0)
     assert('放行记录 { at, by: courseUser() }', b.indexOf('at: Date.now()') >= 0 && b.indexOf('by: courseUser()') >= 0)
     const rb = g('courseExamGateRevoke')
     assert('撤销只删该学员的 examOpened', rb.indexOf('delete a.examOpened[u]') >= 0)
@@ -213,18 +219,20 @@ const CONFIRM_KEY = '[t:courseExamStartConfirm]'
     const b = g('courseAssignDetail')
     const iCol = b.indexOf('courseExamGateCol'), iAct = b.indexOf('courseThAction')
     assert('详情表新增「考试放行」列且位于操作列之前', iCol >= 0 && iAct >= 0 && iCol < iAct)
-    assert('放行/撤销按钮接线（含 escAttr(JSON.stringify(u)) 防引号陷阱）',
-      b.indexOf('courseExamGateOpen(') >= 0 && b.indexOf('courseExamGateRevoke(') >= 0
-      && b.indexOf('escAttr(JSON.stringify(u))') >= 0)
+    // v120 反转：原来是 escAttr(JSON.stringify(u)) 拼参数进 onclick；现改为 data-u + (this)
+    // （v85 引号陷阱的根本解法：用户名永不进入 onclick 字面量）
+    assert('放行/撤销按钮接线（data-u + (this) 取参，用户名不拼进 onclick）',
+      b.indexOf('onclick="${openFn}(this)"') >= 0 && b.indexOf('onclick="${revokeFn}(this)"') >= 0
+      && b.indexOf('data-u="${escAttr(u)}"') >= 0)
     assert('已放行显示时间（courseFmtDate）', b.indexOf('openRec.at') >= 0)
   }
   {
     const b = g('renderCourseStudent')
-    assert('学员卡 gateLocked 判定（examGate + 未放行 + 未作答）',
-      b.indexOf("!!a.examGate && !res && !((a.examOpened || {})[me])") >= 0)
+    assert('学员卡 gateLocked 判定（收口为 courseGateLocked）',
+      b.indexOf('courseGateLocked(a, me, res)') >= 0)
     const iGate = b.indexOf('gateLocked'), iExp = b.indexOf('} else if (expired)')
     assert('等待态分支先于过期分支（闸门优先于截止时间）', iGate >= 0 && iExp >= 0 && iGate < iExp)
-    assert('等待态文案键在（WaitTag + WaitHint）',
+    assert('等待态文案键在（WaitTag + WaitHint，v120 起按类型分流）',
       b.indexOf('courseExamGateWaitTag') >= 0 && b.indexOf('courseExamGateWaitHint') >= 0)
     assert('测评类型徽章带 🔒（gated exam）', b.indexOf("a.examGate ? ' 🔒' : ''") >= 0)
   }
@@ -244,13 +252,16 @@ const CONFIRM_KEY = '[t:courseExamStartConfirm]'
 
   // ---------------- 四、小程序 take.js 同口径拦截 ----------------
   {
-    const iGate = TAKE.indexOf("a.type === 'exam' && a.examGate")
+    // v120：拦截条件收口为 _final / _openMap 两个局部变量后再判定
+    const iGate = TAKE.indexOf('const _final = a.type')
     const iDraft = TAKE.indexOf("a.status === 'draft'")
     assert('小程序 take.js 有放行闸门拦截', iGate >= 0)
     assert('小程序拦截先于草稿检查（同一 course 分支内）', iGate >= 0 && iDraft >= 0 && iGate < iDraft)
-    assert('小程序按 me.username 判定放行名单', TAKE.slice(iGate, iGate + 160).indexOf('me.username') >= 0)
-    assert('小程序拦截后提示并返回', TAKE.slice(iGate, iGate + 260).indexOf('navigateBack()') >= 0)
-    assert('小程序拦截带 !res 前置（已作答走原单次语义）', TAKE.slice(iGate - 60, iGate + 60).indexOf('!res') >= 0)
+    assert('小程序按 me.username 判定放行名单', TAKE.slice(iGate, iGate + 420).indexOf('me.username') >= 0)
+    assert('小程序拦截后提示并返回', TAKE.slice(iGate, iGate + 420).indexOf('navigateBack()') >= 0)
+    assert('小程序拦截带 !res 前置（已作答走原单次语义）', TAKE.slice(iGate, iGate + 420).indexOf('!res') >= 0)
+    assert('小程序最终考试名单走 courseFinalOpened（独立于 examOpened）',
+      TAKE.indexOf('a.courseFinalOpened') >= 0 && TAKE.indexOf('a.examOpened') >= 0)
   }
 
   // ---------------- 五、index.html 版本号 ----------------
