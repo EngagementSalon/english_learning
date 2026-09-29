@@ -128,8 +128,14 @@ for (const k of ['dashChExportBtn', 'dashChExportEmpty', 'dashChExportNoXlsx', '
 // ---------- ④ 版本号 ----------
 console.log('④ 版本号')
 const idxSrc = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8')
-assert((idxSrc.match(/\?v=116/g) || []).length === 12, 'index.html ?v=116 共 12 处')
-assert(!idxSrc.includes('?v=115'), 'index.html 无 ?v=115 残留')
+{
+  // ⚠️ 别把 ?v=N 写死：v116 本来写死 ?v=116 → v117 一 bump 就红（v115 已踩过同一坑）。
+  // 契约本意是「全站统一版本号」，故断言唯一值 × 12 处且 ≥ 116。
+  const vms = (idxSrc.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
+  const uniq = Array.from(new Set(vms))
+  assert(vms.length === 12 && uniq.length === 1, '版本号统一：唯一值 × 12 处')
+  assert(uniq.length === 1 && uniq[0] >= 116, '版本号 ≥ 116')
+}
 
 console.log(`\nPASS ${pass} FAIL ${fail}`)
 if (fail > 0) process.exit(1)

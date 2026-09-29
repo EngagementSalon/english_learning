@@ -3879,6 +3879,7 @@ function dashRoundsPanelHtml() {
         </div>
       </div>
       <p class="form-hint" style="margin-bottom:12px">${t('dashRoundHint')}</p>
+      <p class="form-hint" style="margin:-6px 0 12px">${t('dashRoundCurHint')}</p>
       <div id="dashRoundForm" style="display:none;border:1px dashed #c7d2fe;background:#f8faff;border-radius:10px;padding:14px;margin-bottom:14px">
         <div style="font-weight:700;font-size:14px;margin-bottom:10px">🆕 ${t('dashRoundNewTitle')}</div>
         <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px">
@@ -3962,9 +3963,10 @@ async function dashSetRoundCur(el) {
   if (!rid || typeof CloudSync === 'undefined' || !CloudSync.setChallengeRoundCurrent) return
   const rec = dashRoundList().find(r => r.id === rid)
   const label = (rec && rec.name) || rid
-  if (!confirm((LANG === 'en'
-    ? `Set "${label}" as the current round?\n\nAll students switch to it within about a minute and start from Day 1. The previous round is fully preserved and can be switched back to at any time.`
-    : `把「${label}」设为当前营次？\n\n全体学员约 1 分钟内切换到该营次并从第 1 天开始；之前营次的进度与成绩完整保留，随时可切回。`))) return
+  // v117 文案订正：原文案写「全体学员切换到该营次」是错的——营次按部门隔离，
+  //   切指针只影响「该营次适用部门」的学员，其他部门各走各的解析链、完全不受影响。
+  //   （v89 起 _roundCurrentForDept 先按学员部门匹配，指针不适用本部门时自动跳过。）
+  if (!confirm(t('dashRoundMakeCurConfirm', label))) return
   if (el) el.disabled = true
   try {
     const res = await CloudSync.setChallengeRoundCurrent(rid)

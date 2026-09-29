@@ -780,6 +780,9 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     dashRoundCreated: (n) => `已创建营次「${n}」。\n\n学员端约 1 分钟内切换到新营次，从第 1 天开始；上一期数据完整保留。`,
     dashRoundCreateFail: '创建失败，请检查网络后重试',
     dashRoundSwitched: (n) => `已切换到营次「${n}」。学员端约 1 分钟内同步。`,
+    // v117：订正「设为当前」的语义描述——原文案误写「全体学员」，实际按部门隔离
+    dashRoundMakeCurConfirm: (n) => `把「${n}」设为当前营次？\n\n该营次适用部门的学员约 1 分钟内切换到它，并从第 1 天开始；其他部门学员不受影响。\n之前营次的进度与成绩完整保留，随时可切回。`,
+    dashRoundCurHint: '「设为当前」= 决定本部门学员参加哪一期（切过去就从第 1 天重新开始）；它只影响该营次适用部门的学员，其他部门各用各的期次。与「开放挑战」是两件事：先设为当前、再开放挑战，学员才能答题。',
     dashRoundSwitchFail: '切换失败，请检查网络后重试',
     dashRoundDeleted: (n) => `已删除营次「${n}」。`,
     dashRoundDeleteFail: '删除失败，请检查网络后重试',
@@ -1626,6 +1629,9 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     dashRoundCreated: (n) => `Round "${n}" created.\n\nStudents switch to the new round within about a minute and start from Day 1; the previous round is fully preserved.`,
     dashRoundCreateFail: 'Create failed — please check your network and retry',
     dashRoundSwitched: (n) => `Switched to round "${n}". Students sync within about a minute.`,
+    // v117: corrected wording — the round is scoped by department, not all students
+    dashRoundMakeCurConfirm: (n) => `Set "${n}" as the current round?\n\nStudents in the departments this round applies to switch to it within about a minute and start from Day 1; other departments are unaffected.\nThe previous round is fully preserved and can be switched back to at any time.`,
+    dashRoundCurHint: '"Set current" decides which round the students of that department take part in (switching restarts them from Day 1). It only affects the departments this round applies to; other departments keep their own round. It is separate from "open challenge": set current first, then open the challenge, so students can answer.',
     dashRoundSwitchFail: 'Switch failed — please check your network and retry',
     dashRoundDeleted: (n) => `Round "${n}" deleted.`,
     dashRoundDeleteFail: 'Delete failed — please check your network and retry',
