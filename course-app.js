@@ -224,6 +224,8 @@ function renderCourseStudent() {
       // 线下课：无作答，走独立卡片（信息 + 管理员标注状态）
       if (courseIsOffline(a)) { myCardsHtml += courseStudentOfflineCard(c, a, me); return }
       const res = (a.results || {})[me]
+      // v115 期末考试放行闸门：未放行且未作答 → 等待态（放行后此分支消失，正常显示开始按钮）
+      const gateLocked = a.type === 'exam' && !!a.examGate && !res && !((a.examOpened || {})[me])
       const expired = a.deadline && now > a.deadline
       const isVideo = a.type === 'video'
       // 视频：仅完成记录 ≥90% 视为已完成；低完成度记录（如 3% 脏数据）视为未完成，引导重看刷新
@@ -259,6 +261,9 @@ function renderCourseStudent() {
           ? `<span class="course-status expired">${t('courseVideoLowTag', low)}</span>`
           : `<span class="course-status pending">${t('courseVideoLowTag', low)}</span>`
         actionHtml = `<button class="btn btn-primary btn-sm" onclick="courseStart('${escAttr(c.id)}','${escAttr(a.id)}')">${t('courseWatchBtn')}</button>`
+      } else if (gateLocked) {
+        statusHtml = `<span class="course-status pending">🔒 ${t('courseExamGateWaitTag')}</span>`
+        actionHtml = `<span style="font-size:12px;color:#9ca3af">${t('courseExamGateWaitHint')}</span>`
       } else if (expired) {
         statusHtml = `<span class="course-status expired">${t('courseExpiredOpen')}</span>`
         actionHtml = `<button class="btn btn-primary btn-sm" onclick="courseStart('${escAttr(c.id)}','${escAttr(a.id)}')">${isVideo ? t('courseWatchBtn') : t('courseStartBtn')}</button>`
@@ -267,7 +272,7 @@ function renderCourseStudent() {
         actionHtml = `<button class="btn btn-primary btn-sm" onclick="courseStart('${escAttr(c.id)}','${escAttr(a.id)}')">${isVideo ? t('courseWatchBtn') : t('courseStartBtn')}</button>`
       }
       const typeBadge = isVideo ? `<span class="course-type video">🎬 ${t('courseTypeVideo')}</span>`
-        : a.type === 'exam' ? `<span class="course-type exam">🧪 ${t('courseTypeExam')}</span>` : `<span class="course-type hw">📝 ${t('courseTypeHomework')}</span>`
+        : a.type === 'exam' ? `<span class="course-type exam">🧪 ${t('courseTypeExam')}${a.examGate ? ' 🔒' : ''}</span>` : `<span class="course-type hw">📝 ${t('courseTypeHomework')}</span>`
       myCardsHtml += `
         <div class="card course-card">
           <div class="course-card-head">
@@ -352,7 +357,7 @@ async function courseJoinClass(cid) {
 // ================================================================
 // 学员作答
 // ================================================================
-function courseStart(cid, aid) {
+function courseStart(cid, aid, _recheck) {
   const c = courseFind(cid)
   const a = courseFindAssign(cid, aid)
   if (!c || !a) return
@@ -368,6 +373,13 @@ function courseStart(cid, aid) {
     return courseReviewStart(cid, aid)
   }
   if (a.type === 'exam' && res) { alert(t('courseExamDoneAlert')); return }
+  // v115 期末考试放行闸门：examGate 开启时，学员须被管理员逐人放行后才能作答。
+  // 走到此处 res 必为空（有成绩的已在上方被「仅可作答一次」/回顾分支接走）。
+  if (a.type === 'exam' && a.examGate && !((a.examOpened || {})[me])) {
+    if (_recheck) { alert(t('courseExamGateWait')); return }
+    courseGateRecheck(cid, aid)   // 先重拉一次云端：管理员可能刚放行，本机还是旧缓存
+    return
+  }
   if (a.type === 'exam' && !confirm(t('courseExamStartConfirm', a.title))) return
   // v51：给每题标 _oi（assignment 内原下标），逐题错题明细按原题序记录
   const questions = (a.questions || []).map((q, i) => ({ ...q, _oi: i }))
@@ -392,6 +404,17 @@ function courseStart(cid, aid) {
     })
   }
   courseRenderTake()
+}
+
+// v115：闸门拦截后先重拉云端文档再判定一次（单次重试）——
+// 防「管理员刚放行、学员本机 courseState.doc 还是旧缓存」的误拦
+async function courseGateRecheck(cid, aid) {
+  try { courseState.doc = await CourseStore.getDoc() } catch (e) {}
+  const a = courseFindAssign(cid, aid)
+  if (a && a.type === 'exam' && a.examGate && ((a.examOpened || {})[courseUser()])) {
+    return courseStart(cid, aid, true)
+  }
+  alert(t('courseExamGateWait'))
 }
 
 // 线下课信息弹窗（学员视角：查看上课时间 / 备注 / 自己的完成状态）
@@ -1720,7 +1743,7 @@ async function courseRenderClass() {
     return `<tr${isDraft ? ' class="row-draft"' : ''}>
       <td class="course-sort-cell">${courseSortBtns(c.id, a.id, idx, assignTotal)}</td>
       <td>${draftTag}${escHtml(a.title)}</td>
-      <td>${isVideo ? t('courseTypeVideo') : (a.type === 'exam' ? t('courseTypeExam') : t('courseTypeHomework'))}</td>
+      <td>${isVideo ? t('courseTypeVideo') : (a.type === 'exam' ? t('courseTypeExam') : t('courseTypeHomework'))}${a.type === 'exam' && a.examGate ? ` <span title="${escAttr(t('courseExamGateLabel'))}">🔒</span>` : ''}</td>
       <td style="text-align:center">${isVideo ? ((a.quiz && a.quiz.length) ? a.quiz.length : '—') : (a.questions || []).length}</td>
       <td style="font-size:12px">${isDraft
         ? `<span style="color:#92400E">${t('courseDraftNotSent')}</span>`
@@ -2497,6 +2520,7 @@ async function courseCopyAssignDo(cid, aid) {
   // 深拷贝任务本体（题目数组 / 选项 / 课后小测 / 视频链接等一并复制），再重置实例字段
   const clone = JSON.parse(JSON.stringify(a))
   clone.results = {}          // 成绩不复制：新班级从零开始
+  delete clone.examOpened     // v115：放行名单属于原任务，不随复制带走（examGate 开关本身照常复制）
   clone.id = CourseStore.newId('a')
   clone.createdAt = now
   if (clone.status === 'draft') {
@@ -2594,6 +2618,20 @@ async function courseAssignDetail(cid, aid) {
         <div style="margin-top:8px;font-size:13px;color:#6b7280">${distHtml(diffDist)}</div>
       </div>`
     : ''
+  // v115 期末考试放行闸门：管理端逐成员「放行 / 撤销」列（仅 exam + examGate 显示）
+  const gateExam = a.type === 'exam' && !!a.examGate
+  const gateCell = (u, r) => {
+    const openRec = ((a.examOpened || {})[u]) || null
+    const tag = openRec
+      ? `<span class="course-status done" style="font-size:11px">🔓 ${t('courseExamGateOk')}${openRec.at ? ' · ' + courseFmtDate(openRec.at) : ''}</span>`
+      : `<span class="course-status expired" style="font-size:11px">🔒 ${t('courseExamGateNotYet')}</span>`
+    const btn = (!r && !openRec)
+      ? `<div style="margin-top:4px"><button class="btn btn-primary btn-sm" onclick="courseExamGateOpen(${escAttr(JSON.stringify(cid))},${escAttr(JSON.stringify(aid))},${escAttr(JSON.stringify(u))})">🔓 ${t('courseExamGateBtn')}</button></div>`
+      : (!r && openRec
+        ? `<div style="margin-top:4px"><button class="btn btn-ghost btn-sm" onclick="courseExamGateRevoke(${escAttr(JSON.stringify(cid))},${escAttr(JSON.stringify(aid))},${escAttr(JSON.stringify(u))})">${t('courseExamGateRevoke')}</button></div>`
+        : '')
+    return tag + btn
+  }
   const rows = (c.members || []).map(u => {
     const r = (a.results || {})[u]
     const overTag = r && r.overdue ? ` <span class="course-status expired">${t('courseOverdue')}</span>` : ''
@@ -2615,6 +2653,7 @@ async function courseAssignDetail(cid, aid) {
       ${hasQuiz ? `<td style="text-align:center">${r && r.quizTotal != null ? r.quizCorrect + '/' + r.quizTotal : '—'}</td>` : ''}
       <td style="text-align:center">${r ? (r.attempts || 1) : '—'}</td>
       <td style="font-size:12px">${r ? courseFmtDate(r.at) : '—'}</td>
+      ${gateExam ? `<td style="text-align:center">${gateCell(u, r)}</td>` : ''}
       <td>${r ? `<button class="btn btn-ghost btn-sm" onclick="courseResetResult(${escAttr(JSON.stringify(cid))},${escAttr(JSON.stringify(aid))},${escAttr(JSON.stringify(u))})">${t('courseResetResult')}</button>` : ''}</td>
     </tr>`
   }).join('')
@@ -2630,7 +2669,7 @@ async function courseAssignDetail(cid, aid) {
           <th>${t('courseThMember')}</th><th>${isVideo ? t('courseThWatch') : t('courseThScore')}</th><th>${isVideo ? t('courseThWatchSec') : t('courseThCorrect')}</th>
           ${isVideo ? `<th>${t('courseThDifficulty')}</th>` : ''}
           ${hasQuiz ? `<th>${t('courseThQuiz')}</th>` : ''}
-          <th>${t('courseThTries')}</th><th>${t('courseThSubmitAt')}</th><th>${t('courseThAction')}</th>
+          <th>${t('courseThTries')}</th><th>${t('courseThSubmitAt')}</th>${gateExam ? `<th>${t('courseExamGateCol')}</th>` : ''}<th>${t('courseThAction')}</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table></div>` :
@@ -2647,6 +2686,38 @@ async function courseResetResult(cid, aid, u) {
       const a = CourseStore.findAssign(c, aid)
       if (!a) return false
       if (a.results) delete a.results[u]
+    })
+  } catch (e) { alert(t('courseWriteFail')); return }
+  courseState.doc = await CourseStore.getDoc()
+  courseAssignDetail(cid, aid)
+}
+
+// v115：期末考试逐人放行（examGate 开启时学员须被放行才能作答；幂等，重复点不重复写）
+async function courseExamGateOpen(cid, aid, u) {
+  if (!confirm(t('courseExamGateConfirm', u))) return
+  try {
+    await CourseStore.mutate(doc => {
+      const c = CourseStore.findClass(doc, cid)
+      const a = CourseStore.findAssign(c, aid)
+      if (!a) return false
+      a.examOpened = a.examOpened || {}
+      if (a.examOpened[u]) return false   // 幂等：已放行不重复
+      a.examOpened[u] = { at: Date.now(), by: courseUser() }
+    })
+  } catch (e) { alert(t('courseWriteFail')); return }
+  courseState.doc = await CourseStore.getDoc()
+  courseAssignDetail(cid, aid)
+}
+
+// v115：撤销放行（仅未作答时出现按钮；已交成绩不受影响，examOpened 名单移除该学员）
+async function courseExamGateRevoke(cid, aid, u) {
+  if (!confirm(t('courseExamGateRevokeConfirm', u))) return
+  try {
+    await CourseStore.mutate(doc => {
+      const c = CourseStore.findClass(doc, cid)
+      const a = CourseStore.findAssign(c, aid)
+      if (!a) return false
+      if (a.examOpened) delete a.examOpened[u]
     })
   } catch (e) { alert(t('courseWriteFail')); return }
   courseState.doc = await CourseStore.getDoc()
@@ -2680,6 +2751,11 @@ function courseCreateAssignModal(cid) {
     </div>
     <div class="form-group" id="caPassGroup"><label>${t('coursePassLabel')}</label>
       <input type="number" id="caPass" min="0" max="100" value="60" /></div>
+    <div class="form-group" id="caGateGroup" style="display:none">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
+        <input type="checkbox" id="caExamGate" /> <span>🔒 ${t('courseExamGateLabel')}</span></label>
+      <p class="form-hint" style="margin:4px 0 0">${t('courseExamGateHint')}</p>
+    </div>
     <div class="form-group" id="caVideoUrlGroup" style="display:none"><label>${t('courseVideoUrlLabel')} *</label>
       <input type="text" id="caVideoUrl" placeholder="${t('courseVideoUrlPh')}" /></div>
 
@@ -2773,8 +2849,10 @@ function courseDraftTypeChange() {
   const bank = document.getElementById('caBankBox')
   const file = document.getElementById('caFileBox')
   const imp = document.getElementById('caImportBox')
+  const gate = document.getElementById('caGateGroup')
   if (dur) dur.style.display = type === 'exam' ? '' : 'none'
   if (pass) pass.style.display = type === 'exam' ? '' : 'none'
+  if (gate) gate.style.display = type === 'exam' ? '' : 'none'
   if (video) video.style.display = type === 'video' ? '' : 'none'
   if (quizBox) quizBox.style.display = type === 'video' ? '' : 'none'
   if (source) source.style.display = type === 'video' ? 'none' : ''
@@ -3147,6 +3225,9 @@ async function courseSubmitAssign(status) {
   const deadline = deadlineRaw ? new Date(deadlineRaw).getTime() : 0
   const duration = type === 'exam' ? (Number(document.getElementById('caDuration').value) || 20) : 0
   const passScore = type === 'exam' ? (Number(document.getElementById('caPass').value) || 60) : 60
+  // v115 期末考试放行闸门：勾选后学员须被管理员逐人放行才能作答
+  const gateEl = document.getElementById('caExamGate')
+  const examGate = type === 'exam' && !!(gateEl && gateEl.checked)
   if (!title) { alert(t('courseErrTitle')); return }
   // 截止时间校验：仅发布时检查（草稿可先存，发布/发送时再校验）
   if (status !== 'draft' && deadline && deadline < Date.now()) { alert(t('courseErrDeadline')); return }
@@ -3161,7 +3242,7 @@ async function courseSubmitAssign(status) {
         c.assignments.push(Object.assign({
           id: aid, type, title, desc, deadline, duration, passScore,
           createdAt: now, results: {}
-        }, status === 'draft' ? { status: 'draft' } : null, extra || {}))
+        }, status === 'draft' ? { status: 'draft' } : null, examGate ? { examGate: true } : null, extra || {}))
       })
     } catch (e) { alert(t('courseWriteFail')); throw e }
   }
@@ -3211,7 +3292,8 @@ function courseEditAssignModal(cid, aid) {
       desc: a.desc || '',
       deadline: a.deadline || 0,
       duration: a.duration || 0,
-      passScore: a.passScore || 60
+      passScore: a.passScore || 60,
+      examGate: !!a.examGate
     },
     questions: (a.questions || []).map(q => ({
       type: q.type,
@@ -3255,6 +3337,11 @@ function courseRenderEditModal() {
     </div>
     <div class="form-group" id="cePassGroup"><label>${t('coursePassLabel')}</label>
       <input type="number" id="cePass" min="0" max="100" value="${m.meta.passScore || 60}" /></div>
+    <div class="form-group" id="ceGateGroup" style="display:none">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
+        <input type="checkbox" id="ceExamGate" ${m.meta.examGate ? 'checked' : ''} /> <span>🔒 ${t('courseExamGateLabel')}</span></label>
+      <p class="form-hint" style="margin:4px 0 0">${t('courseExamGateHint')}</p>
+    </div>
 
     <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0" />
     <h4 style="margin:0 0 8px;color:#374151">${t('courseEditQuestions')}</h4>
@@ -3298,8 +3385,10 @@ function courseEditToggleExamFields() {
   const type = courseEditAssign.meta.type
   const dur = document.getElementById('ceExamOnly')
   const pass = document.getElementById('cePassGroup')
+  const gate = document.getElementById('ceGateGroup')
   if (dur) dur.style.display = type === 'exam' ? '' : 'none'
   if (pass) pass.style.display = type === 'exam' ? '' : 'none'
+  if (gate) gate.style.display = type === 'exam' ? '' : 'none'
 }
 
 function courseRenderEditQCard(q, i) {
@@ -3515,6 +3604,9 @@ async function courseSaveAssignEdit() {
   const deadline = deadlineRaw ? new Date(deadlineRaw).getTime() : 0
   const duration = type === 'exam' ? (Number(document.getElementById('ceDuration').value) || 20) : 0
   const passScore = type === 'exam' ? (Number(document.getElementById('cePass').value) || 60) : 60
+  // v115 期末考试放行闸门开关
+  const gateEl = document.getElementById('ceExamGate')
+  const examGate = type === 'exam' && !!(gateEl && gateEl.checked)
   if (!title) { alert(t('courseErrTitle')); return }
   // 验证题目：至少 1 道有效题
   const questions = m.questions.map(q => {
@@ -3555,6 +3647,10 @@ async function courseSaveAssignEdit() {
       a.deadline = deadline
       a.duration = duration
       a.passScore = passScore
+      // v115：期末考试放行闸门开关。examOpened（已放行名单）刻意保留不清 ——
+      // 关闭再重开闸门时旧放行仍有效（破坏性操作宁可不清）。
+      if (examGate) a.examGate = true
+      else delete a.examGate
       a.questions = questions
     })
   } catch (e) { alert(t('courseWriteFail')); return }
