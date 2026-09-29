@@ -1,6 +1,8 @@
 // ====== 测试：v35 线下课标注完成可选择未出席成员 ======
 // ① 数据模型：absent 字段 + 缺席者完成判定
-// ② 管理端「标注完成」弹窗：勾选没来的学员 → 其余自动标注；缺席徽标 / 幂等 / 全员缺席拦截 / 预勾选回显
+// ② 管理端「标注完成」弹窗：勾选【来了的】学员 → 其余自动标注为缺席；
+//    缺席徽标 / 幂等 / 全员缺席拦截 / 预勾选回显
+//    ⚠️ v119 反转：「勾选没来」→「勾选来了」（默认全勾，取消没到的）；存储结构 a.absent 不变。
 // ③ 撤销清空缺席名单；「成员补标」弹窗 ⇄ 缺席名单互为补集
 // ④ 学员端：缺席学员显示「未出席」；线性进度把缺席节点视为未完成
 // ⑤ i18n 双语键齐全（含人数插值）
@@ -126,21 +128,30 @@ const docStudent = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮英语班',
   assert('出席者 done=true → 完成', vm.runInContext('courseTaskDone({ type: "offline", absent: ["s2"] }, { done: true })', sbA) === true)
   assert('absent 兼容缺失（旧数据无字段）不报错', vm.runInContext('Array.isArray(({ held: true }).absent)', sbA) === false)
 
-  console.log('\n② 管理端：标注完成弹窗勾选没来的学员')
+  console.log('\n② 管理端：标注完成弹窗勾选【来了的学员】（v119 反转 v35 的「勾选没来」口径）')
+  // ⚠️ 契约反转（v119）：本弹窗由「勾选没来的学员」改为「勾选来了的学员」——
+  //   默认全员勾选（= 都来了），老师只需取消没到的几个 → 正向操作更顺手、不易误标。
+  //   存储结构未变（仍写 a.absent）；勾选框的语义反了，故下面断言随之改写。
   const sbB = makeSandbox(JSON.parse(JSON.stringify(docAdmin)))
   asAdmin(sbB)
   await vm.runInContext('courseTestSeedDoc()', sbB)
   const oid = vm.runInContext('courseState.doc.classes[0].assignments.find(a => a.type === "offline").id', sbB)
-  // 未下课行：主按钮应打开缺席选择弹窗
+  // 未下课行：主按钮应打开出席选择弹窗
   const row0 = vm.runInContext(`courseOfflineAdminRow(courseFind("c1"), courseState.doc.classes[0].assignments.find(a => a.id === "${oid}"))`, sbB)
   assert('未下课行主按钮 = courseHeldModal（含排序列）', row0.includes('courseHeldModal') && row0.includes('course-sort-cell'), row0.slice(0, 300))
   // 弹窗内容
-  vm.runInContext(`courseHeldModal("c1","${oid}")`, sbB)
+  await vm.runInContext(`courseHeldModal("c1","${oid}")`, sbB)
   const modalHtml = sbB._lastCreated() ? sbB._lastCreated().innerHTML : ''
-  assert('弹窗含 3 个缺席勾选框（name="coAbs"）', (modalHtml.match(/name="coAbs"/g) || []).length === 3, modalHtml.slice(0, 400))
-  assert('弹窗标题=标注完成、提示含「没来的学员 / 共 3 人」', modalHtml.includes('标注完成') && modalHtml.includes('没来的学员') && modalHtml.includes('共 3 人'), modalHtml.slice(0, 300))
-  // 勾选 s2、s3 没来 → 保存
-  sbB.document.querySelectorAll = () => [{ value: 's2' }, { value: 's3' }]
+  assert('弹窗含 3 个出席勾选框（name="coAbs"）', (modalHtml.match(/name="coAbs"/g) || []).length === 3, modalHtml.slice(0, 400))
+  assert('弹窗标题=标注完成、提示改为「取消勾选没来的学员 / 共 3 人」',
+    modalHtml.includes('标注完成') && modalHtml.includes('取消勾选没来的学员') && modalHtml.includes('共 3 人'), modalHtml.slice(0, 300))
+  // 首开无历史 → 默认全员勾选（都来了）
+  assert('v119：首开默认全员勾选（3 个 checked）', (modalHtml.match(/checked/g) || []).length === 3, modalHtml.slice(0, 400))
+  // v119 新增：一键全选/全不选按钮
+  assert('v119：弹窗含「全选 / 全不选」快捷按钮',
+    modalHtml.includes('courseHeldPickAll(true)') && modalHtml.includes('courseHeldPickAll(false)'), modalHtml.slice(0, 500))
+  // 提交「来了 s1」→ s2/s3 缺席
+  sbB.document.querySelectorAll = () => [{ value: 's1' }]
   await vm.runInContext(`courseHeldSave("c1","${oid}")`, sbB)
   const o1b = vm.runInContext(`courseState.doc.classes[0].assignments.find(a => a.id === "${oid}")`, sbB)
   assert('保存后 held=true、absent=[s2,s3]、仅出席者 s1 完成', o1b.held === true && JSON.stringify(o1b.absent) === '["s2","s3"]' && o1b.results.s1.done === true && !o1b.results.s2 && !o1b.results.s3, JSON.stringify(o1b))
@@ -152,28 +163,31 @@ const docStudent = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮英语班',
   await vm.runInContext(`courseHeldSave("c1","${oid}")`, sbB)
   const o1b2 = vm.runInContext(`courseState.doc.classes[0].assignments.find(a => a.id === "${oid}")`, sbB)
   assert('重复标注被拦截（提示已完成，数据不变）', (sbB._lastAlert || '').includes('已完成全员标注') && JSON.stringify(o1b2.absent) === '["s2","s3"]', 'alert=' + sbB._lastAlert)
-  // 撤销 → absent 与 results 清空
+  // 撤销 → results 清空、absent 保留
   await vm.runInContext(`courseUnheldAll("c1","${oid}")`, sbB)
   const o1c = vm.runInContext(`courseState.doc.classes[0].assignments.find(a => a.id === "${oid}")`, sbB)
   assert('撤销后 held=false、results 清空、缺席名单保留 [s2,s3]', o1c.held === false && Object.keys(o1c.results).length === 0 && JSON.stringify(o1c.absent) === '["s2","s3"]', JSON.stringify(o1c))
-  // 全员缺席 → 拦截不标注
-  sbB.document.querySelectorAll = () => [{ value: 's1' }, { value: 's2' }, { value: 's3' }]
+  // 全员未勾选（= 全员缺席）→ 拦截不标注
+  sbB.document.querySelectorAll = () => []
   await vm.runInContext(`courseHeldSave("c1","${oid}")`, sbB)
   const o1d = vm.runInContext(`courseState.doc.classes[0].assignments.find(a => a.id === "${oid}")`, sbB)
   assert('全员缺席被拦截：held 仍 false、无记录、提示无出席成员', o1d.held === false && Object.keys(o1d.results).length === 0 && (sbB._lastAlert || '').includes('没有可标注的出席成员'), 'alert=' + sbB._lastAlert)
-  // 预勾选回显：标注 s3 缺席 → 撤销 → 再开弹窗 s3 应预勾选
-  sbB.document.querySelectorAll = () => [{ value: 's3' }]
+  // 预勾选回显（v119 反转）：上次 s3 缺席 → 本次 s3 应【不勾选】，s1/s2 勾选
+  sbB.document.querySelectorAll = () => [{ value: 's1' }, { value: 's2' }]
   await vm.runInContext(`courseHeldSave("c1","${oid}")`, sbB)
   const o1e = vm.runInContext(`courseState.doc.classes[0].assignments.find(a => a.id === "${oid}")`, sbB)
   assert('s3 缺席标注成功（s1/s2 完成）', o1e.held === true && JSON.stringify(o1e.absent) === '["s3"]' && o1e.results.s1.done && o1e.results.s2.done && !o1e.results.s3, JSON.stringify(o1e))
   await vm.runInContext(`courseUnheldAll("c1","${oid}")`, sbB)
-  vm.runInContext(`courseHeldModal("c1","${oid}")`, sbB)
+  await vm.runInContext(`courseHeldModal("c1","${oid}")`, sbB)
   const modal2 = sbB._lastCreated() ? sbB._lastCreated().innerHTML : ''
-  assert('再次标注弹窗中 s3 预勾选、s1 未勾选', (modal2.match(/name="coAbs"/g) || []).length === 3 && modal2.includes('value="s3" checked') && !modal2.includes('value="s1" checked'), modal2.slice(0, 400))
+  assert('v119：再次标注弹窗中 s1/s2 预勾选、s3 未勾选（按上次缺席回显）',
+    (modal2.match(/name="coAbs"/g) || []).length === 3 &&
+    modal2.includes('value="s1" checked') && modal2.includes('value="s2" checked') && !modal2.includes('value="s3" checked'),
+    modal2.slice(0, 400))
 
   console.log('\n③ 「成员补标」弹窗 ⇄ 缺席名单互为补集')
   // 恢复 held + absent=[s3]
-  sbB.document.querySelectorAll = () => [{ value: 's3' }]
+  sbB.document.querySelectorAll = () => [{ value: 's1' }, { value: 's2' }]
   await vm.runInContext(`courseHeldSave("c1","${oid}")`, sbB)
   // 补标弹窗只勾 s1/s2（s3 仍缺席）
   vm.runInContext(`courseOfflineMembers("c1","${oid}")`, sbB)
@@ -215,6 +229,11 @@ const docStudent = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮英语班',
   console.log('\n⑤ i18n 双语键')
   const sbF = makeSandbox({ doc: {} })
   assert('courseOfflineHeldModalHint(3) 中文含「共 3 人」', vm.runInContext("t('courseOfflineHeldModalHint',3)", sbF).includes('共 3 人'))
+  // ⚠️ v119 反转：提示语由「请勾选没来的学员」改为「请取消勾选没来的学员」（口径变了）
+  assert('v119：HeldModalHint 中文改为「取消勾选没来的学员」',
+    vm.runInContext("t('courseOfflineHeldModalHint',3)", sbF).includes('取消勾选没来的学员'))
+  assert('v119：全选/全不选两键中文齐备',
+    vm.runInContext("t('courseOfflinePickAll')", sbF) === '全选' && vm.runInContext("t('courseOfflinePickNone')", sbF) === '全不选')
   assert('courseOfflineAbsentTag(2) = 未到 2 人', vm.runInContext("t('courseOfflineAbsentTag',2)", sbF) === '未到 2 人')
   assert('courseOfflineNoAttend 中文存在', vm.runInContext("t('courseOfflineNoAttend')", sbF).length > 8)
   assert('courseOfflineAbsentSelf = 未出席', vm.runInContext("t('courseOfflineAbsentSelf')", sbF) === '未出席')
@@ -222,6 +241,10 @@ const docStudent = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮英语班',
   // 切换英文（t 取 en 侧）
   vm.runInContext('LANG = "en"', sbF)
   assert('en：HeldAll = Mark Done', vm.runInContext("t('courseOfflineHeldAll')", sbF) === 'Mark Done')
+  assert('v119 en：HeldModalHint 改为 Uncheck',
+    vm.runInContext("t('courseOfflineHeldModalHint',3)", sbF).includes('Uncheck'))
+  assert('v119 en：PickAll/PickNone = Select all / Clear all',
+    vm.runInContext("t('courseOfflinePickAll')", sbF) === 'Select all' && vm.runInContext("t('courseOfflinePickNone')", sbF) === 'Clear all')
   assert('en：AbsentTag(2) = 2 absent', vm.runInContext("t('courseOfflineAbsentTag',2)", sbF) === '2 absent')
   assert('en：AbsentSelf = Absent', vm.runInContext("t('courseOfflineAbsentSelf')", sbF) === 'Absent')
 

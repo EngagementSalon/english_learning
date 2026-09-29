@@ -184,6 +184,9 @@ const docLearner = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮英语班',
   assert('自定义主题创建成功（custom=true, topicId=0, 标题=葡萄酒品鉴）', oC && oC.custom === true && oC.topicId === 0 && oC.title === '葡萄酒品鉴', JSON.stringify(oC))
   assert('空主题被拦截（alert 提示选择主题）', (() => { sbC._getEl('coTopic').value = ''; vm.runInContext('courseCreateOffline("c1")', sbC); return (sbC._lastAlert || '').includes('请选择或输入培训主题') })())
   // 标注完成（默认无缺席 → 全员完成）
+  // ⚠️ v119 反转：勾选框语义由「没来」改为「来了」，故 mock 需返回全部成员才等于「全员出席」
+  //    （旧口径下空数组 = 无人缺席；新口径下空数组 = 全员缺席，会被拦截）
+  sbC.document.querySelectorAll = () => [{ value: 's1' }, { value: 's2' }]
   await vm.runInContext('courseHeldSave("c1","' + o1.id + '")', sbC)
   const o1b = vm.runInContext('courseState.doc.classes[0].assignments.find(a => a.id === "' + o1.id + '")', sbC)
   assert('一键后 held=true 且全员 done（by admin）', o1b && o1b.held === true && o1b.results.s1.done === true && o1b.results.s2.done === true && o1b.results.s1.by === 'admin', JSON.stringify(o1b && o1b.results))
@@ -192,7 +195,7 @@ const docLearner = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮英语班',
   const o1c = vm.runInContext('courseState.doc.classes[0].assignments.find(a => a.id === "' + o1.id + '")', sbC)
   assert('重复一键被拦截（已标注提示，数据不变）', o1c && o1c.results.s1.at === atBefore && (sbC._lastAlert || '').includes('已完成全员标注'), 'alert=' + sbC._lastAlert)
   // 成员标注弹窗：s1 取消，s2 保留
-  vm.runInContext('courseOfflineMembers("c1","' + o1.id + '")', sbC)
+  await vm.runInContext('courseOfflineMembers("c1","' + o1.id + '")', sbC)
   const memHtml = sbC._lastCreated() ? sbC._lastCreated().innerHTML : ''
   assert('成员弹窗含出席标注标题与两个勾选项', memHtml.includes('出席标注') && (memHtml.match(/name="coM"/g) || []).length === 2, memHtml.slice(0, 300))
   sbC.document.querySelectorAll = () => [{ value: 's2' }]   // 只勾 s2
@@ -204,6 +207,7 @@ const docLearner = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮英语班',
   const o1e = vm.runInContext('courseState.doc.classes[0].assignments.find(a => a.id === "' + o1.id + '")', sbC)
   assert('全取消后 results 清空且 held=false', o1e && Object.keys(o1e.results).length === 0 && o1e.held === false, JSON.stringify(o1e))
   // 撤销标注（对 o0：先一键再撤销）
+  sbC.document.querySelectorAll = () => [{ value: 's1' }, { value: 's2' }]   // v119：勾选=来了，全员勾选才能标注成功
   await vm.runInContext('courseHeldSave("c1","o0")', sbC)
   await vm.runInContext('courseUnheldAll("c1","o0")', sbC)
   const o0b = vm.runInContext('courseState.doc.classes[0].assignments.find(a => a.id === "o0")', sbC)

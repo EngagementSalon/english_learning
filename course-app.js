@@ -2003,26 +2003,38 @@ async function courseEditOffline(cid, aid) {
   courseRenderClass()
 }
 
-// 真正下课后「标注完成」：先弹窗勾选本次没来的学员，其余成员自动标注完成
-// 缺席名单写入 a.absent（数组）；results 只记录出席(done)者 —— 二者互补
-function courseHeldModal(cid, aid) {
+// 真正下课后「标注完成」：弹窗勾选**来了的人**（v119 反转，原先勾的是没来的人）
+// 默认全员勾选（= 全来了），老师只需取消没到的那几个 → 正向操作更顺手、不易误标。
+// 存储结构不变：仍写 a.absent（缺席数组）；results 只记录出席(done)者 —— 二者互补
+// 名单标签用 courseMemberCell（中文名加粗 + 用户名小字），老师看名字点人而不是看账号
+async function courseHeldModal(cid, aid) {
   const c = courseFind(cid)
   const a = courseFindAssign(cid, aid)
   if (!c || !a) return
   const members = c.members || []
   if (a.held) { alert(t('courseOfflineAlreadyHeld')); return }
   if (!members.length) { alert(t('courseOfflineNoMembers')); return }
+  const infoMap = await courseUserInfoMap()
   const prevAbsent = Array.isArray(a.absent) ? a.absent.filter(u => members.indexOf(u) >= 0) : []
+  // v119：无历史记录时默认全勾（假设都来了）；有历史则按上次缺席名单反推
   const listHtml = members.map(u => {
-    const chk = prevAbsent.indexOf(u) >= 0 ? ' checked' : ''
-    return `<label class="course-off-member"><input type="checkbox" name="coAbs" value="${escAttr(u)}"${chk} /> ${escHtml(u)}</label>`
+    const present = prevAbsent.length ? prevAbsent.indexOf(u) < 0 : true
+    return `<label class="course-off-member"><input type="checkbox" name="coAbs" value="${escAttr(u)}"${present ? ' checked' : ''} /> <span>${courseMemberCell(u, infoMap)}</span></label>`
   }).join('')
   courseModalOpen(t('courseOfflineHeldAll'), `
     <p style="margin-bottom:8px;font-weight:600">📅 ${escHtml(a.title)}</p>
     <p class="form-hint" style="margin-bottom:10px">${t('courseOfflineHeldModalHint', members.length)}</p>
+    <div style="margin-bottom:8px;display:flex;gap:8px">
+      <button class="btn btn-ghost btn-sm" type="button" onclick="courseHeldPickAll(true)">${t('courseOfflinePickAll')}</button>
+      <button class="btn btn-ghost btn-sm" type="button" onclick="courseHeldPickAll(false)">${t('courseOfflinePickNone')}</button>
+    </div>
     <div class="course-chips course-off-members course-off-absent-pick" style="max-height:240px;overflow-y:auto">${listHtml}</div>`,
     `<button class="btn btn-primary" onclick="courseHeldSave('${escAttr(cid)}','${escAttr(aid)}')">✅ ${t('courseOfflineHeldAll')}</button>
      <button class="btn btn-ghost" onclick="courseModalClose()">${t('cancelBtn')}</button>`)
+}
+// v119：一键全选 / 全不选（长名单时省事）
+function courseHeldPickAll(on) {
+  document.querySelectorAll('.course-off-absent-pick input[name="coAbs"]').forEach(el => { el.checked = !!on })
 }
 
 async function courseHeldSave(cid, aid) {
@@ -2032,10 +2044,12 @@ async function courseHeldSave(cid, aid) {
   const members = c.members || []
   if (a.held) { alert(t('courseOfflineAlreadyHeld')); return }
   if (!members.length) { alert(t('courseOfflineNoMembers')); return }
-  const absent = Array.prototype.slice.call(document.querySelectorAll('.course-off-absent-pick input[name="coAbs"]:checked')).map(el => el.value)
-  const absentSet = {}
-  absent.forEach(u => { absentSet[u] = true })
-  const attend = members.filter(u => !absentSet[u])
+  // v119：勾选框现在代表「来了」（反转 v35 的「没来」口径），故缺席 = 未勾选者
+  const present = Array.prototype.slice.call(document.querySelectorAll('.course-off-absent-pick input[name="coAbs"]:checked')).map(el => el.value)
+  const presentSet = {}
+  present.forEach(u => { presentSet[u] = true })
+  const absent = members.filter(u => !presentSet[u])
+  const attend = members.filter(u => presentSet[u])
   if (!attend.length) { alert(t('courseOfflineNoAttend')); return }   // 全员缺席：不标 held
   const by = courseUser()
   try {
@@ -2049,7 +2063,7 @@ async function courseHeldSave(cid, aid) {
       aa.absent = absent.slice()
       aa.results = aa.results || {}
       ;(cc.members || []).forEach(u => {
-        if (absentSet[u]) delete aa.results[u]   // 缺席者移除（防此前误标残留）
+        if (!presentSet[u]) delete aa.results[u]   // 缺席者移除（防此前误标残留）
         else {
           const prev = aa.results[u]             // 出席者写 done，保留原有标注人/时间
           aa.results[u] = { done: true, at: (prev && prev.at) || now, by: (prev && prev.by) || by }
@@ -2083,23 +2097,34 @@ async function courseUnheldAll(cid, aid) {
 }
 
 // 出席成员标注弹窗：逐个勾选（补标缺席 / 取消误标）
-function courseOfflineMembers(cid, aid) {
+// 本弹窗一直是「勾选=出席」的正向口径（与 v119 后的 courseHeldModal 一致）；
+// v119 起名单同样改用中文名显示（原先只显示用户名）
+async function courseOfflineMembers(cid, aid) {
   const c = courseFind(cid)
   const a = courseFindAssign(cid, aid)
   if (!c || !a) return
   const members = c.members || []
+  const infoMap = await courseUserInfoMap()
   const listHtml = members.length
     ? members.map(u => {
         const done = !!(a.results || {})[u] && (a.results || {})[u].done
-        return `<label class="course-off-member"><input type="checkbox" name="coM" value="${escAttr(u)}"${done ? ' checked' : ''} /> ${escHtml(u)}</label>`
+        return `<label class="course-off-member"><input type="checkbox" name="coM" value="${escAttr(u)}"${done ? ' checked' : ''} /> <span>${courseMemberCell(u, infoMap)}</span></label>`
       }).join('')
     : `<p style="color:#9ca3af">${t('courseOfflineNoMembers')}</p>`
   courseModalOpen(t('courseOfflineMembersTitle'), `
     ${members.length ? `<p style="margin-bottom:8px;font-weight:600">📅 ${escHtml(a.title)}</p>` : ''}
     <p class="form-hint" style="margin-bottom:10px">${t('courseOfflineMembersHint')}</p>
+    <div style="margin-bottom:8px;display:flex;gap:8px">
+      <button class="btn btn-ghost btn-sm" type="button" onclick="courseOfflinePickAll(true)">${t('courseOfflinePickAll')}</button>
+      <button class="btn btn-ghost btn-sm" type="button" onclick="courseOfflinePickAll(false)">${t('courseOfflinePickNone')}</button>
+    </div>
     <div class="course-chips course-off-members" style="max-height:240px;overflow-y:auto">${listHtml}</div>`,
     `<button class="btn btn-primary" onclick="courseOfflineMembersSave('${escAttr(cid)}','${escAttr(aid)}')">${t('saveBtn')}</button>
      <button class="btn btn-ghost" onclick="courseModalClose()">${t('cancelBtn')}</button>`)
+}
+// v119：出席标注弹窗的一键全选 / 全不选
+function courseOfflinePickAll(on) {
+  document.querySelectorAll('.course-off-members input[name="coM"]').forEach(el => { el.checked = !!on })
 }
 
 async function courseOfflineMembersSave(cid, aid) {
