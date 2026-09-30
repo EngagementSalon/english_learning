@@ -1,9 +1,16 @@
 // ====== 测试：v34 任务排序（调整「作业 / 线下课」在班级内的先后顺序） ======
-// ① 班级详情任务表每行有 ↕ 排序按钮（↑ 上移 / ↓ 下移），首行 ↑ 禁用、末行 ↓ 禁用
+// ① 班级详情任务表每行有排序控件（v127 起为拖拽手柄 ⠿，取代 v34 的 ↑↓ 按钮）
 // ② courseMoveAssign 上移/下移 → 交换云端 classes[].assignments 顺序；边界 no-op
 // ③ 排序后管理端表格行顺序随之变化（作业 + 线下课混排）
 // ④ 学员「我的学习进度」按排序后的数组顺序渲染节点路径 + 下一步引导
 // ⑤ i18n 双语键齐全
+//
+// ★ v127 反转（v34 契约作废）：排序交互由「点 ↑↓ 挪一位」改为「拖拽直接落位」。
+//   本节 ①③ 组里所有断言「↑↓ 按钮存在 / 边界 disabled / onclick 带 ±1」的断言
+//   描述的是**旧交互实现**，已被用户需求（「作业顺序要一直点这不太方便」）显式推翻 →
+//   改写为描述新契约：拖拽手柄存在 + 双通道（鼠标 drag / 手机 touch）接线 + 行级落点标记。
+//   ★ ② 组（真实的顺序交换行为）**完全未改动且全部通过** —— 这证明重排逻辑没被重构破坏，
+//     变的只是「触发交互的入口」，不是「排序语义」。
 const fs = require('fs')
 const path = require('path')
 const vm = require('vm')
@@ -128,15 +135,29 @@ const docPath = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮英语班', me
 ;(async () => {
   console.log('\n🧪 v34 任务排序（作业 / 线下课先后顺序）回归测试\n')
 
-  console.log('① 纯函数：排序按钮渲染 + 边界禁用')
+  console.log('① 纯函数：排序手柄渲染 + 双通道接线（v127 反转）')
   const sbA = makeSandbox({ doc: {} })
   const up0 = vm.runInContext('courseSortBtns("c1","h1",0,3)', sbA)
-  assert('首行：↑ 禁用、↓ 可点击（onclick 带 +1）', up0.includes('disabled') && up0.includes("courseMoveAssign('c1','h1',1)") && !up0.includes("courseMoveAssign('c1','h1',-1)"), up0)
-  const mid = vm.runInContext('courseSortBtns("c1","h2",1,3)', sbA)
-  assert('中间行：↑↓ 均可点击', mid.includes("courseMoveAssign('c1','h2',-1)") && mid.includes("courseMoveAssign('c1','h2',1)") && !mid.includes('disabled'), mid)
-  const last = vm.runInContext('courseSortBtns("c1","v1",3,4)', sbA)
-  assert('末行：↓ 禁用、↑ 可点击', last.includes('disabled') && last.includes("courseMoveAssign('c1','v1',-1)") && !last.includes("courseMoveAssign('c1','v1',1)"), last)
-  assert('按钮带 title 提示（上移/下移）', up0.includes('title="上移"') && up0.includes('title="下移"'), up0)
+  // v127 新契约：每行渲染一个拖拽手柄，不再区分首/末行（拖拽无边界禁用概念）
+  assert('v127：渲染拖拽手柄（course-drag-handle + draggable）',
+    up0.includes('course-drag-handle') && up0.includes('draggable="true"'), up0)
+  assert('v127：鼠标通道接线完整（dragstart/dragover/drop/dragend）',
+    up0.includes('ondragstart="courseDragStart(event,this)"') &&
+    up0.includes('ondragover="courseDragOver(event,this)"') &&
+    up0.includes('ondrop="courseDragDrop(event,this)"') &&
+    up0.includes('ondragend="courseDragEnd(event,this)"'), up0)
+  assert('v127：手机触摸通道接线（ontouchstart）',
+    up0.includes('ontouchstart="courseTouchStart(event,this)"'), up0)
+  assert('v127：手柄带 data-idx / data-aid（落位与标识需要）',
+    up0.includes('data-idx="0"') && up0.includes('data-aid="h1"'), up0)
+  assert('v127：中间行渲染出同样的手柄（不再有「均可点击」的边界差异）',
+    vm.runInContext('courseSortBtns("c1","h2",1,3)', sbA).includes('course-drag-handle'), '')
+  assert('v127：末行渲染出同样的手柄（拖拽无「末行禁用」概念）',
+    vm.runInContext('courseSortBtns("c1","v1",3,4)', sbA).includes('course-drag-handle'), '')
+  assert('v127 反转：旧的 ↑↓ 内联 onclick 已消失（不再 courseMoveAssign(...,-1)）',
+    !up0.includes("courseMoveAssign('c1','h1'") && !up0.includes('course-sort-btns'), up0)
+  assert('v127：手柄带拖拽提示 title（courseDragHint）',
+    up0.includes('title="按住拖动可调整顺序"'), up0)
 
   console.log('\n② 管理端：上移 / 下移交换 assignments 顺序（云端入库）')
   const sbB = makeSandbox(JSON.parse(JSON.stringify(docMix)))
@@ -169,20 +190,30 @@ const docPath = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮英语班', me
   await vm.runInContext('courseMoveAssign("c1","nope",-1)', sbB)
   assert('不存在的任务 id 移动 = 顺序不变', JSON.stringify(idsOf(sbB, 'c1')) === JSON.stringify(['h2', 'h1', 'v1', 'o1']), JSON.stringify(idsOf(sbB, 'c1')))
 
-  console.log('\n③ 管理端表格：排序后行顺序变化 + ↕ 列存在')
+  console.log('\n③ 管理端表格：排序后行顺序变化 + 拖拽手柄列存在（v127 反转）')
   const html = sbB._getEl('page-course').innerHTML
-  assert('班级详情表格含 ↕ 顺序列（4 行 sort-cell + 4 组 sort-btns）',
-    (html.match(/course-sort-cell/g) || []).length === 4 && (html.match(/course-sort-btns/g) || []).length === 4,
-    'cells=' + (html.match(/course-sort-cell/g) || []).length + ' btns=' + (html.match(/course-sort-btns/g) || []).length)
-  assert('表格含排序按钮 onclick', html.includes('courseMoveAssign'), '')
+  // v127 新契约：每一行都有「顺序单元格 + 拖拽手柄」；旧断言数的是 sort-btns（按钮组），已作废
+  assert('v127：班级详情表格 4 行都有顺序单元格',
+    (html.match(/course-sort-cell/g) || []).length === 4,
+    'cells=' + (html.match(/course-sort-cell/g) || []).length)
+  assert('v127：4 行都有拖拽手柄（接线断言：不是只定义函数）',
+    (html.match(/course-drag-handle/g) || []).length === 4,
+    'handles=' + (html.match(/course-drag-handle/g) || []).length)
+  assert('v127：行级落点标记 data-drag-idx 覆盖 4 行（拖拽落位依赖它）',
+    (html.match(/data-drag-idx="/g) || []).length === 4,
+    'dragIdx=' + (html.match(/data-drag-idx="/g) || []).length)
+  assert('v127 反转：旧排序按钮 onclick（courseMoveAssign）已不在表格里',
+    !html.includes('courseMoveAssign('), '')
   assert('表格下方含排序提示（我的学习进度按此顺序）', html.includes('我的学习进度') && html.includes('按此顺序'), html.slice(0, 300))
   // 行顺序应按新数组：h2 → h1 → v1 → o1
   const t1 = html.indexOf('第二课作业'), t2 = html.indexOf('第一课作业'), t3 = html.indexOf('服务礼仪视频'), t4 = html.indexOf('点餐服务')
   assert('表格行顺序 = 第二课作业 → 第一课作业 → 服务礼仪视频 → 点餐服务', t1 >= 0 && t1 < t2 && t2 < t3 && t3 < t4, 'idx=' + t1 + ',' + t2 + ',' + t3 + ',' + t4)
-  // 末行（o1）的 ↓ 按钮禁用
+  // 末行（o1）也应带手柄与正确的落位下标（v127：拖拽不区分首末行，但仍须能标识自己是第几行）
   const rowStart = html.lastIndexOf('<tr', t4)
   const o1row = html.slice(rowStart, html.indexOf('</tr>', t4))
-  assert('末行 o1 的 ↓ 禁用（disabled 且无 +1 onclick）', o1row.includes('course-sort-cell') && o1row.includes('disabled') && !o1row.includes("courseMoveAssign('c1','o1',1)"), o1row.slice(0, 200))
+  assert('v127：末行 o1 带手柄 + data-drag-idx="3"（拖到末位后可再拖回）',
+    o1row.includes('course-sort-cell') && o1row.includes('course-drag-handle') && o1row.includes('data-drag-idx="3"'),
+    o1row.slice(0, 240))
 
   console.log('\n④ 学员端：线性学习进度按排序后的顺序展示')
   const sbD = makeSandbox(JSON.parse(JSON.stringify(docPath)))

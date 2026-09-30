@@ -1719,6 +1719,7 @@ async function courseSaveResult(correct, total, usedSec) {
 // 管理员端
 // ================================================================
 function renderCourseAdmin() {
+  courseDragBindGlobal()
   const el = document.getElementById('page-course')
   const classes = courseState.doc.classes || []
   let totalAssign = 0, totalExam = 0, totalSubmit = 0
@@ -1837,7 +1838,7 @@ async function courseRenderClass() {
     const scores = Object.values(a.results || {}).map(r => r.score || 0)
     const avg = scores.length ? Math.round(scores.reduce((s, x) => s + x, 0) / scores.length) : 0
     const draftTag = isDraft ? `<span class="course-draft-tag">⏳ ${t('courseDraftTag')}</span> ` : ''
-    return `<tr${isDraft ? ' class="row-draft"' : ''}>
+    return `<tr${isDraft ? ' class="row-draft"' : ''} data-drag-aid="${escAttr(a.id)}" data-drag-idx="${idx}">
       <td class="course-sort-cell">${courseSortBtns(c.id, a.id, idx, assignTotal)}</td>
       <td>${draftTag}${escHtml(a.title)}</td>
       <td>${isVideo ? t('courseTypeVideo') : (a.type === 'coursefinal' ? t('courseTypeCourseFinal') : (a.type === 'exam' ? t('courseTypeExam') : t('courseTypeHomework')))}${a.type === 'coursefinal' ? ` <span title="${escAttr(t('courseFinalGateLabel'))}">🔒</span>` : (a.type === 'exam' && a.examGate ? ` <span title="${escAttr(t('courseExamGateLabel'))}">🔒</span>` : '')}</td>
@@ -1892,7 +1893,7 @@ async function courseRenderClass() {
     ${assignRows ? `<div class="card" style="padding:0;overflow-x:auto">
       <table class="admin-table dash-table">
         <thead><tr>
-          <th style="width:76px" title="${escAttr(t('courseOrderHint'))}">↕</th>
+          <th style="width:56px" title="${escAttr(t('courseOrderHint'))}">⠿</th>
           <th>${t('courseThTitle')}</th><th>${t('courseThType')}</th><th>${t('courseThCount')}</th>
           <th>${t('courseThDeadline')}</th><th>${t('courseThProgress')}</th><th>${t('courseThAvg')}</th>
           <th>${t('courseThAction')}</th>
@@ -1900,41 +1901,212 @@ async function courseRenderClass() {
         <tbody>${assignRows}</tbody>
       </table></div>` :
       `<div class="card" style="text-align:center;padding:30px;color:#9ca3af">${t('courseNoAssign')}</div>`}
-    <p class="form-hint" style="margin-top:8px">↕ ${t('courseOrderHint')}</p>
+    <p class="form-hint" style="margin-top:8px">⠿ ${t('courseOrderHint')}</p>
     <p class="form-hint" style="margin-top:12px">${t('courseAdminHint')}</p>`
 }
 
 // ================================================================
 // 任务排序：调整「作业 / 测评 / 视频 / 线下课」在班级内的先后顺序
 // 学员端「我的学习进度」按 assignments 数组顺序渲染，交换数组即全局生效
+//
+// v127：整列为「拖拽手柄」，把原来「点一下挪一位」的 ↑↓ 按钮换成直接拖到位。
+//       同时保留 courseMoveAssign（键盘/无拖拽环境回落，见 §无拖拽能力兜底）。
 // ================================================================
-// 行内排序按钮（↕）：首行禁用 ↑、末行禁用 ↓，草稿行同样可排
+
+// 行首拖拽手柄。draggable 只挂在手柄上（不挂 <tr>），否则整行文字都无法选中。
 function courseSortBtns(cid, aid, idx, total) {
-  const up = idx > 0
-    ? `<button class="btn btn-ghost btn-sm course-sort-btn" title="${escAttr(t('courseMoveUp'))}" onclick="courseMoveAssign('${escAttr(cid)}','${escAttr(aid)}',-1)">↑</button>`
-    : `<button class="btn btn-ghost btn-sm course-sort-btn" disabled title="${escAttr(t('courseMoveUp'))}">↑</button>`
-  const dn = idx < total - 1
-    ? `<button class="btn btn-ghost btn-sm course-sort-btn" title="${escAttr(t('courseMoveDown'))}" onclick="courseMoveAssign('${escAttr(cid)}','${escAttr(aid)}',1)">↓</button>`
-    : `<button class="btn btn-ghost btn-sm course-sort-btn" disabled title="${escAttr(t('courseMoveDown'))}">↓</button>`
-  return `<div class="course-sort-btns">${up}${dn}</div>`
+  return `<div class="course-drag-handle"
+      draggable="true"
+      title="${escAttr(t('courseDragHint'))}"
+      data-cid="${escAttr(cid)}" data-aid="${escAttr(aid)}" data-idx="${idx}"
+      ondragstart="courseDragStart(event,this)"
+      ondragover="courseDragOver(event,this)"
+      ondragleave="courseDragLeave(event,this)"
+      ondrop="courseDragDrop(event,this)"
+      ondragend="courseDragEnd(event,this)"
+      ontouchstart="courseTouchStart(event,this)"
+    >⠿</div>`
 }
 
-// 上移 / 下移一位（dir=-1 上移，+1 下移）；首尾边界处不动（mutate 返回 false）
-async function courseMoveAssign(cid, aid, dir) {
+// 把 arr 里 from 位置的元素移到 to 位置（纯函数，便于测试；越界返回 null 不动数据）
+function courseReorderList(arr, from, to) {
+  if (!Array.isArray(arr)) return null
+  if (from < 0 || to < 0 || from >= arr.length || to >= arr.length) return null
+  if (from === to) return null
+  const next = arr.slice()
+  const [moved] = next.splice(from, 1)
+  next.splice(to, 0, moved)
+  return next
+}
+
+// 拖拽状态（模块级，同一时刻只会有一个手势）
+let _courseDrag = { cid: '', aid: '', from: -1 }
+
+function courseDragStart(e, el) {
+  _courseDrag = {
+    cid: el.dataset.cid || '',
+    aid: el.dataset.aid || '',
+    from: parseInt(el.dataset.idx, 10)
+  }
+  const tr = el.closest('tr')
+  if (tr) tr.classList.add('course-dragging')
+  if (e && e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    // Firefox 要求设置数据，否则不触发 drop
+    try { e.dataTransfer.setData('text/plain', el.dataset.aid || '') } catch (err) {}
+  }
+}
+
+// 悬停时给目标行加「插入到上方 / 下方」的视觉提示，松手即按此落位
+function courseDragOver(e, el) {
+  if (e) { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'move' }
+  const tr = el.closest('tr')
+  if (!tr) return
+  const r = tr.getBoundingClientRect()
+  const after = (e && typeof e.clientY === 'number') ? (e.clientY > r.top + r.height / 2) : false
+  // 先清掉全表标记，避免同时高亮多行
+  document.querySelectorAll('tr.course-drop-above, tr.course-drop-below').forEach(x => {
+    x.classList.remove('course-drop-above', 'course-drop-below')
+  })
+  if (tr.dataset && tr.dataset.dragAid === _courseDrag.aid) return
+  tr.classList.add(after ? 'course-drop-below' : 'course-drop-above')
+}
+
+function courseDragLeave(e, el) {
+  const tr = el.closest('tr')
+  if (tr) tr.classList.remove('course-drop-above', 'course-drop-below')
+}
+
+function courseDragEnd(e, el) {
+  const tr = el && el.closest ? el.closest('tr') : null
+  if (tr) tr.classList.remove('course-dragging')
+  document.querySelectorAll('tr.course-drop-above, tr.course-drop-below').forEach(x => {
+    x.classList.remove('course-drop-above', 'course-drop-below')
+  })
+  _courseDrag = { cid: '', aid: '', from: -1 }
+}
+
+// 松手落位：目标行 + 「上半/下半」→ 目标下标；交给 courseMoveAssignTo 写云端
+async function courseDragDrop(e, el) {
+  if (e) e.preventDefault()
+  const tr = el.closest('tr')
+  const cid = _courseDrag.cid
+  const from = _courseDrag.from
+  if (!tr || from < 0) { courseDragEnd(e, el); return }
+  const toIdx = parseInt(tr.dataset.dragIdx, 10)
+  if (isNaN(toIdx)) { courseDragEnd(e, el); return }
+  const after = tr.classList.contains('course-drop-below')
+  courseDragEnd(e, el)
+  // 往下拖时：插到目标行之后 = 目标下标；插到之前 = 目标下标 - 1（元素自身被摘走后下标会左移）
+  let to = after ? toIdx : toIdx - 1
+  if (to < 0) to = 0
+  if (to === from) return
+  return courseMoveAssignTo(cid, from, to)
+}
+
+// ★ 无拖拽能力兜底：手机端部分浏览器（尤其旧版 Safari / 微信内置）不派发 HTML5 drag 事件，
+//   故额外接一套 touch 手势。手指数值与阈值见下，只在纵向位移超阈值后才进入拖拽态，
+//   以免把「想滚动列表」误判成拖拽。
+//
+// 注意：touchmove / touchend 必须挂在 document 上——触摸事件的 target 始终是「手指按下的
+// 那个元素」，手指滑出该元素后仍在它身上派发，挂在内联手柄上会漏掉后续事件。
+// 挂载点用 renderCourseAdmin（进管理页必过），带幂等标记，避免多次渲染重复挂。
+function courseDragBindGlobal() {
+  if (courseDragBindGlobal._done) return
+  courseDragBindGlobal._done = true
+  document.addEventListener('touchmove', courseTouchMove, { passive: false })
+  document.addEventListener('touchend', courseTouchEnd)
+  document.addEventListener('touchcancel', courseTouchEnd)
+}
+
+let _courseTouch = null
+
+function courseTouchStart(e, el) {
+  if (!e || !e.touches || e.touches.length !== 1) return
+  const t = e.touches[0]
+  _courseTouch = {
+    el: el,
+    cid: el.dataset.cid || '',
+    aid: el.dataset.aid || '',
+    from: parseInt(el.dataset.idx, 10),
+    startY: t.clientY,
+    active: false
+  }
+}
+
+function courseTouchMove(e) {
+  if (!_courseTouch || !e || !e.touches || e.touches.length !== 1) return
+  const t = e.touches[0]
+  const dy = t.clientY - _courseTouch.startY
+  if (!_courseTouch.active) {
+    // 10px 阈值内视为「用户想滚页面」，不抢事件
+    if (Math.abs(dy) < 10) return
+    _courseTouch.active = true
+    const tr = _courseTouch.el.closest('tr')
+    if (tr) tr.classList.add('course-dragging')
+  }
+  // 已进入拖拽态：阻止页面滚动，改由我们处理落位
+  if (e.cancelable) e.preventDefault()
+  const rows = Array.prototype.slice.call(document.querySelectorAll('tr[data-drag-idx]'))
+  let hit = null, after = false
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i].getBoundingClientRect()
+    if (t.clientY >= r.top && t.clientY <= r.bottom) {
+      hit = rows[i]
+      after = t.clientY > r.top + r.height / 2
+      break
+    }
+  }
+  rows.forEach(x => x.classList.remove('course-drop-above', 'course-drop-below'))
+  if (hit) hit.classList.add(after ? 'course-drop-below' : 'course-drop-above')
+  _courseTouch.hitAfter = after
+  _courseTouch.hitIdx = hit ? parseInt(hit.dataset.dragIdx, 10) : -1
+}
+
+function courseTouchEnd(e) {
+  if (!_courseTouch) return
+  const st = _courseTouch
+  _courseTouch = null
+  const tr = st.el && st.el.closest ? st.el.closest('tr') : null
+  if (tr) tr.classList.remove('course-dragging')
+  document.querySelectorAll('tr.course-drop-above, tr.course-drop-below').forEach(x => {
+    x.classList.remove('course-drop-above', 'course-drop-below')
+  })
+  if (!st.active) return            // 没越过阈值 = 只是点了一下，什么都不做
+  const toIdx = (typeof st.hitIdx === 'number') ? st.hitIdx : -1
+  if (toIdx < 0 || isNaN(st.from)) return
+  let to = st.hitAfter ? toIdx : toIdx - 1
+  if (to < 0) to = 0
+  if (to === st.from) return
+  return courseMoveAssignTo(st.cid, st.from, to)
+}
+
+// 把第 from 个任务移到第 to 个位置并持久化（拖拽落位唯一入口）
+async function courseMoveAssignTo(cid, from, to) {
+  let ok = false
   try {
     await CourseStore.mutate(doc => {
       const c = CourseStore.findClass(doc, cid)
       if (!c || !Array.isArray(c.assignments)) return false
-      const i = c.assignments.findIndex(a => a.id === aid)
-      const j = i + (dir < 0 ? -1 : 1)
-      if (i < 0 || j < 0 || j >= c.assignments.length) return false
-      const tmp = c.assignments[i]
-      c.assignments[i] = c.assignments[j]
-      c.assignments[j] = tmp
+      const next = courseReorderList(c.assignments, from, to)
+      if (!next) return false
+      c.assignments = next
+      ok = true
     })
   } catch (e) { alert(t('courseWriteFail')); return }
+  if (!ok) return                       // 越界 / 原位，无需重渲染
   courseState.doc = await CourseStore.getDoc()
   return courseRenderClass()
+}
+
+// 上移 / 下移一位（dir=-1 上移，+1 下移）；首尾边界处不动（mutate 返回 false）
+// v127 起作为「无拖拽环境 / 键盘操作」的回落通道保留
+async function courseMoveAssign(cid, aid, dir) {
+  const c = courseFind(cid)
+  if (!c || !Array.isArray(c.assignments)) return
+  const i = c.assignments.findIndex(a => a.id === aid)
+  if (i < 0) return
+  return courseMoveAssignTo(cid, i, i + (dir < 0 ? -1 : 1))
 }
 
 // ================================================================
@@ -1954,7 +2126,7 @@ function courseOfflineAdminRow(c, a, idx, total) {
       ? `<span class="course-status done">✅ ${t('courseOfflineHeld')}</span><span class="course-off-absent">🚫 ${t('courseOfflineAbsentTag', absent.length)}</span>`
       : `<span class="course-status done">✅ ${t('courseOfflineHeldTag')}</span>`)
     : ''
-  return `<tr>
+  return `<tr data-drag-aid="${escAttr(a.id)}" data-drag-idx="${idx}">
     <td class="course-sort-cell">${courseSortBtns(c.id, a.id, idx, total)}</td>
     <td>📅 ${escHtml(a.title)}</td>
     <td>${t('courseTypeOffline')}</td>

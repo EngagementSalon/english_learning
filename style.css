@@ -930,11 +930,39 @@ tr.row-draft td { background:#fefce8; }
 .course-timer.urgent { color:#b91c1c; background:#fef2f2; animation: blink 1s infinite; }
 @keyframes blink { 50% { opacity: 0.5; } }
 
-/* v34 任务排序：班级任务表的 ↕ 顺序列 */
-.course-sort-cell { width:76px; white-space:nowrap; text-align:center; }
+/* v34 任务排序：班级任务表的顺序列 */
+/* v127：改为拖拽排序——整列是一个 ⠿ 手柄（见 .course-drag-handle）。 */
+.course-sort-cell { width:56px; white-space:nowrap; text-align:center; }
+/* 兼容旧类名（v127 前的 ↑↓ 按钮组），保留以免历史页面闪现无样式 */
 .course-sort-btns { display:inline-flex; gap:6px; }
 .course-sort-btns .btn-sm { padding:2px 9px; font-size:13px; line-height:1.5; }
 .course-sort-btns .btn-sm:disabled { opacity:.35; cursor:not-allowed; }
+
+/* v127 拖拽手柄：鼠标与触摸都要能拖，故 touch-action:none 阻止浏览器抢走纵向手势 */
+.course-drag-handle {
+  display:inline-flex; align-items:center; justify-content:center;
+  width:34px; height:30px; border-radius:8px;
+  color:#9ca3af; font-size:17px; line-height:1;
+  cursor:grab; user-select:none; -webkit-user-select:none;
+  touch-action:none;                 /* 关键：让 touchmove 归我们处理，页面不跟着滚 */
+  transition:background .12s, color .12s;
+}
+.course-drag-handle:hover { background:#f3f4f6; color:#374151; }
+.course-drag-handle:active { cursor:grabbing; background:#e5e7eb; color:#111827; }
+
+/* 正在被拖动的行：半透明 + 微缩，明确「它被拿起来了」 */
+tr.course-dragging { opacity:.45; }
+tr.course-dragging .course-drag-handle { cursor:grabbing; }
+
+/* 落点提示：目标行上/下边缘画一条主色实线 */
+tr.course-drop-above > td { box-shadow:inset 0 3px 0 0 #2f6fed; }
+tr.course-drop-below > td { box-shadow:inset 0 -3px 0 0 #2f6fed; }
+
+/* 窄屏：手柄略小，避免挤压标题列 */
+@media (max-width:640px) {
+  .course-sort-cell { width:44px; }
+  .course-drag-handle { width:30px; height:34px; font-size:18px; }
+}
 .course-off-absent { display:inline-block; margin-left:6px; color:#b91c1c; background:#fef2f2; font-size:12px; font-weight:700; padding:2px 10px; border-radius:999px; vertical-align:middle; white-space:nowrap; }
 .course-off-absent-pick .course-off-member:has(input:checked) { border-color:#fca5a5; background:#fee2e2; }
 .course-score { font-size:22px; font-weight:800; margin:10px 0; }
