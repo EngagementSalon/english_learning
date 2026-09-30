@@ -138,7 +138,32 @@ function courseStudentOfflineCard(c, a, me) {
     </div>`
 }
 
-// 学员「线性学习进度」：每个已加入班级的任务序列 → 节点路径 + 进度条 + 下一步引导
+// v123：任务类型的中文/英文短标签（大纲行第二行小字）
+function courseTaskKindLabel(a) {
+  if (!a) return ''
+  if (a.type === 'offline') return t('courseTypeOffline')
+  if (a.type === 'video') return t('courseTypeVideo')
+  if (a.type === 'coursefinal') return t('courseTypeCourseFinal')
+  if (a.type === 'exam') return t('courseTypeExam')
+  return t('courseTypeHomework')
+}
+
+// v123：大纲行副标题 = 「类型 · 题数 / 上课时间 / 时长」按类型取值
+function courseTaskMetaText(a) {
+  const kind = courseTaskKindLabel(a)
+  if (courseIsOffline(a)) return `${kind} · ${courseOfflineWhen(a)}`
+  if (a.type === 'video') {
+    const qn = (a.quiz && a.quiz.length) ? ` · ${t('courseQuizCount', a.quiz.length)}` : ''
+    return `${kind} · ${t('courseVideoLabel')}${qn}`
+  }
+  const qn = (a.questions || []).length
+  const dur = (a.type === 'exam' || courseIsFinal(a)) && a.duration ? ` · ${a.duration}${LANG === 'en' ? ' min' : ' 分钟'}` : ''
+  return `${kind} · ${t('courseProgressQN', qn)}${dur}`
+}
+
+// 学员「我的学习进度」：v123 参照课程平台分栏布局 ——
+// 电脑端（≥900px）左侧大纲（任务序列行）+ 右侧详情（进度环 + 下一步 + 去完成）；
+// 手机端隐藏右侧详情，仅保留左侧大纲（信息由各行的 cp-meta 小字承载）。
 function courseStudentPathHtml(myClasses, me) {
   if (!myClasses || !myClasses.length) return ''
   const blocks = []
@@ -149,30 +174,52 @@ function courseStudentPathHtml(myClasses, me) {
     const doneCount = assigns.reduce((s, a) => s + (courseTaskDone(a, (a.results || {})[me]) ? 1 : 0), 0)
     const pct = Math.round(doneCount / total * 100)
     const nextIdx = assigns.findIndex(a => !courseTaskDone(a, (a.results || {})[me]))
-    let chain = ''
+    let rows = ''
     for (let i = 0; i < total; i++) {
       const a = assigns[i]
       const d = courseTaskDone(a, (a.results || {})[me])
       const isNext = i === nextIdx
       const dotTxt = d ? '✓' : (isNext ? '▶' : String(i + 1))
-      // v122 竖版时间线：标题不再截断（完整展示）、不再输出独立 cp-conn——
-      // 连接线由节点行伪元素绘制（CSS :not(:last-child)::before），
-      // 「本节点与下一节点都完成」→ 该行挂 seg-on（竖线点亮），视觉语义与旧 cp-conn.on 一致
-      const segOn = i < total - 1 && courseTaskDone(assigns[i + 1], (assigns[i + 1].results || {})[me])
-      chain += `<div class="cp-node${d ? ' done' : ''}${isNext ? ' next' : ''}${segOn ? ' seg-on' : ''}" onclick="courseStart('${escAttr(c.id)}','${escAttr(a.id)}')" title="${escAttr(a.title)}">
+      // v123：行式大纲卡片（左圆点 + 右标题/副标题）。v122 的「相邻双完成连线」随横纵链一起取消——
+      // 行式列表用「已完成样式（绿点/绿字）+ 当前项高亮」表达进度，无需连线。
+      rows += `<div class="cp-node${d ? ' done' : ''}${isNext ? ' next' : ''}" onclick="courseStart('${escAttr(c.id)}','${escAttr(a.id)}')" title="${escAttr(a.title)}">
           <span class="cp-dot">${dotTxt}</span>
-          <span class="cp-lbl">${courseTaskIcon(a)} ${escHtml(a.title)}</span>
+          <span class="cp-info">
+            <span class="cp-lbl">${courseTaskIcon(a)} ${escHtml(a.title)}</span>
+            <span class="cp-meta">${escHtml(courseTaskMetaText(a))}</span>
+          </span>
         </div>`
     }
-    let tipHtml
+    // 右侧详情：进度环（SVG）+ 完成数 + 下一步任务与「去完成」入口
+    const R = 34, CIRC = 2 * Math.PI * R
+    const ringHtml = `<div class="cp-ring">
+        <svg viewBox="0 0 80 80" width="80" height="80" aria-hidden="true">
+          <circle cx="40" cy="40" r="${R}" fill="none" stroke="#e5e7eb" stroke-width="8"></circle>
+          <circle cx="40" cy="40" r="${R}" fill="none" stroke="var(--primary)" stroke-width="8" stroke-linecap="round"
+            stroke-dasharray="${CIRC.toFixed(1)}" stroke-dashoffset="${(CIRC * (1 - pct / 100)).toFixed(1)}"
+            transform="rotate(-90 40 40)"></circle>
+        </svg>
+        <span class="cp-ring-txt">${pct}%</span>
+      </div>`
+    let sideHtml
     if (nextIdx === -1) {
-      tipHtml = `<div class="cp-tip ok">🎉 ${t('courseProgressAllDone')}</div>`
+      sideHtml = `<div class="cp-side">
+          ${ringHtml}
+          <div class="cp-side-count">${t('courseProgressOf', doneCount, total)}</div>
+          <div class="cp-tip ok">🎉 ${t('courseProgressAllDone')}</div>
+        </div>`
     } else {
       const na = assigns[nextIdx]
       const goBtn = courseIsOffline(na)
         ? `<button class="btn btn-ghost btn-sm" onclick="courseStart('${escAttr(c.id)}','${escAttr(na.id)}')">${t('courseOfflineView')}</button>`
         : `<button class="btn btn-primary btn-sm" onclick="courseStart('${escAttr(c.id)}','${escAttr(na.id)}')">${courseTaskIcon(na)} ${t('courseProgressGo')}</button>`
-      tipHtml = `<div class="cp-tip">${t('courseProgressNext')}：<strong>${escHtml(na.title)}</strong> ${goBtn}</div>`
+      sideHtml = `<div class="cp-side">
+          ${ringHtml}
+          <div class="cp-side-count">${t('courseProgressOf', doneCount, total)}</div>
+          <div class="cp-tip">${t('courseProgressNext')}：<strong>${escHtml(na.title)}</strong></div>
+          <div class="cp-side-go">${goBtn}</div>
+          <div class="cp-side-meta">${escHtml(courseTaskMetaText(na))}</div>
+        </div>`
     }
     blocks.push(`
       <div class="card course-path-card">
@@ -181,8 +228,10 @@ function courseStudentPathHtml(myClasses, me) {
           <span class="cp-count">${t('courseProgressOf', doneCount, total)} · ${pct}%</span>
         </div>
         <div class="cp-bar"><div class="cp-bar-in" style="width:${pct}%"></div></div>
-        <div class="cp-path">${chain}</div>
-        ${tipHtml}
+        <div class="cp-grid">
+          <div class="cp-list">${rows}</div>
+          ${sideHtml}
+        </div>
       </div>`)
   })
   if (!blocks.length) return ''

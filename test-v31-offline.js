@@ -133,8 +133,9 @@ const docLearner = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮英语班',
   assert('页面含「我的学习进度」区块', html.includes('我的学习进度'), html.slice(0, 200))
   assert('进度统计 = 2 / 3 完成', html.includes('2 / 3 完成'), '')
   assert('进度条宽度 67%', html.includes('width:67%'), '')
-  // v122 反转：学习进度改竖版时间线，独立连线 cp-conn 删除（连线由节点行伪元素绘制），语义改为断节点行存在
-  assert('含任务节点路径（v122 竖版 cp-path + cp-node）', html.includes('cp-path') && html.includes('cp-node'), '')
+  // v122/v123 沿革：v122 竖版时间线删除独立连线 cp-conn（连线改节点行伪元素）；v123 再改为分栏大纲
+  // （cp-path 容器 → cp-grid + cp-list），连线概念整体取消——学习进度由「cp-list 容器 + cp-node 行」承载
+  assert('含任务节点路径（v123 分栏大纲 cp-list + cp-node + cp-grid）', html.includes('cp-list') && html.includes('cp-node') && html.includes('cp-grid'), '')
   assert('未完成的线下课节点标记为下一步（cp-node next）', html.includes('cp-node next'), '')
   assert('下一步引导含「点餐服务」', html.includes('下一步') && html.includes('点餐服务'), '')
   // 卡片区域

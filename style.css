@@ -1066,21 +1066,40 @@ tr.row-draft td { background:#fefce8; }
 .cp-count { font-size:13px; color:#6b7280; font-weight:600; }
 .cp-bar { height:8px; border-radius:999px; background:#e5e7eb; overflow:hidden; }
 .cp-bar-in { height:100%; border-radius:999px; background:var(--primary); transition:width .3s; }
-/* v122 竖版时间线：横向节点链（cp-conn 独立连线）改为纵向行——连接线由节点行伪元素绘制，
-   「本节点与下一节点都完成」→ 节点行挂 seg-on 点亮竖线（视觉语义同旧 .cp-conn.on） */
+/* v123 分栏大纲：电脑端左侧任务大纲（行式卡片）+ 右侧详情（进度环 + 下一步）；
+   手机端隐藏右侧详情，仅保留大纲行（信息由 cp-meta 小字承载）。
+   注：v122 的竖版连线（节点行伪元素 + seg-on）已随行式列表取消。 */
 .cp-path { display:flex; flex-direction:column; margin-top:12px; }
-.cp-node { position:relative; display:flex; align-items:flex-start; gap:10px; cursor:pointer; padding-bottom:14px; }
-.cp-node:last-child { padding-bottom:2px; }
-.cp-node:not(:last-child)::before { content:''; position:absolute; left:12px; top:28px; bottom:0; width:2px; border-radius:2px; background:#e5e7eb; }
-.cp-node.seg-on::before { background:#86efac; }
+.cp-grid { margin-top:12px; }
+.cp-list { display:flex; flex-direction:column; }
+.cp-node { position:relative; display:flex; align-items:flex-start; gap:10px; cursor:pointer; padding:9px 10px; border-radius:8px; }
+.cp-node:hover { background:#f9fafb; }
+.cp-node.next { background:#f7f8dd; }
 .cp-node .cp-dot { flex:0 0 auto; width:26px; height:26px; border-radius:50%; background:#fff; border:2px solid #d1d5db; color:#9ca3af; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; box-sizing:border-box; }
 .cp-node.done .cp-dot { background:#16a34a; border-color:#16a34a; color:#fff; }
 .cp-node.next .cp-dot { border-color:var(--primary-dark); background:var(--primary); color:#fff; box-shadow:0 0 0 3px rgba(205,207,44,.28); }
-.cp-node .cp-lbl { font-size:13px; color:#6b7280; line-height:1.5; margin-top:3px; word-break:break-word; }
+.cp-node .cp-info { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.cp-node .cp-lbl { font-size:13px; color:#6b7280; line-height:1.5; margin-top:2px; word-break:break-word; }
 .cp-node.done .cp-lbl { color:#065f46; }
 .cp-node.next .cp-lbl { color:#374151; font-weight:600; }
+.cp-node .cp-meta { font-size:11px; color:#9ca3af; line-height:1.4; }
+.cp-node.done .cp-meta { color:#6b7280; }
+.cp-side { display:none; }
+.cp-side .cp-ring { position:relative; width:80px; height:80px; }
+.cp-side .cp-ring svg { display:block; }
+.cp-side .cp-ring-txt { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:17px; font-weight:700; color:#374151; }
+.cp-side .cp-side-count { font-size:13px; color:#6b7280; font-weight:600; }
+.cp-side .cp-side-go { margin-top:2px; }
+.cp-side .cp-side-meta { font-size:11px; color:#9ca3af; }
 .cp-tip { margin-top:10px; font-size:13px; color:#6b7280; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .cp-tip.ok { color:#065f46; font-weight:600; }
+@media (min-width: 900px) {
+  .cp-grid { display:grid; grid-template-columns:minmax(0, 1fr) 220px; gap:16px; align-items:start; }
+  .cp-side { display:flex; flex-direction:column; align-items:center; gap:10px; padding:14px 12px; border:1px solid #e5e7eb; border-radius:10px; background:#fafafa; text-align:center; }
+  .cp-side .cp-tip { margin-top:0; justify-content:center; text-align:center; }
+  .cp-side .cp-side-go { width:100%; }
+  .cp-side .cp-side-go .btn { width:100%; justify-content:center; }
+}
 .course-off-members .course-off-member { display:inline-flex; align-items:center; gap:6px; border:1px solid #e5e7eb; border-radius:999px; padding:6px 12px; font-size:13px; cursor:pointer; background:#fff; }
 .course-off-members .course-off-member:has(input:checked) { border-color:var(--primary); background:var(--brand-soft); }
 

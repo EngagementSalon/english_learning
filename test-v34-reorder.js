@@ -194,8 +194,9 @@ const docPath = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮英语班', me
   assert('路径节点顺序 = 第一课作业 → 宾客抵达与接待 → 点餐服务', p1 >= 0 && p1 < p2 && p2 < p3, 'idx=' + p1 + ',' + p2 + ',' + p3)
   assert('进度 = 2 / 3 完成（67%）', shtml.includes('2 / 3 完成') && shtml.includes('width:67%'), '')
   assert('下一步引导 = 最后一个未完成节点「点餐服务」', shtml.includes('cp-node next') && /cp-node next[\s\S]*?点餐服务/.test(shtml), shtml.slice(0, 400))
-  // v122 反转：竖版时间线删除独立 cp-conn，「相邻节点都完成→连线点亮」改为节点行 seg-on 类（伪元素竖线），视觉语义不变
-  assert('完成节点间连线高亮（v122 竖版 seg-on，语义同旧 cp-conn on）', shtml.includes('cp-node done seg-on'), '')
+  // v123 反转（承接 v122）：行式分栏大纲取消「相邻节点连线」概念——完成态由节点行的 done 样式
+  // （绿点 + 绿字）与当前项 next 高亮表达，故断言改为「已完成行沿用 done 类 + 大纲行进入分栏容器」
+  assert('完成节点样式保留（v123 分栏大纲：done 类 + cp-list 容器，连线已取消）', shtml.includes('cp-node done') && shtml.includes('cp-list'), '')
 
   console.log('\n⑤ i18n 双语键')
   const sbE = makeSandbox({ doc: {} })

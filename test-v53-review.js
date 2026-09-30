@@ -258,7 +258,9 @@ async function main() {
     assert('作业待回顾 → 显示「回顾错题」按钮（courseReviewStart）', card.includes("courseReviewStart('c1','hw1')") && card.includes('回顾错题'))
     assert('待回顾 → 不显示已完成 ✓', sliceBetween(card, '餐具英语', 'course-card-actions').indexOf('✓') < 0)
     // 线性进度：待回顾不算完成
-    assert('线性进度节点不标完成', !sliceBetween(card, 'cp-path', 'cp-tip').includes('cp-node done'))
+    // v123 反转：分栏大纲把「任务行区间」容器由 cp-path 换成 cp-list（右侧详情 cp-side 另含一个同名 cp-tip，
+    // 故右边界改用 cp-side 以准确切出左侧大纲行区间）
+    assert('线性进度节点不标完成', !sliceBetween(card, 'cp-list', 'cp-side').includes('cp-node done'))
     // 清空后恢复完成
     const docD = mkDoc([{ id: 'hw1', type: 'homework', title: '餐具英语', desc: '', deadline: 0, createdAt: 1,
       questions: JSON.parse(JSON.stringify(Q3)),

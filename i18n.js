@@ -288,6 +288,8 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     courseProgressOf: (d, n) => `${d} / ${n} 完成`,
     courseProgressAllDone: '本班所有任务已完成，太棒了！',
     courseProgressNext: '下一步', courseProgressGo: '去完成',
+    // v123 分栏大纲行副标题：任务题数（与 courseQuestions「 题」区分：此处为独立短语，供 cp-meta 使用）
+    courseProgressQN: (n) => `${n} 题`,
     courseVideoLabel: '视频', courseWatchBtn: '去观看',
     courseVideoNoUrl: '该视频暂未配置播放链接，请联系管理员。',
     courseVideoStartTip: '播放视频，看完后确认完成。（拖动快进不计入观看进度）',
@@ -1170,6 +1172,8 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     courseProgressOf: (d, n) => `${d} / ${n} done`,
     courseProgressAllDone: 'All tasks in this class completed!',
     courseProgressNext: 'Next', courseProgressGo: 'Go',
+    // v123 split outline row subtitle: question count for a task (see zh sibling)
+    courseProgressQN: (n) => `${n} question(s)`,
     courseVideoLabel: 'Video', courseWatchBtn: 'Watch',
     courseVideoNoUrl: 'No video link configured yet. Please contact the admin.',
     courseVideoStartTip: 'Play the video, then confirm completion. (Seeking ahead does not count as watching.)',
