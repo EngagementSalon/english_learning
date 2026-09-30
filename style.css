@@ -626,6 +626,12 @@ select { min-width: 120px; }
   .logout-btn { font-size: 12px; padding: 4px 8px; }
   .topbar-user { padding: 4px 8px; font-size: 13px; gap: 4px; }
   .topbar-user .role-badge, .topbar-user #userInfoDisplay { display: none; }
+  /* v130：手机端顶栏太局促（品牌文字被压成两行）→ 隐藏文字标题，品牌识别交给公司 Logo；
+     旧断点 400px 的同名规则已上移到这里（400~768px 视口同样局促） */
+  .topbar-brand { gap: 6px; }
+  .topbar-brand .brand-text { display: none; }
+  .topbar-brand .logo { font-size: 20px; }
+  .topbar-brand .logo img.brand-img { max-height: 30px; max-width: 104px; }
 
   /* ---- 页面与卡片 ---- */
   .page { padding: 14px 10px 40px; }
@@ -726,7 +732,6 @@ select { min-width: 120px; }
 @media (max-width: 400px) {
   .dashboard-summary { grid-template-columns: repeat(2, 1fr); }
   .result-stats { grid-template-columns: 1fr 1fr; }
-  .topbar-brand .brand-text { display: none; }
 }
 
 /* ====== 等级体系（L1-L4）====== */

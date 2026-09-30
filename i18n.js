@@ -15,7 +15,7 @@ const I18N = {
     },
 
     // 登录/注册
-    appTitle: '英语刷题平台',
+    appTitle: 'Engagement Salon',
     appSubtitle: '多题型练习 · 模拟考试 · 分类进度',
     username: '用户名', password: '密码', fullName: '姓名', dept: '部门',
     login: '登 录', register: '注 册',
@@ -518,7 +518,7 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     qgenPdfLoadFail: 'PDF 解析库加载失败，请检查网络后重试',
 
     // 首页
-    heroTitle: '欢迎来到英语刷题平台 👋',
+    heroTitle: '欢迎来到 Engagement Salon 👋',
     heroSub: '水平测试 · 分级练习 · 模拟考试 · 进度追踪 — 随时随地提升你的英语水平',
     statTotalQuestions: '题库总量（含培训）', statTotalAnswered: '答题总数', statAccuracy: '正确率', statExamCount: '考试次数',
     unitQuestion: ' 题', unitTime: ' 次',
@@ -920,7 +920,7 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
       4: 'Excellent English! Keep training at L4 difficulty and take mock exams to test your overall ability.'
     },
 
-    appTitle: 'English Quiz Platform',
+    appTitle: 'Engagement Salon',
     appSubtitle: 'Multi-type Practice · Mock Exams · Progress Tracking',
     username: 'Username', password: 'Password', fullName: 'Name', dept: 'Department',
     login: 'Log In', register: 'Sign Up',
@@ -1422,7 +1422,7 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     qgenBadXlsx: 'Not a valid Excel (.xlsx) file. Make sure the sheet has content and is not encrypted.',
     qgenPdfLoadFail: 'Failed to load PDF parser. Please check your network and retry.',
 
-    heroTitle: 'Welcome to English Quiz Platform 👋',
+    heroTitle: 'Welcome to Engagement Salon 👋',
     heroSub: 'Placement Test · Levelled Practice · Mock Exams · Progress Tracking — improve your English anytime, anywhere',
     statTotalQuestions: 'Question Bank (incl. Training)', statTotalAnswered: 'Total Answered', statAccuracy: 'Accuracy', statExamCount: 'Exams Taken',
     unitQuestion: '', unitTime: '',
