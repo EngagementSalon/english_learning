@@ -182,12 +182,17 @@ function courseStudentPathHtml(myClasses, me) {
       const dotTxt = d ? '✓' : (isNext ? '▶' : String(i + 1))
       // v123：行式大纲卡片（左圆点 + 右标题/副标题）。v122 的「相邻双完成连线」随横纵链一起取消——
       // 行式列表用「已完成样式（绿点/绿字）+ 当前项高亮」表达进度，无需连线。
+      // v128：每节课升级为独立分格卡片（白底描边 + 左侧状态色条），右侧加状态角标
+      // （已完成 / 待完成 / 未开始），对齐 NovoEd 参考版式。外层 cp-node 类名模板保持 v123 原样不破坏。
+      const flagCls = d ? ' ok' : (isNext ? ' doing' : '')
+      const flagTxt = d ? t('courseDoneTag') : (isNext ? t('coursePending') : t('courseNodeTodo'))
       rows += `<div class="cp-node${d ? ' done' : ''}${isNext ? ' next' : ''}" onclick="courseStart('${escAttr(c.id)}','${escAttr(a.id)}')" title="${escAttr(a.title)}">
           <span class="cp-dot">${dotTxt}</span>
           <span class="cp-info">
             <span class="cp-lbl">${courseTaskIcon(a)} ${escHtml(a.title)}</span>
             <span class="cp-meta">${escHtml(courseTaskMetaText(a))}</span>
           </span>
+          <span class="cp-flag${flagCls}">${escHtml(flagTxt)}</span>
         </div>`
     }
     // 右侧详情：进度环（SVG）+ 完成数 + 下一步任务与「去完成」入口

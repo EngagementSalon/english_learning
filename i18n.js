@@ -219,7 +219,7 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     courseJoinFail: '加入失败，请重试',
     courseNoAvail: '暂无可加入的班级，请等待管理员创建。',
     courseNoAssign: '暂无作业或测评',
-    coursePending: '待完成', courseDoneTag: '已完成', courseExpiredOpen: '已截止·可补交',
+    coursePending: '待完成', courseDoneTag: '已完成', courseExpiredOpen: '已截止·可补交', courseNodeTodo: '未开始',
     courseOverdue: '逾期',
     courseExamDoneAlert: '你已完成该测评（测评仅可作答一次）。',
     // v115 期末考试放行闸门
@@ -1105,7 +1105,7 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     courseJoinFail: 'Failed to join. Please retry.',
     courseNoAvail: 'No classes available to join yet. Please wait for an admin to create one.',
     courseNoAssign: 'No homework or assessments yet',
-    coursePending: 'To do', courseDoneTag: 'Done', courseExpiredOpen: 'Closed · late OK',
+    coursePending: 'To do', courseDoneTag: 'Done', courseExpiredOpen: 'Closed · late OK', courseNodeTodo: 'Not started',
     courseOverdue: 'Overdue',
     courseExamDoneAlert: 'You have already completed this assessment (one attempt only).',
     // v115 final-exam per-student approval gate
