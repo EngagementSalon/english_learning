@@ -31,7 +31,9 @@ const qgen = read('qgen.js');
 const SRC_ALL = [idx, i18n, css, app, cou, cstore, store, cloud, challenge, qgen].join('\n');
 
 console.log('--- ① 更名：i18n ---');
-assert((i18n.match(/appTitle: 'Engagement Salon'/g) || []).length === 2, '1.1 i18n appTitle zh+en 均为 Engagement Salon（×2）');
+// v132 追加：站名一律全大写「ENGAGEMENT SALON」（用户要求；原首字母大写形态被推翻 —— 契约更新，非回归）。
+assert((i18n.match(/appTitle: 'ENGAGEMENT SALON'/g) || []).length === 2, '1.1 i18n appTitle zh+en 均为全大写 ENGAGEMENT SALON（×2）');
+assert(!i18n.includes("appTitle: 'Engagement Salon'"), '1.1a 无首字母大写形态的 appTitle 残留');
 assert(!i18n.includes("appTitle: '英语刷题平台'"), '1.2 i18n 无旧 zh appTitle');
 assert(!i18n.includes("appTitle: 'English Quiz Platform'"), '1.3 i18n 无旧 en appTitle');
 // v131 追加：首页横幅标题改全大写「WELCOME TO ENGAGEMENT SALON 👋」（zh/en 同文案，
@@ -43,9 +45,12 @@ assert(!i18n.includes("heroTitle: 'Welcome to Engagement Salon"), '1.5b 无旧�
 assert(!i18n.includes('Welcome to English Quiz Platform'), '1.6 en 无旧 heroTitle');
 
 console.log('--- ② 更名：index.html ---');
-assert(idx.includes('<title>Engagement Salon</title>'), '2.1 <title> = Engagement Salon');
-assert(idx.includes('id="authTitle">Engagement Salon<'), '2.2 登录页 authTitle 初始值更名');
-assert(idx.includes('id="brandText">Engagement Salon<'), '2.3 顶栏 brandText 初始值更名');
+assert(idx.includes('<title>ENGAGEMENT SALON</title>'), '2.1 <title> = 全大写 ENGAGEMENT SALON');
+assert(idx.includes('id="authTitle">ENGAGEMENT SALON<'), '2.2 登录页 authTitle 初始值全大写');
+assert(idx.includes('id="brandText">ENGAGEMENT SALON<'), '2.3 顶栏 brandText 初始值全大写');
+// 全大写合约：index.html 里不应再有首字母大写形态的站名
+assert(!idx.includes('>Engagement Salon<'), '2.4 index.html 无首字母大写站名残留（元素内容）');
+assert(!idx.includes('<title>Engagement Salon'), '2.5 index.html 无首字母大写站名残留（title）');
 
 console.log('--- ③ 更名：全源码无旧名残留 ---');
 assert(!SRC_ALL.includes('英语刷题平台'), '3.1 十个源文件均无「英语刷题平台」');
@@ -101,8 +106,8 @@ console.log('--- ⑨ 更名不误伤：旧文案的其它消费者 ---');
 // hero 区渲染在 app.js renderHome，断言其消费 heroTitle 的接线仍在
 assert(app.includes('heroTitle') || cou.includes('heroTitle'), '9.1 heroTitle 仍被页面渲染消费');
 // i18n 键成对性抽查：appTitle 在 zh 与 en 两段各一次（1.1 已断 ×2，这里断 en 段内位置在 zh 段之后）
-const zhPos = i18n.indexOf("appTitle: 'Engagement Salon'");
-const enPos = i18n.indexOf("appTitle: 'Engagement Salon'", zhPos + 10);
+const zhPos = i18n.indexOf("appTitle: 'ENGAGEMENT SALON'");
+const enPos = i18n.indexOf("appTitle: 'ENGAGEMENT SALON'", zhPos + 10);
 assert(zhPos >= 0 && enPos > zhPos, '9.2 zh 段在前、en 段在后（成对）');
 
 console.log('');

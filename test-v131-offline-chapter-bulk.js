@@ -156,9 +156,12 @@ console.log('--- ⑩ CSS 与版本号 ---');
 })
 assert(/\.cbc-row input\[type="checkbox"\]/.test(css), '10.5 复选框样式在场');
 assert(css.indexOf('.cbc-toolbar') > css.indexOf('tr.chapter-sep-plain'), '10.6 v131 样式位于章节分隔样式之后（append 位置正确）');
-const vCount = (idx.match(/\?v=131/g) || []).length;
-assert(vCount === 12, `10.7 index.html ?v=131 ×12（实得 ${vCount}）`);
-assert(!idx.includes('?v=130'), '10.8 无旧版本号 130 残留');
+// ★ v132 起改为弹性断言：本套件只锁「缓存参数唯一且 ≥131」（v131 是被推翻的旧契约：
+//   版本号必须随每版递增，写死 131 会在 v132 上线瞬间变红 —— 属实现细节而非契约）。
+const vAll = idx.match(/\?v=(\d+)/g) || [];
+const vNums = [...new Set(vAll.map(s => Number(s.slice(3))))];
+assert(vAll.length === 12, `10.7 index.html 缓存参数 ×12（实得 ${vAll.length}）`);
+assert(vNums.length === 1 && vNums[0] >= 131, `10.7a 版本唯一且 ≥131（实得 ${vNums.join(',')}）`);
 
 console.log('--- ⑪ 反向：未引入重复定义 ---');
 assert((cou.match(/function courseBulkChapterModal\(/g) || []).length === 1, '11.1 courseBulkChapterModal 只定义一次');

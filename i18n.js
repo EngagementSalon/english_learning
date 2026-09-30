@@ -15,7 +15,7 @@ const I18N = {
     },
 
     // 登录/注册
-    appTitle: 'Engagement Salon',
+    appTitle: 'ENGAGEMENT SALON',
     appSubtitle: '多题型练习 · 模拟考试 · 分类进度',
     username: '用户名', password: '密码', fullName: '姓名', dept: '部门',
     login: '登 录', register: '注 册',
@@ -930,7 +930,7 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
       4: 'Excellent English! Keep training at L4 difficulty and take mock exams to test your overall ability.'
     },
 
-    appTitle: 'Engagement Salon',
+    appTitle: 'ENGAGEMENT SALON',
     appSubtitle: 'Multi-type Practice · Mock Exams · Progress Tracking',
     username: 'Username', password: 'Password', fullName: 'Name', dept: 'Department',
     login: 'Log In', register: 'Sign Up',
