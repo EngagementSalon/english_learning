@@ -25,6 +25,9 @@
   min-height:100vh; display:flex; align-items:center; justify-content:center;
   background:url('login-bg.jpg') center center / cover no-repeat fixed;
   position:relative; padding:24px;
+  /* v136：整块（含标题）上移 —— 用 padding-bottom 造「视觉重心偏上」，
+     比 align-items:flex-start 温和，不会在矮屏上顶到边缘。 */
+  padding-bottom:96px;
 }
 .auth-screen::before {
   content:''; position:absolute; inset:0;
@@ -37,11 +40,15 @@
   box-shadow:0 20px 60px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.1);
   text-align:center;
 }
-.auth-logo { font-size:48px; margin-bottom:8px; }
-/* 平台品牌 Logo（登录页）——v126 缩小三分之一（280×110 → 187×73）；v135 再缩一半（187×73 → 94×37，用户反馈仍太大） */
+/* v136：Logo 容器给足高度（避免父级撑不开导致视觉裁切），并把 Logo 与标题的间距收紧 */
+.auth-logo { font-size:48px; margin-bottom:10px; min-height:44px; display:flex; align-items:center; justify-content:center; }
+/* 平台品牌 Logo（登录页）——v126 缩小三分之一（280×110 → 187×73）；v135 再缩一半（187×73 → 94×37）；
+   v136 修复裁切：改为「只限高、宽自适应」—— 同时给 max-width+max-height 时，若图片实际比例比 94:37 更宽，
+   浏览器会按 max-width 定宽后把高度压到 max-height，导致上下被裁。现在只限 max-height，宽度由比例自然撑开
+   （max-width 放到 100% 仅作溢出兜底），Logo 按原始比例完整显示。 */
 .auth-logo img.brand-img {
-  display:inline-block; max-width:94px; max-height:37px; object-fit:contain;
-  border-radius:8px; vertical-align:middle;
+  display:block; max-height:38px; max-width:100%; width:auto; height:auto;
+  object-fit:contain; border-radius:8px;
 }
 .auth-title { font-size:24px; font-weight:800; color:#1f2937; }
 /* v132：登录页站名「ENGAGEMENT SALON」全大写 → Logo 版品牌字体 */

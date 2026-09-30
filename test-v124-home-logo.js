@@ -100,12 +100,17 @@ function mkSandbox(logoUrl) {
 // ---------- ③ CSS ----------
 assert('[v135 反转] CSS：.hero-logo 样式已删除', !CSS.includes('.hero-logo'))
 assert('CSS：登录页/顶栏品牌图样式未被破坏', CSS.includes('.auth-logo img.brand-img') && CSS.includes('.topbar-brand .logo img.brand-img'))
-// [v135] 登录页 Logo 尺寸契约：v126 定为 187×73，v135 用户反馈「太大了，再缩小一半」→ 94×37
+// [v135/v136] 登录页 Logo 尺寸契约：
+//   v126 定为 187×73 → v135「再缩小一半」94×37 → v136「显示完整」改为「只限高、宽自适应」
+//   根因：同时给 max-width + max-height 时，图片实际比例比 94:37 更宽 → 按 max-width 定宽后高度被压 → 上下裁切
 const authLogoRule = (CSS.match(/\.auth-logo img\.brand-img\s*\{[^}]*\}/) || [''])[0]
-assert('[v135] 登录页 Logo 缩一半：max-width:94px + max-height:37px',
-  authLogoRule.includes('max-width:94px') && authLogoRule.includes('max-height:37px'), authLogoRule.slice(0, 120))
-assert('[v135 反转] 登录页 Logo 旧尺寸 187×73 已清除',
-  !authLogoRule.includes('187px') && !authLogoRule.includes('73px'))
+assert('[v136 反转] 登录页 Logo 改为只限高（max-height）+ 宽自适应',
+  authLogoRule.includes('max-height:38px') && authLogoRule.includes('width:auto') && authLogoRule.includes('height:auto'),
+  authLogoRule.slice(0, 140))
+assert('[v136 反转] 登录页 Logo 不再用双约束（旧 max-width:94px 已清除）',
+  !authLogoRule.includes('max-width:94px') && !authLogoRule.includes('max-height:37px'))
+assert('[v136] 登录页 Logo 容器给足高度，避免父级撑不开',
+  /\.auth-logo\s*\{[^}]*min-height/.test(CSS))
 
 // ---------- ④ 版本弹性 ----------
 const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
