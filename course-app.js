@@ -1838,6 +1838,7 @@ async function courseRenderClass() {
     <div class="admin-toolbar" style="margin-top:20px">
       <span style="font-size:14px;color:#6b7280;flex:1">${t('courseAssignments')}</span>
       <button class="btn btn-ghost" onclick="courseCreateOfflineModal('${escAttr(c.id)}')">📅 ${t('courseNewOffline')}</button>
+      <button class="btn btn-ghost" onclick="courseCopyAllAssignmentsModal('${escAttr(c.id)}')">📋 ${t('courseCopyAllBtn')}</button>
       <button class="btn btn-primary" onclick="courseCreateAssignModal('${escAttr(c.id)}')">${t('courseNewAssign')}</button>
     </div>
     ${assignRows ? `<div class="card" style="padding:0;overflow-x:auto">
@@ -2617,6 +2618,85 @@ async function courseCopyAssignDo(cid, aid) {
   } catch (e) { alert(t('courseWriteFail')); return }
   courseModalClose()
   alert(t('courseCopyOk', tgt.name, a.title))
+  courseState.doc = await CourseStore.getDoc()
+  try { if (courseState.doc && courseState.doc.classes && typeof Store !== 'undefined' && Store.rebuildBankFromCourse) Store.rebuildBankFromCourse(courseState.doc.classes) } catch (e) { /* ignore */ }
+  courseRenderClass()
+}
+
+// ================================================================
+// 一键复制全部作业到其他班级（v121）：与单条复制的三点差异——
+// ① 线下课也复制（单条复制不支持）；② 一次复制该班全部任务；
+// ③ 线下课复制后上课时间清空、回到「未上过课」（考勤名单不带走）。
+// 共同口径：成绩不复制、放行名单（examOpened / courseFinalOpened）不带走、
+// 目标班级成员不变、草稿保持草稿、已发布 → 复制即发布（过期截止时间清空）
+// ================================================================
+async function courseCopyAllAssignmentsModal(cid) {
+  // 拉取最新班级列表（其他管理员可能刚建了新班级）
+  try { courseState.doc = await CourseStore.getDoc() } catch (e) {}
+  const c = courseFind(cid)
+  const items = (c && c.assignments) || []
+  const others = ((courseState.doc && courseState.doc.classes) || []).filter(x => x.id !== cid)
+  if (!c || !items.length) { alert(t('courseCopyAllNone')); return }
+  if (!others.length) { alert(t('courseCopyNoClass')); return }
+  const nOffline = items.filter(a => a.type === 'offline').length
+  const opts = others.map(x =>
+    `<option value="${escAttr(x.id)}">${escHtml(x.name)}</option>`).join('')
+  courseModalOpen(t('courseCopyAllTitle'), `
+    <div style="font-size:14px;color:#1f2937;background:#f3f4f6;border-radius:6px;padding:10px 12px;margin-bottom:14px;line-height:1.7">
+      📋 ${escHtml(c.name)}<br>
+      <span style="color:#6b7280;font-size:13px">${t('courseCopyAllSummary', items.length, nOffline)}</span></div>
+    <div class="form-group"><label>${t('courseCopyTargetLabel')}</label>
+      <select id="ccAllTarget"><option value="">${t('courseCopyPick')}</option>${opts}</select></div>
+    <p class="form-hint" style="margin-top:10px">${t('courseCopyAllHint')}</p>
+  `,
+    `<button class="btn btn-primary" onclick="courseCopyAllAssignmentsDo('${escAttr(cid)}')">📋 ${t('courseCopyAllBtn')}</button>
+     <button class="btn btn-ghost" onclick="courseModalClose()">${t('cancelBtn')}</button>`)
+}
+
+async function courseCopyAllAssignmentsDo(cid) {
+  const sel = document.getElementById('ccAllTarget')
+  const tid = sel ? sel.value : ''
+  const c = courseFind(cid)
+  const items = (c && c.assignments) || []
+  if (!c || !items.length || !tid) return
+  const tgt = ((courseState.doc && courseState.doc.classes) || []).find(x => x.id === tid)
+  if (!tgt) return
+  const now = Date.now()
+  // 逐条深拷贝任务本体（题目 / 选项 / 课后小测 / 线下课主题等一并复制），再重置实例字段
+  const clones = items.map(a => {
+    const clone = JSON.parse(JSON.stringify(a))
+    clone.results = {}               // 成绩不复制：新班级从零开始
+    delete clone.examOpened          // v115：测评放行名单属于原任务，不随复制带走（examGate 开关本身照常复制）
+    delete clone.courseFinalOpened   // v120：最终考试放行名单同理（类型/时长/及格分照常复制）
+    clone.id = CourseStore.newId('a')
+    clone.createdAt = now
+    if (a.type === 'offline') {
+      // v121：线下课复制后上课时间清空、回到「未上过课」，考勤名单不带走
+      clone.date = 0
+      clone.held = false
+      clone.heldAt = 0
+      delete clone.absent
+    } else if (clone.status === 'draft') {
+      // 草稿 → 保持草稿状态
+    } else {
+      delete clone.status
+      // 已发布 → 复制即发布；原截止时间已过则清空，避免目标班级学员一进来看见「已逾期」
+      if (clone.deadline && clone.deadline < now) clone.deadline = 0
+      clone.sentAt = now
+    }
+    return clone
+  })
+  try {
+    await CourseStore.mutate(doc => {
+      const tc = CourseStore.findClass(doc, tid)
+      if (!tc) return false
+      tc.assignments = tc.assignments || []
+      if (clones.some(x => tc.assignments.some(y => y.id === x.id))) return false   // 幂等：重试不重复
+      tc.assignments.push(...clones)
+    })
+  } catch (e) { alert(t('courseWriteFail')); return }
+  courseModalClose()
+  alert(t('courseCopyAllOk', clones.length, tgt.name))
   courseState.doc = await CourseStore.getDoc()
   try { if (courseState.doc && courseState.doc.classes && typeof Store !== 'undefined' && Store.rebuildBankFromCourse) Store.rebuildBankFromCourse(courseState.doc.classes) } catch (e) { /* ignore */ }
   courseRenderClass()
