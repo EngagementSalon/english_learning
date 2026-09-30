@@ -38,9 +38,9 @@
   text-align:center;
 }
 .auth-logo { font-size:48px; margin-bottom:8px; }
-/* 平台品牌 Logo（登录页）——v126：缩小三分之一（280×110 → 187×73，用户反馈太大） */
+/* 平台品牌 Logo（登录页）——v126 缩小三分之一（280×110 → 187×73）；v135 再缩一半（187×73 → 94×37，用户反馈仍太大） */
 .auth-logo img.brand-img {
-  display:inline-block; max-width:187px; max-height:73px; object-fit:contain;
+  display:inline-block; max-width:94px; max-height:37px; object-fit:contain;
   border-radius:8px; vertical-align:middle;
 }
 .auth-title { font-size:24px; font-weight:800; color:#1f2937; }
@@ -209,8 +209,9 @@ body {
 .page { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
 
 /* ====== Home ====== */
+/* v135：首页横幅改品牌红渐变（与 v133 章节条同一品牌色语言，主色 #DD3D00 = 用户指定 RGB(221,61,0)） */
 .hero {
-  background: linear-gradient(135deg, var(--primary), var(--primary-light));
+  background: linear-gradient(135deg, #C33600 0%, #DD3D00 60%, #F06B35 100%);
   color: #fff;
   border-radius: var(--radius);
   padding: 32px 28px;
@@ -221,9 +222,6 @@ body {
    emoji 与中文由后续字体栈接管，字距略放开更接近品牌字样比例。 */
 .hero h2 { font-family: 'W Supreme TT', 'W Supreme', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; letter-spacing: .04em; }
 .hero p { opacity: .9; font-size: 15px; }
-/* v124 首页 hero Logo 位：无 Logo 时与登录页/顶栏同口径显示 📚 兜底，上传后自动换公司 Logo */
-.hero-logo { display:flex; justify-content:center; align-items:center; margin-bottom:12px; font-size:52px; line-height:1; }
-.hero-logo img.brand-img { max-width:130px; max-height:110px; object-fit:contain; border-radius:10px; background:rgba(255,255,255,.92); padding:6px; box-sizing:border-box; box-shadow:0 2px 8px rgba(0,0,0,.12); }
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px,1fr));

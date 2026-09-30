@@ -995,7 +995,6 @@ function renderHome() {
   const el = document.getElementById('page-home')
   el.innerHTML = `
     <div class="hero">
-      <div class="hero-logo">${logoImgHtml(Store.getLogo())}</div>
       <h2>${t('heroTitle')}</h2>
       <p>${t('heroSub')}</p>
     </div>

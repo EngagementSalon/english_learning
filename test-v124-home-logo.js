@@ -1,10 +1,11 @@
-// test-v124-home-logo.js — v124 学员首页 hero 区加公司 Logo 位
-// ① 源码级：renderHome 的 hero 模板含 hero-logo 容器 + logoImgHtml(Store.getLogo()) 真调用（接线断言）
-// ② 行为（沙箱真跑 renderHome）：
-//    - 无 Logo → hero-logo 内显示 📚 兜底（与登录页/顶栏同口径）
-//    - 有 Logo → 输出 <img class="brand-img" src=dataURL>
-// ③ CSS：.hero-logo 居中 + 图片约束样式就位
-// ④ 版本弹性：唯一 ?v=N ×12 且 ≥124（v123 套件的 ≥123 弹性断言不被破坏）
+// test-v124-home-logo.js — 平台品牌 Logo 位（登录页 / 顶栏 / 首页 hero）
+// [v135 反转] 用户要求首页 hero「不要 logo」→ hero-logo 容器已从 renderHome 移除，
+//   .hero-logo CSS 一并删除；logoImgHtml 与登录页/顶栏两处 Logo 位保持不变。
+//   本套件从「v124：hero 有 Logo 位」反转为「v135：hero 无 Logo 位，其余两处仍在」。
+// ① 源码级：renderHome 不再含 hero-logo；logoImgHtml/renderLogo 定义仍在且接线登录页+顶栏
+// ② 行为（沙箱真跑 renderHome）：hero 容器有标题副标题、无 hero-logo、无 📚 兜底
+// ③ CSS：.hero-logo 样式已删；.auth-logo / .topbar-brand 的 brand-img 样式未破坏
+// ④ 版本弹性：唯一 ?v=N ×12 且 ≥124
 
 const fs = require('fs')
 const path = require('path')
@@ -35,10 +36,15 @@ function grabFn(src, name) {
 
 // ---------- ① 源码级 ----------
 const homeBody = grabFn(APP, 'renderHome')
-assert('renderHome 的 hero 模板含 hero-logo 容器', homeBody.includes('class="hero-logo"'))
-assert('renderHome 真调用 logoImgHtml(Store.getLogo())（接线断言：函数存在且被模板调用）',
-  homeBody.includes('logoImgHtml(Store.getLogo())') && /function logoImgHtml\s*\(/.test(APP))
-assert('logoImgHtml 兜底仍为 📚（三处口径一致）', /return url \? `<img class="brand-img" src="\$\{escAttr\(url\)\}" alt="logo">` : '📚'/.test(APP))
+assert('[v135 反转] renderHome 的 hero 模板已无 hero-logo 容器', !homeBody.includes('hero-logo'))
+assert('[v135 反转] renderHome 不再调用 logoImgHtml（首页不显示 Logo）',
+  !homeBody.includes('logoImgHtml(Store.getLogo())'))
+assert('logoImgHtml 函数仍存在（登录页/顶栏共用）', /function logoImgHtml\s*\(/.test(APP))
+assert('logoImgHtml 兜底仍为 📚（登录页/顶栏口径不变）', /return url \? `<img class="brand-img" src="\$\{escAttr\(url\)\}" alt="logo">` : '📚'/.test(APP))
+assert('renderLogo 仍接线登录页 + 顶栏两处',
+  /function renderLogo\s*\(/.test(APP) &&
+  APP.includes("document.querySelector('.auth-logo')") &&
+  APP.includes("document.querySelector('.topbar-brand .logo')"))
 
 // ---------- ② 行为 ----------
 function mkSandbox(logoUrl) {
@@ -71,28 +77,35 @@ function mkSandbox(logoUrl) {
   return sb
 }
 
-// 场景 A：无 Logo → 📚 兜底
+// 场景 A：无 Logo → hero 干净（无 logo 位、无兜底字符）
 {
   const sb = mkSandbox('')
   vm.runInContext('renderHome()', sb)
   const html = sb._els['page-home'].innerHTML
-  assert('场景A：hero 容器存在且含 hero-logo', html.includes('class="hero"') && html.includes('class="hero-logo"'))
-  assert('场景A：无 Logo → hero-logo 内是 📚 兜底', /class="hero-logo">📚</.test(html))
+  assert('场景A：hero 容器存在', html.includes('class="hero"'))
+  assert('[v135 反转] 场景A：hero 内无 hero-logo', !html.includes('hero-logo'))
+  assert('[v135 反转] 场景A：hero 无 📚 兜底字符', !html.includes('📚'))
   assert('场景A：hero 标题副标题保留', html.includes('T_heroTitle') && html.includes('T_heroSub'))
 }
 
-// 场景 B：有 Logo → img 输出
+// 场景 B：有 Logo → hero 也不显示（Logo 只出现在登录页/顶栏）
 {
   const sb = mkSandbox('data:image/png;base64,AAAABBBB')
   vm.runInContext('renderHome()', sb)
   const html = sb._els['page-home'].innerHTML
-  assert('场景B：有 Logo → hero-logo 内输出 brand-img', /class="hero-logo"><img class="brand-img" src="data:image\/png;base64,AAAABBBB"/.test(html))
+  assert('[v135 反转] 场景B：即便已上传 Logo，hero 也不渲染 brand-img',
+    !html.includes('brand-img') && !html.includes('hero-logo'))
 }
 
 // ---------- ③ CSS ----------
-assert('CSS：.hero-logo 居中样式', CSS.includes('.hero-logo { display:flex; justify-content:center'))
-assert('CSS：.hero-logo 图片约束（max-width + object-fit:contain）', /\.hero-logo img\.brand-img \{[^}]*max-width:130px[^}]*object-fit:contain/.test(CSS))
+assert('[v135 反转] CSS：.hero-logo 样式已删除', !CSS.includes('.hero-logo'))
 assert('CSS：登录页/顶栏品牌图样式未被破坏', CSS.includes('.auth-logo img.brand-img') && CSS.includes('.topbar-brand .logo img.brand-img'))
+// [v135] 登录页 Logo 尺寸契约：v126 定为 187×73，v135 用户反馈「太大了，再缩小一半」→ 94×37
+const authLogoRule = (CSS.match(/\.auth-logo img\.brand-img\s*\{[^}]*\}/) || [''])[0]
+assert('[v135] 登录页 Logo 缩一半：max-width:94px + max-height:37px',
+  authLogoRule.includes('max-width:94px') && authLogoRule.includes('max-height:37px'), authLogoRule.slice(0, 120))
+assert('[v135 反转] 登录页 Logo 旧尺寸 187×73 已清除',
+  !authLogoRule.includes('187px') && !authLogoRule.includes('73px'))
 
 // ---------- ④ 版本弹性 ----------
 const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
