@@ -34,8 +34,12 @@ console.log('--- ① 更名：i18n ---');
 assert((i18n.match(/appTitle: 'Engagement Salon'/g) || []).length === 2, '1.1 i18n appTitle zh+en 均为 Engagement Salon（×2）');
 assert(!i18n.includes("appTitle: '英语刷题平台'"), '1.2 i18n 无旧 zh appTitle');
 assert(!i18n.includes("appTitle: 'English Quiz Platform'"), '1.3 i18n 无旧 en appTitle');
-assert(i18n.includes("heroTitle: '欢迎来到 Engagement Salon 👋'"), '1.4 zh heroTitle 更名');
-assert(i18n.includes("heroTitle: 'Welcome to Engagement Salon 👋'"), '1.5 en heroTitle 更名');
+// v131 追加：首页横幅标题改全大写「WELCOME TO ENGAGEMENT SALON 👋」（zh/en 同文案，
+// 用户要求全大写；原「欢迎来到 / Welcome to」前缀被推翻 —— 契约更新，非回归）。
+assert(i18n.includes("heroTitle: 'WELCOME TO ENGAGEMENT SALON 👋'"), '1.4 zh heroTitle = 全大写 WELCOME TO ENGAGEMENT SALON');
+assert((i18n.match(/heroTitle: 'WELCOME TO ENGAGEMENT SALON 👋'/g) || []).length === 2, '1.5 en heroTitle 同文案（zh/en 各一次）');
+assert(!i18n.includes('欢迎来到 Engagement Salon'), '1.5a 无旧 zh heroTitle（欢迎来到…）');
+assert(!i18n.includes("heroTitle: 'Welcome to Engagement Salon"), '1.5b 无旧首字母大写形态（说明：全大写字母串包含子串 Welcome 不成立，此处断言的是带引号的完整键值前缀）');
 assert(!i18n.includes('Welcome to English Quiz Platform'), '1.6 en 无旧 heroTitle');
 
 console.log('--- ② 更名：index.html ---');
@@ -85,9 +89,13 @@ assert(/\.topbar-brand \.brand-text \{ font-size:18px; font-weight:700;/.test(cs
 assert(/\.topbar-brand \.logo img\.brand-img \{/.test(css), '7.2 桌面 Logo 基础样式仍在（v126 顶栏 36px 口径不动）');
 
 console.log('--- ⑧ 版本号 ---');
-const vCount = (idx.match(/\?v=130/g) || []).length;
-assert(vCount === 12, `8.1 index.html ?v=130 ×12（实得 ${vCount}）`);
-assert(!idx.includes('?v=129') && !idx.includes('?v=128'), '8.2 无旧版本号残留（129/128）');
+// ★ v131 起改为「弹性断言」：本套件只锁「缓存参数唯一且 ≥130」（v130 是被推翻的旧契约：
+//   版本号必须随每版递增，写死 130 会在 v131 上线瞬间变红，属实现细节而非契约）。
+const vAll = idx.match(/\?v=(\d+)/g) || [];
+const vNums = [...new Set(vAll.map(s => Number(s.slice(3))))];
+assert(vAll.length === 12, `8.1 index.html 缓存参数 ×12（实得 ${vAll.length}）`);
+assert(vNums.length === 1, `8.2 缓存参数版本唯一（实得 ${vNums.join(',')}）`);
+assert(vNums.length === 1 && vNums[0] >= 130, `8.3 版本号 ≥130（实得 ${vNums[0]}）`);
 
 console.log('--- ⑨ 更名不误伤：旧文案的其它消费者 ---');
 // hero 区渲染在 app.js renderHome，断言其消费 heroTitle 的接线仍在

@@ -1984,6 +1984,7 @@ async function courseRenderClass() {
     <div class="admin-toolbar" style="margin-top:20px">
       <span style="font-size:14px;color:#6b7280;flex:1">${t('courseAssignments')}</span>
       <button class="btn btn-ghost" onclick="courseCreateOfflineModal('${escAttr(c.id)}')">📅 ${t('courseNewOffline')}</button>
+      <button class="btn btn-ghost" onclick="courseBulkChapterModal('${escAttr(c.id)}')">📚 ${t('courseChapterBulkBtn')}</button>
       <button class="btn btn-ghost" onclick="courseCopyAllAssignmentsModal('${escAttr(c.id)}')">📋 ${t('courseCopyAllBtn')}</button>
       <button class="btn btn-primary" onclick="courseCreateAssignModal('${escAttr(c.id)}')">${t('courseNewAssign')}</button>
     </div>
@@ -2293,6 +2294,10 @@ function courseCreateOfflineModal(cid) {
       <input type="datetime-local" id="coDate" /></div>
     <div class="form-group"><label>${t('courseClassNote')}</label>
       <input type="text" id="coDesc" placeholder="${t('courseOfflineDescPh')}" /></div>
+    <div class="form-group"><label>🏷️ ${t('courseChapterLabel')}</label>
+      <input type="text" id="coChapter" placeholder="${escAttr(t('courseChapterPh'))}" list="coChapterList" />
+      <datalist id="coChapterList">${courseChapterOptionsHtml(cid)}</datalist>
+      <p class="form-hint" style="margin:4px 0 0">${t('courseChapterHint')}</p></div>
     <p class="form-hint">${t('courseOfflineCreateHint')}</p>`,
     `<button class="btn btn-primary" onclick="courseCreateOffline('${escAttr(cid)}')">${t('courseCreate')}</button>
      <button class="btn btn-ghost" onclick="courseModalClose()">${t('cancelBtn')}</button>`)
@@ -2304,6 +2309,9 @@ async function courseCreateOffline(cid) {
   const dateRaw = document.getElementById('coDate').value
   const date = dateRaw ? new Date(dateRaw).getTime() : 0
   const desc = (document.getElementById('coDesc').value || '').trim()
+  // v131：线下课也要能归入章节（v129 的章节体系原先只覆盖 homework/exam/video）
+  const chEl = document.getElementById('coChapter')
+  const chapter = (chEl ? chEl.value : '').trim()
   const aid = CourseStore.newId('a')
   try {
     await CourseStore.mutate(doc => {
@@ -2311,11 +2319,13 @@ async function courseCreateOffline(cid) {
       if (!c) return false
       c.assignments = c.assignments || []
       if (c.assignments.some(x => x.id === aid)) return false   // 幂等：重试不重复
-      c.assignments.push({
+      const rec = {
         id: aid, type: 'offline', title: topic.name, topicId: topic.topicId, custom: topic.custom,
         desc, date, createdAt: Date.now(), createdBy: courseUser(),
         held: false, heldAt: 0, results: {}
-      })
+      }
+      if (chapter) rec.chapter = chapter
+      c.assignments.push(rec)
     })
   } catch (e) { alert(t('courseWriteFail')); return }
   courseModalClose()
@@ -2341,7 +2351,11 @@ function courseEditOfflineModal(cid, aid) {
     <div class="form-group"><label>${t('courseOfflineDate')}</label>
       <input type="datetime-local" id="ceDate" value="${courseDateLocalInput(a.date)}" /></div>
     <div class="form-group"><label>${t('courseClassNote')}</label>
-      <input type="text" id="ceDesc" value="${escAttr(a.desc || '')}" placeholder="${t('courseOfflineDescPh')}" /></div>`,
+      <input type="text" id="ceDesc" value="${escAttr(a.desc || '')}" placeholder="${t('courseOfflineDescPh')}" /></div>
+    <div class="form-group"><label>🏷️ ${t('courseChapterLabel')}</label>
+      <input type="text" id="ceOffChapter" value="${escAttr(a.chapter || '')}" placeholder="${escAttr(t('courseChapterPh'))}" list="ceOffChapterList" />
+      <datalist id="ceOffChapterList">${courseChapterOptionsHtml(cid)}</datalist>
+      <p class="form-hint" style="margin:4px 0 0">${t('courseChapterHint')}</p></div>`,
     `<button class="btn btn-primary" onclick="courseEditOffline('${escAttr(cid)}','${escAttr(aid)}')">${t('saveBtn')}</button>
      <button class="btn btn-ghost" onclick="courseModalClose()">${t('cancelBtn')}</button>`)
 }
@@ -2352,6 +2366,9 @@ async function courseEditOffline(cid, aid) {
   const dateRaw = document.getElementById('ceDate').value
   const date = dateRaw ? new Date(dateRaw).getTime() : 0
   const desc = (document.getElementById('ceDesc').value || '').trim()
+  // v131：线下课章节（空 = 清除归属）。用独立 id 避免与通用编辑弹窗的 ceChapter 冲突。
+  const chEl = document.getElementById('ceOffChapter')
+  const chapter = (chEl ? chEl.value : '').trim()
   try {
     await CourseStore.mutate(doc => {
       const c = CourseStore.findClass(doc, cid)
@@ -2362,6 +2379,8 @@ async function courseEditOffline(cid, aid) {
       a.custom = topic.custom
       a.date = date
       a.desc = desc
+      if (chapter) a.chapter = chapter
+      else delete a.chapter
     })
   } catch (e) { alert(t('courseWriteFail')); return }
   courseModalClose()
@@ -3994,6 +4013,114 @@ function courseChapterOptionsHtml(cid) {
     })
     return seen.map(ch => `<option value="${escAttr(ch)}"></option>`).join('')
   } catch (e) { return '' }
+}
+
+// ====== v131：批量设置章节 ======
+// 场景：一个班往往十几个作业，逐个开编辑弹窗填章节太慢。
+// 语义：勾选若干作业 → 一键设为同一章节（或清空归属）。
+//   ★ 只写 a.chapter，绝不碰其它字段（尤其不碰 video 的 quiz / exam 的 examGate 与放行名单）。
+//   ★ 幂等：重复提交同一章节名结果一致。
+let courseBulkChapterSel = null   // Set<assignmentId>（用数组存，便于 JSON 序列化到 data-*）
+
+function courseBulkChapterModal(cid) {
+  const c = courseFind(cid)
+  if (!c) return
+  const list = c.assignments || []
+  if (!list.length) { alert(t('courseChapterBulkEmpty')); return }
+  courseBulkChapterSel = list.map(a => a.id)   // 默认全选（多数场景是「把这批都归到一章」）
+  courseRenderBulkChapterModal(cid)
+}
+
+function courseRenderBulkChapterModal(cid) {
+  const c = courseFind(cid)
+  if (!c) return
+  const list = c.assignments || []
+  const sel = courseBulkChapterSel || []
+  const isAllSel = sel.length === list.length && list.length > 0
+  const rows = list.map((a, i) => {
+    const ch = String(a.chapter == null ? '' : a.chapter).trim()
+    const kind = a.type === 'offline' ? t('courseTypeOffline')
+      : a.type === 'video' ? t('courseTypeVideo')
+        : a.type === 'coursefinal' ? t('courseTypeCourseFinal')
+          : a.type === 'exam' ? t('courseTypeExam') : t('courseTypeHomework')
+    return `<label class="cbc-row">
+      <input type="checkbox" class="cbc-chk" data-aid="${escAttr(a.id)}"${sel.indexOf(a.id) >= 0 ? ' checked' : ''}
+        onchange="courseBulkChapterToggle(this)" />
+      <span class="cbc-ord">${i + 1}</span>
+      <span class="cbc-title">${escHtml(a.title)}</span>
+      <span class="cbc-kind">${escHtml(kind)}</span>
+      <span class="cbc-ch">${ch ? '📚 ' + escHtml(ch) : '<i>' + t('courseChapterNoneShort') + '</i>'}</span>
+    </label>`
+  }).join('')
+
+  courseModalOpen(t('courseChapterBulkTitle'), `
+    <p class="form-hint" style="margin:0 0 10px">${t('courseChapterBulkHint')}</p>
+    <div class="cbc-toolbar">
+      <button class="btn btn-ghost btn-sm" onclick="courseBulkChapterAll(true)">${t('courseChapterBulkAll')}</button>
+      <button class="btn btn-ghost btn-sm" onclick="courseBulkChapterAll(false)">${t('courseChapterBulkNone')}</button>
+      <span class="cbc-count" id="cbcCount">${t('courseChapterBulkPicked', sel.length)}</span>
+    </div>
+    <div class="cbc-list">${rows}</div>
+    <div class="form-group" style="margin-top:14px"><label>🏷️ ${t('courseChapterBulkTarget')}</label>
+      <input type="text" id="cbcName" placeholder="${escAttr(t('courseChapterPh'))}" list="cbcChapterList"
+        onkeydown="if(event.key==='Enter')courseBulkChapterDo('${escAttr(cid)}')" />
+      <datalist id="cbcChapterList">${courseChapterOptionsHtml(cid)}</datalist>
+      <p class="form-hint" style="margin:4px 0 0">${t('courseChapterBulkTargetHint')}</p></div>
+  `,
+    `<button class="btn btn-primary" onclick="courseBulkChapterDo('${escAttr(cid)}')">${t('courseEditSave')}</button>
+     <button class="btn btn-ghost" onclick="courseModalClose()">${t('cancelBtn')}</button>`)
+}
+
+function courseBulkChapterToggle(el) {
+  const aid = el && el.dataset ? el.dataset.aid : ''
+  if (!aid) return
+  const sel = courseBulkChapterSel || []
+  const i = sel.indexOf(aid)
+  if (el.checked) { if (i < 0) sel.push(aid) }
+  else if (i >= 0) sel.splice(i, 1)
+  courseBulkChapterSel = sel
+  const cnt = document.getElementById('cbcCount')
+  if (cnt) cnt.textContent = t('courseChapterBulkPicked', sel.length)
+}
+
+function courseBulkChapterAll(on) {
+  // ★ 选择器挂在 #courseModal 上（courseModalOpen 里 .modal-body 没有 id，用 #modalBody 会静默查不到）
+  const boxes = document.querySelectorAll('#courseModal .cbc-chk')
+  const sel = []
+  ;(boxes || []).forEach(b => {
+    b.checked = !!on
+    if (on && b.dataset && b.dataset.aid) sel.push(b.dataset.aid)
+  })
+  courseBulkChapterSel = sel
+  const cnt = document.getElementById('cbcCount')
+  if (cnt) cnt.textContent = t('courseChapterBulkPicked', sel.length)
+}
+
+async function courseBulkChapterDo(cid) {
+  const sel = courseBulkChapterSel || []
+  if (!sel.length) { alert(t('courseChapterBulkNoPick')); return }
+  const el = document.getElementById('cbcName')
+  const name = (el ? el.value : '').trim()
+  if (!confirm(t('courseChapterBulkConfirm', sel.length, name || t('courseChapterNoneShort')))) return
+  let hit = 0
+  try {
+    await CourseStore.mutate(doc => {
+      const c = CourseStore.findClass(doc, cid)
+      if (!c) return false
+      ;(c.assignments || []).forEach(a => {
+        if (sel.indexOf(a.id) < 0) return
+        if (name) a.chapter = name
+        else delete a.chapter
+        hit++
+      })
+    })
+  } catch (e) { alert(t('courseWriteFail')); return }
+  if (!hit) { alert(t('courseChapterBulkFail')); return }
+  courseModalClose()
+  courseBulkChapterSel = null
+  alert(t('courseChapterBulkDone', hit, name || t('courseChapterNoneShort')))
+  courseState.doc = await CourseStore.getDoc()
+  courseRenderClass()
 }
 
 function courseRenderEditQCard(q, i) {
