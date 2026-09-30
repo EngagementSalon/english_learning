@@ -193,6 +193,9 @@ body {
 }
 .hero h2 { font-size: 24px; margin-bottom: 8px; }
 .hero p { opacity: .9; font-size: 15px; }
+/* v124 首页 hero Logo 位：无 Logo 时与登录页/顶栏同口径显示 📚 兜底，上传后自动换公司 Logo */
+.hero-logo { display:flex; justify-content:center; align-items:center; margin-bottom:12px; font-size:52px; line-height:1; }
+.hero-logo img.brand-img { max-width:130px; max-height:110px; object-fit:contain; border-radius:10px; background:rgba(255,255,255,.92); padding:6px; box-sizing:border-box; box-shadow:0 2px 8px rgba(0,0,0,.12); }
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px,1fr));

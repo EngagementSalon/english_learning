@@ -4,6 +4,18 @@
 // 输出题目格式与平台题库一致：{ type, difficulty, question, options, answer:[idx], explanation }
 // 注意：生成结果仅供管理员预览勾选，题目内容保持中文（学习内容不翻译）
 
+// v125：xlsx 单元格 XML 实体还原 / 列号换算（A→0, Z→25, AA→26）
+function xlsxUnesc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'").replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+}
+function xlsxColIndex(letters) {
+  let n = 0
+  for (let i = 0; i < letters.length; i++) n = n * 26 + (letters.charCodeAt(i) - 64)
+  return n - 1
+}
+
 const QGen = {
   // ---------- 文件 → 文本 ----------
   async readText(file) {
@@ -15,6 +27,124 @@ const QGen = {
     if (name.endsWith('.doc')) throw new Error(typeof t === 'function' ? t('qgenOldDoc') : 'old .doc')
     if (name.endsWith('.ppt')) throw new Error(typeof t === 'function' ? t('qgenOldPpt') : 'old .ppt')
     throw new Error(typeof t === 'function' ? t('qgenUnsupported') : 'unsupported')
+  },
+
+  // ---------- 通用 ZIP 目录遍历（docx/pptx/xlsx 共用）----------
+  // 返回 { td, count, entries }，entries = [{ name, method, compSize, localOff }]
+  // 注意：这里只读目录，不解压；调用方按需对命中的条目调 _entryData/_inflateRaw。
+  _zipEntries(u8) {
+    const td = new TextDecoder('utf-8')
+    let eocd = -1
+    for (let i = u8.length - 22; i >= 0; i--) {
+      if (u8[i] === 0x50 && u8[i + 1] === 0x4b && u8[i + 2] === 0x05 && u8[i + 3] === 0x06) { eocd = i; break }
+    }
+    if (eocd < 0) return null
+    const count = u8.length > eocd + 12 ? (u8[eocd + 10] | (u8[eocd + 11] << 8)) : 0
+    let ptr = (u8[eocd + 16] | (u8[eocd + 17] << 8) | (u8[eocd + 18] << 16) | (u8[eocd + 19] << 24)) >>> 0
+    const entries = []
+    for (let n = 0; n < count && ptr + 46 <= u8.length; n++) {
+      if (((u8[ptr] | (u8[ptr + 1] << 8) | (u8[ptr + 2] << 16) | (u8[ptr + 3] << 24)) >>> 0) !== 0x02014b50) break
+      const method = u8[ptr + 10] | (u8[ptr + 11] << 8)
+      const compSize = (u8[ptr + 20] | (u8[ptr + 21] << 8) | (u8[ptr + 22] << 16) | (u8[ptr + 23] << 24)) >>> 0
+      const nameLen = u8[ptr + 28] | (u8[ptr + 29] << 8)
+      const extraLen = u8[ptr + 30] | (u8[ptr + 31] << 8)
+      const commLen = u8[ptr + 32] | (u8[ptr + 33] << 8)
+      const localOff = (u8[ptr + 42] | (u8[ptr + 43] << 8) | (u8[ptr + 44] << 16) | (u8[ptr + 45] << 24)) >>> 0
+      entries.push({ name: td.decode(u8.subarray(ptr + 46, ptr + 46 + nameLen)), method, compSize, localOff })
+      ptr += 46 + nameLen + extraLen + commLen
+    }
+    return { td, count, entries }
+  },
+
+  // 按条目取原始字节（跳过 local header 的文件名/扩展字段）
+  _entryData(u8, e) {
+    const lNameLen = u8[e.localOff + 26] | (u8[e.localOff + 27] << 8)
+    const lExtraLen = u8[e.localOff + 28] | (u8[e.localOff + 29] << 8)
+    const start = e.localOff + 30 + lNameLen + lExtraLen
+    return u8.subarray(start, start + e.compSize)
+  },
+
+  // 按条目名取解压后的 UTF-8 文本（method 0 = stored / 8 = deflate）
+  async _zipText(u8, e) {
+    const data = this._entryData(u8, e)
+    return e.method === 0 ? new TextDecoder('utf-8').decode(data) : new TextDecoder('utf-8').decode(await this._inflateRaw(data))
+  },
+
+  // ---------- xlsx → 二维数组 ----------
+  // v125：线下课作业支持 .xlsx 上传（此前只能 CSV，Excel 直接另存 xlsx 会解析失败）。
+  // 取第一个工作表，还原成 rows（字符串二维数组），列按出现顺序补齐。
+  async xlsxToRows(arrayBuffer) {
+    const u8 = new Uint8Array(arrayBuffer)
+    const zip = this._zipEntries(u8)
+    if (!zip) throw new Error(typeof t === 'function' ? t('qgenBadXlsx') : 'bad xlsx')
+
+    // 共享字符串表（t="s" 的单元格存的是下标）
+    const shared = []
+    const sstEntry = zip.entries.find(x => /^xl\/sharedStrings\.xml$/i.test(x.name))
+    if (sstEntry) {
+      try {
+        const sst = await this._zipText(u8, sstEntry)
+        const re = /<si>([\s\S]*?)<\/si>/g
+        let m
+        while ((m = re.exec(sst)) !== null) {
+          // 一个 <si> 内可能由多个 <t> 片段拼成（富文本），全部串起来
+          const parts = []
+          const tre = /<t[^>]*>([\s\S]*?)<\/t>/g
+          let tm
+          while ((tm = tre.exec(m[1])) !== null) parts.push(tm[1])
+          shared.push(xlsxUnesc(parts.join('')))
+        }
+      } catch (e) { /* 无共享串表则忽略 */ }
+    }
+
+    // 找第一个工作表：优先按 xl/workbook.xml 的 rId 顺序，退化为 sheet1.xml
+    const sheetEntries = zip.entries
+      .filter(x => /^xl\/worksheets\/sheet\d+\.xml$/i.test(x.name))
+      .sort((a, b) => {
+        const na = parseInt((a.name.match(/(\d+)\.xml$/i) || [])[1] || '0', 10)
+        const nb = parseInt((b.name.match(/(\d+)\.xml$/i) || [])[1] || '0', 10)
+        return na - nb
+      })
+    if (!sheetEntries.length) throw new Error(typeof t === 'function' ? t('qgenBadXlsx') : 'no sheet in xlsx')
+
+    const xml = await this._zipText(u8, sheetEntries[0])
+    const rows = []
+    const rowRe = /<row[^>]*>([\s\S]*?)<\/row>/g
+    let rm
+    while ((rm = rowRe.exec(xml)) !== null) {
+      const cells = []
+      const cellRe = /<c\s([^>]*?)(\/>|>([\s\S]*?)<\/c>)/g
+      let cm
+      while ((cm = cellRe.exec(rm[1])) !== null) {
+        const attrs = cm[1] || ''
+        const inner = cm[3] || ''
+        const refM = attrs.match(/r="([A-Z]+)\d+"/)
+        const colIdx = refM ? xlsxColIndex(refM[1]) : cells.length
+        const tM = attrs.match(/t="([^"]+)"/)
+        const type = tM ? tM[1] : ''
+        let val = ''
+        if (type === 'inlineStr') {
+          const parts = []
+          const tre = /<t[^>]*>([\s\S]*?)<\/t>/g
+          let tm
+          while ((tm = tre.exec(inner)) !== null) parts.push(tm[1])
+          val = xlsxUnesc(parts.join(''))
+        } else {
+          const vm = inner.match(/<v[^>]*>([\s\S]*?)<\/v>/)
+          const raw = vm ? vm[1] : ''
+          if (type === 's') val = shared[parseInt(raw, 10)] || ''
+          else if (type === 'b') val = raw === '1' ? 'TRUE' : 'FALSE'
+          else val = xlsxUnesc(raw)
+        }
+        // 中间空列补齐（Excel 会跳过空单元格）
+        while (cells.length < colIdx) cells.push('')
+        cells[colIdx] = val
+      }
+      // 全空行跳过
+      if (cells.some(c => String(c || '').trim() !== '')) rows.push(cells.map(c => String(c == null ? '' : c)))
+    }
+    if (!rows.length) throw new Error(typeof t === 'function' ? t('qgenBadXlsx') : 'empty sheet')
+    return rows
   },
 
   // ---------- docx 解析 ----------

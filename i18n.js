@@ -500,6 +500,7 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     qgenOldPpt: '旧版 .ppt 请先用 PowerPoint 另存为 .pptx 再上传',
     qgenBadDocx: '不是有效的 docx 文件',
     qgenBadPptx: '不是有效的 pptx 文件',
+    qgenBadXlsx: '不是有效的 Excel(.xlsx) 文件，请确认表格里有内容且未加密',
     qgenPdfLoadFail: 'PDF 解析库加载失败，请检查网络后重试',
 
     // 首页
@@ -1384,6 +1385,7 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     qgenOldPpt: 'Legacy .ppt files must be re-saved as .pptx first',
     qgenBadDocx: 'Not a valid docx file',
     qgenBadPptx: 'Not a valid pptx file',
+    qgenBadXlsx: 'Not a valid Excel (.xlsx) file. Make sure the sheet has content and is not encrypted.',
     qgenPdfLoadFail: 'Failed to load PDF parser. Please check your network and retry.',
 
     heroTitle: 'Welcome to English Quiz Platform 👋',

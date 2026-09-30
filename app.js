@@ -995,6 +995,7 @@ function renderHome() {
   const el = document.getElementById('page-home')
   el.innerHTML = `
     <div class="hero">
+      <div class="hero-logo">${logoImgHtml(Store.getLogo())}</div>
       <h2>${t('heroTitle')}</h2>
       <p>${t('heroSub')}</p>
     </div>
@@ -3088,8 +3089,23 @@ function compactAndPushUploaded() {
     return res.fixed
   } catch (e) { return 0 }
 }
+// v125：.xlsx 上传收口 —— xlsx 是 ZIP 二进制，不能当文本读。
+// 解包取首个工作表 → 二维数组 → CSV 文本 → 复用 impParseAndPreview 预览勾选链路。
+// 管理员题库上传与线下课作业上传共用此入口。
+function importFileChange(input) {
+  const f = input && input.files && input.files[0]
+  if (!f) return
+  importReadFile(f)
+}
 function importReadFile(file, done) {
   const finish = done || (text => impParseAndPreview(text))
+  if (/\.xlsx$/i.test(String((file && file.name) || ''))) {
+    if (typeof QGen === 'undefined' || !QGen.xlsxToRows) { alert(t('qgenBadXlsx')); return }
+    file.arrayBuffer().then(buf => QGen.xlsxToRows(buf))
+      .then(rows => finish(courseRowsToCsv(rows)))
+      .catch(() => alert(t('qgenBadXlsx')))
+    return
+  }
   const fr = new FileReader()
   fr.onload = () => {
     let text = String(fr.result || '')
@@ -3157,7 +3173,7 @@ function openImportModal(presetCat, presetDept) {
         </div>
         <div class="form-group">
           <label>${t('impFileLabel')}</label>
-          <input type="file" id="importFile" accept=".csv,.txt,.tsv,.json,text/csv,text/plain,application/json" onchange="importReadFile(this.files[0])" style="font-size:13px" />
+          <input type="file" id="importFile" accept=".csv,.txt,.tsv,.json,.xlsx,text/csv,text/plain,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onchange="importFileChange(this)" style="font-size:13px" />
         </div>
         <div class="form-group">
           <label>${t('impPasteLabel')}</label>

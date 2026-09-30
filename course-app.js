@@ -3083,7 +3083,7 @@ function courseCreateAssignModal(cid) {
 
     <div id="caImportBox" style="display:none">
       <div class="form-group"><label>${t('courseImportFileLabel')}</label>
-        <input type="file" id="caImportFile" accept=".csv,.tsv,.txt,.json,text/csv,text/plain,application/json" onchange="courseImportReadFile(this)" />
+        <input type="file" id="caImportFile" accept=".csv,.tsv,.txt,.json,.xlsx,text/csv,text/plain,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onchange="courseImportReadFile(this)" />
         <p class="form-hint" style="margin-top:4px">${t('courseImportFileHint')}</p></div>
       <div class="form-group"><label>${t('courseImportPaste')}</label>
         <textarea id="caImportData" style="min-height:90px;font-family:monospace;font-size:12px" placeholder="${t('courseImportPastePh')}" oninput="courseImportParse(this.value)"></textarea></div>
@@ -3149,11 +3149,25 @@ function courseDraftModeChange(mode) {
 // ================================================================
 // v55：作业/测评「上传现成题目文件」——读取 v52 模板 CSV（写好的选择题），
 // 解析预览勾选后直接成为本作业题目（不入题库）。复用 app.js 的 imp* 解析器。
+// v125：新增 .xlsx 直传 —— 管理员用 Excel 填完模板常见是「另存为 xlsx」，
+// 此前只按文本读会因 ZIP 二进制变成乱码而解析失败。现在先解包取首个工作表成
+// 二维数组 → 转回 CSV 文本 → 走同一条 impParseAndPreview 预览勾选链路。
 // ================================================================
+// 二维数组 → CSV 文本（按 IMPORT_COLS 列宽补齐；引号/逗号/换行按 RFC4180 转义）
+function courseRowsToCsv(rows) {
+  const width = Math.max(IMPORT_COLS.length, ...rows.map(r => (r || []).length))
+  return rows.map(r => {
+    const cells = []
+    for (let i = 0; i < width; i++) cells.push(i < r.length ? r[i] : '')
+    return impCsvRow(cells)
+  }).join('\n')
+}
 function courseImportReadFile(input) {
   const f = input && input.files && input.files[0]
   if (!f) return
-  importReadFile(f)   // UTF-8/GBK 兜底读取 → 默认回调 impParseAndPreview 渲染 #importPreview
+  // v125：xlsx 分支统一收口在 importReadFile（importFileChange 同款判据），
+  // 这里只负责把文件交给它，避免两处各写一份 ZIP 解包判据。
+  importReadFile(f)
 }
 function courseImportParse(text) { impParseAndPreview(text) }   // 粘贴框实时解析
 
