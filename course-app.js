@@ -155,15 +155,14 @@ function courseStudentPathHtml(myClasses, me) {
       const d = courseTaskDone(a, (a.results || {})[me])
       const isNext = i === nextIdx
       const dotTxt = d ? '✓' : (isNext ? '▶' : String(i + 1))
-      const short = a.title.length > 9 ? a.title.slice(0, 9) + '…' : a.title
-      chain += `<div class="cp-node${d ? ' done' : ''}${isNext ? ' next' : ''}" onclick="courseStart('${escAttr(c.id)}','${escAttr(a.id)}')" title="${escAttr(a.title)}">
+      // v122 竖版时间线：标题不再截断（完整展示）、不再输出独立 cp-conn——
+      // 连接线由节点行伪元素绘制（CSS :not(:last-child)::before），
+      // 「本节点与下一节点都完成」→ 该行挂 seg-on（竖线点亮），视觉语义与旧 cp-conn.on 一致
+      const segOn = i < total - 1 && courseTaskDone(assigns[i + 1], (assigns[i + 1].results || {})[me])
+      chain += `<div class="cp-node${d ? ' done' : ''}${isNext ? ' next' : ''}${segOn ? ' seg-on' : ''}" onclick="courseStart('${escAttr(c.id)}','${escAttr(a.id)}')" title="${escAttr(a.title)}">
           <span class="cp-dot">${dotTxt}</span>
-          <span class="cp-lbl">${courseTaskIcon(a)} ${escHtml(short)}</span>
+          <span class="cp-lbl">${courseTaskIcon(a)} ${escHtml(a.title)}</span>
         </div>`
-      if (i < total - 1) {
-        const nd = courseTaskDone(assigns[i + 1], (assigns[i + 1].results || {})[me])
-        chain += `<span class="cp-conn${d && nd ? ' on' : ''}"></span>`
-      }
     }
     let tipHtml
     if (nextIdx === -1) {

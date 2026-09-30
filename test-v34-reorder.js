@@ -194,7 +194,8 @@ const docPath = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮英语班', me
   assert('路径节点顺序 = 第一课作业 → 宾客抵达与接待 → 点餐服务', p1 >= 0 && p1 < p2 && p2 < p3, 'idx=' + p1 + ',' + p2 + ',' + p3)
   assert('进度 = 2 / 3 完成（67%）', shtml.includes('2 / 3 完成') && shtml.includes('width:67%'), '')
   assert('下一步引导 = 最后一个未完成节点「点餐服务」', shtml.includes('cp-node next') && /cp-node next[\s\S]*?点餐服务/.test(shtml), shtml.slice(0, 400))
-  assert('完成节点间连线高亮（cp-conn on）', shtml.includes('cp-conn on'), '')
+  // v122 反转：竖版时间线删除独立 cp-conn，「相邻节点都完成→连线点亮」改为节点行 seg-on 类（伪元素竖线），视觉语义不变
+  assert('完成节点间连线高亮（v122 竖版 seg-on，语义同旧 cp-conn on）', shtml.includes('cp-node done seg-on'), '')
 
   console.log('\n⑤ i18n 双语键')
   const sbE = makeSandbox({ doc: {} })
