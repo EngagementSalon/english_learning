@@ -212,7 +212,12 @@ const docStudent = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮英语班',
   await vm.runInContext('courseTestSeedDoc()', sbD)
   vm.runInContext('renderCourseStudent()', sbD)
   const htmlD = sbD._getEl('page-course').innerHTML
-  assert('缺席学员卡片状态 = 未出席', htmlD.includes('未出席'), htmlD.slice(0, 300))
+  // v133 反转：「我的班级」卡片列表已移除 —— 学员首页现在只有「学习进度大纲 + 可加入的班级」。
+  //   线下课出席/缺席状态改由：① 大纲行的完成态（courseTaskDone 判定）② 信息弹窗（courseOfflineInfoModal）
+  //   两处承载。故下面两条断言改写为新表面，原来的「卡片状态 / course-status done」已不存在。
+  assert('[v133 反转] 缺席状态由大纲行承载（待完成，非卡片）',
+    htmlD.includes('0 / 1 完成') && htmlD.includes('待完成'),
+    htmlD.slice(0, 300))
   assert('缺席学员线性进度 0/1、缺席节点为下一步', htmlD.includes('0 / 1 完成') && htmlD.includes('cp-node next') && htmlD.includes('点餐服务'), htmlD.slice(0, 300))
   vm.runInContext('courseOfflineInfoModal("c1","o1")', sbD)
   const infoD = sbD._lastCreated() ? sbD._lastCreated().innerHTML : ''
@@ -223,7 +228,9 @@ const docStudent = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮英语班',
   await vm.runInContext('courseTestSeedDoc()', sbE)
   vm.runInContext('renderCourseStudent()', sbE)
   const htmlE = sbE._getEl('page-course').innerHTML
-  assert('出席学员卡片 = 已完成 1/1', htmlE.includes('1 / 1 完成') && htmlE.includes('course-status done'), htmlE.slice(0, 300))
+  assert('[v133 反转] 出席者为已完成 1/1（由大纲行/进度承载，无卡片）',
+    htmlE.includes('1 / 1 完成') || htmlE.includes('100%'),
+    htmlE.slice(0, 300))
   assert('出席学员无「未出席」字样', !htmlE.includes('未出席'), '')
 
   console.log('\n⑤ i18n 双语键')

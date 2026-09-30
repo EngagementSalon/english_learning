@@ -1136,20 +1136,44 @@ tr.course-drop-below > td { box-shadow:inset 0 -3px 0 0 #2f6fed; }
 .cp-path { display:flex; flex-direction:column; margin-top:12px; }
 .cp-grid { margin-top:12px; }
 .cp-list { display:flex; flex-direction:column; }
-/* v129 章节分块（学员端）：章节头 + 章节体。
+/* v133 章节分组（学员端 = B「容器分组卡」+ C「吸顶章节条」组合）。
    ★ 类名一律避开 'cp-side' 前缀 —— test-v53-review 用 sliceBetween(card,'cp-list','cp-side')
-     切「左侧大纲行区间」，若此处出现该子串会让切片提前收尾、断言语义静默丢失。 */
-.cp-chapter-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;
-  margin:16px 0 8px; padding:8px 12px; border-radius:9px;
-  background:linear-gradient(90deg, var(--brand-soft) 0%, rgba(239,241,196,.35) 100%);
-  border-left:4px solid var(--primary-dark); }
-.cp-chapter-head:first-child { margin-top:0; }
-.cp-chapter-name { font-size:13px; font-weight:700; color:var(--brand-soft-text); }
-.cp-chapter-count { font-size:11px; font-weight:600; color:var(--brand-soft-text); opacity:.85; }
-.cp-chapter-body { display:flex; flex-direction:column; }
+     切「左侧大纲行区间」，若此处出现该子串会让切片提前收尾、断言语义静默丢失。
+   ★ sticky 的活动范围 = 最近的滚动祖先容器内、且被最近父级裁剪。
+     v129 的「头/体平级兄弟」结构里，章节头与节点同级 → 头的活动范围是整个 .cp-list，
+     一滚到底就钉死不动了。v133 用 .cp-chapter 把「头 + 体」包进同一个容器，
+     头就随所在章节滚进滚出（离开本章即被容器上边界带走）。 */
+.cp-chapter { display:flex; flex-direction:column; }
+.cp-chapter + .cp-chapter { margin-top:6px; }
+/* 章节体：内缩留白，白卡节点落在品牌橙章节条之下形成层次 */
+.cp-chapter-body { display:flex; flex-direction:column; padding:14px 0 0; }
+/* 散项块（无章节归属的作业）：不入分组卡、不吸顶，保持低调 */
+.cp-chapter-plain { padding:0; }
 /* 分块后的「每章第一个节点」不再满足 .cp-node + .cp-node，需补回卡片间距 */
 .cp-chapter-body > .cp-node:first-child { margin-top:0; }
-.cp-chapter-body + .cp-chapter-head { margin-top:16px; }
+.cp-chapter-body > .cp-node + .cp-node { margin-top:8px; }
+
+/* ── C 吸顶章节条：品牌橙横幅（v133 用户指定 RGB(221,61,0) = #DD3D00 ≡ --brand-text），
+      滚到顶栏下方时钉住 ── */
+.cp-chapter-head { position:sticky; top:60px; z-index:20;
+  display:flex; align-items:center; gap:10px;
+  padding:9px 12px; border-radius:10px;
+  background:linear-gradient(135deg, #C33600 0%, #DD3D00 60%, #F06B35 100%);
+  box-shadow:0 2px 8px rgba(221,61,0,.30);
+  border:1px solid rgba(0,0,0,.10); }
+.cp-chapter-head:first-child { margin-top:0; }
+/* 章节名：白字 + 留白，避免被进度条挤压换行 */
+.cp-chapter-name { flex:0 1 auto; min-width:0; font-size:13px; font-weight:700; color:#fff;
+  letter-spacing:.02em; text-shadow:0 1px 2px rgba(0,0,0,.25);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* 内嵌进度条：白底 + 品牌色填充，占满剩余空间 */
+.cp-chapter-bar { flex:1 1 auto; min-width:40px; height:5px; border-radius:999px;
+  background:rgba(255,255,255,.35); overflow:hidden; }
+.cp-chapter-bar-in { display:block; height:100%; border-radius:999px;
+  background:var(--primary); transition:width .3s; }
+/* 完成计数：白字小号，不换行 */
+.cp-chapter-count { flex:0 0 auto; font-size:11px; font-weight:600; color:rgba(255,255,255,.88);
+  white-space:nowrap; }
 /* v128 分格卡片：每节课独立成格（白底描边 + 圆角 + 左侧状态色条 + 右侧状态角标），
    NovoEd 参考版式。cp-node / cp-dot / cp-lbl / cp-meta 的类名与字号契约不变（v123 套件钉住）。 */
 .cp-node { position:relative; display:flex; align-items:flex-start; gap:10px; cursor:pointer; padding:10px 12px; border-radius:10px; background:#fff; border:1px solid #e5e7eb; box-shadow:0 1px 2px rgba(17,24,39,.04); transition:border-color .15s, box-shadow .15s; overflow:hidden; }
@@ -1175,6 +1199,11 @@ tr.course-drop-below > td { box-shadow:inset 0 -3px 0 0 #2f6fed; }
 @media (max-width:640px) {
   .cp-node { padding:9px 10px; gap:8px; }
   .cp-flag { padding:3px 8px; font-size:10px; }
+}
+/* v133：手机端顶栏 56px（见 .topbar 的 max-width:768px 覆盖），吸顶条偏移同步下移，
+   否则章节条会被顶栏压住 4px。加 max-width:768px 与顶栏高度覆盖同档。 */
+@media (max-width:768px) {
+  .cp-chapter-head { top:56px; padding:8px 10px; gap:8px; }
 }
 .cp-side { display:none; }
 .cp-side .cp-ring { position:relative; width:80px; height:80px; }
@@ -1203,9 +1232,25 @@ tr.chapter-sep .chapter-sep-count { font-size:11px; font-weight:600; color:var(-
 tr.chapter-sep .chapter-sep-btn { padding:2px 8px; font-size:11px; margin-left:10px; }
 tr.chapter-sep-plain > td { background:#fafafa; border-left:4px solid #e5e7eb; padding:6px 12px; }
 tr.chapter-sep-plain .chapter-sep-plain-txt { font-size:12px; color:#9ca3af; }
+/* v134 章节开关：分节行右侧的「开放 / 关闭」切换按钮 + 关闭态灰化 */
+tr.chapter-sep .chapter-sep-toggle { font-weight:600; }
+tr.chapter-sep .chapter-sep-toggle.open { color:#166534; border-color:#86efac; background:#f0fdf4; }
+tr.chapter-sep .chapter-sep-toggle.locked { color:#92400e; border-color:#fcd34d; background:#fffbeb; }
+/* 关闭的章节：分节行灰化（管理员一眼看出哪些还没放给学员） */
+tr.chapter-sep-locked > td { background:#f3f4f6; border-left-color:#9ca3af; }
+tr.chapter-sep-locked .chapter-sep-name,
+tr.chapter-sep-locked .chapter-sep-count { color:#6b7280; }
+tr.chapter-sep-plain.chapter-sep-locked > td { background:#f3f4f6; }
 
-/* v131 批量设置章节弹窗 */
-.cbc-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:0 0 10px; }
+/* v134 学员端：未开放章节 = 整章收起 + 灰化锁定章节条（不发吸顶深色） */
+.cp-chapter-closed .cp-chapter-body { padding:0; }
+.cp-chapter-head-locked { background:linear-gradient(135deg, #6b7280 0%, #9ca3af 100%);
+  box-shadow:0 2px 8px rgba(107,114,128,.25); }
+.cp-chapter-head-locked .cp-chapter-name { color:#fff; opacity:.95; }
+.cp-chapter-head-locked .cp-chapter-count { color:#f3f4f6; background:rgba(255,255,255,.18);
+  border-radius:999px; padding:1px 8px; }
+
+/* v131 批量设置章节弹窗 */.cbc-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:0 0 10px; }
 .cbc-count { font-size:12px; color:#6b7280; margin-left:auto; }
 .cbc-list { border:1px solid #e5e7eb; border-radius:10px; max-height:320px; overflow-y:auto; background:#fff; }
 .cbc-row { display:flex; align-items:center; gap:10px; padding:8px 12px; border-bottom:1px solid #f3f4f6; cursor:pointer; margin:0; }

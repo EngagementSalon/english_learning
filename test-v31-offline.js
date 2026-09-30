@@ -138,11 +138,11 @@ const docLearner = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮英语班',
   assert('含任务节点路径（v123 分栏大纲 cp-list + cp-node + cp-grid）', html.includes('cp-list') && html.includes('cp-node') && html.includes('cp-grid'), '')
   assert('未完成的线下课节点标记为下一步（cp-node next）', html.includes('cp-node next'), '')
   assert('下一步引导含「点餐服务」', html.includes('下一步') && html.includes('点餐服务'), '')
-  // 卡片区域
-  assert('线下课卡片含徽标与类型名', html.includes('course-type offline') && html.includes('📅 线下课'), '')
-  assert('未下课卡片状态 = 待上课（o1）', html.includes('待上课'), '')
-  assert('已标注卡片显示 已完成 + 标注人（o2）', html.includes('已完成') && html.includes('由 管理员 标注'), '')
-  assert('线下课卡片操作为「查看」', html.includes('courseOfflineView') || html.includes('>查看<'), '')
+  // v133 第二项（契约反转）：「我的班级」卡片列表已移除 —— 学习进度大纲是唯一作业导航，
+  //   线下课状态展示改由 大纲行（courseTaskDone 判定）+ 信息弹窗（courseOfflineInfoModal）承载。
+  assert('[v133 反转] 「我的班级」卡片区已移除', !html.includes('我的班级'), '')
+  assert('线下课 o2 完成态由大纲行承载（已完成）', html.includes('已完成'), '')
+  assert('o1 未完成态由大纲行承载（待完成）', html.includes('待完成'), '')
   // 点击线下课 → 信息弹窗（非作答）
   vm.runInContext('courseStart("c1","o1")', sbB)
   const info1 = sbB._lastCreated() ? sbB._lastCreated().innerHTML : ''

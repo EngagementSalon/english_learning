@@ -91,7 +91,10 @@ function mkSandbox(doc, sess) {
       findAssign: (cls, aid) => cls && (cls.assignments || []).find(a => a.id === aid),
       getDoc: async () => sb.courseState.doc,
       mutate: async (fn) => { const r = fn(sb.courseState.doc); calls.mutateRet.push(r); return r !== false }
-    },
+    },    // v134：courseStart 新增「章节闸门」依赖 —— 本套件验的是放行闸门，
+    //   故注入「全部已开放」桩，让章节闸门恒不拦截（章节开关由 test-v134 专门覆盖）。
+    courseChapterOpened: () => true,
+
     setTimeout, clearTimeout, setInterval: () => 0, clearInterval,
   }
   sb.window = sb
@@ -355,20 +358,40 @@ const EX_CONFIRM = '[t:courseExamStartConfirm]'
       b.indexOf('(isFinal ? a.courseFinalOpened : a.examOpened)') >= 0)
     assert('已放行显示时间（courseFmtDate(openRec.at)）', b.indexOf('courseFmtDate(openRec.at)') >= 0)
   }
+  // v133 反转：原 7 条断言全部钉在「我的班级」卡片列表的渲染分支上
+  //   （卡片里的 gateLocked 分支 / 等待态文案分流 / 📕🔒 徽章 / 仅可作答一次提示 / 时长字段 / 无重考按钮）。
+  //   卡片列表已随 v133 移除 —— 这些功能契约整体由 courseStart 闸门链路 + i18n 表 + 管理端承载。
+  //   逐条落到真实收口处重写如下。
   {
-    const b = g('renderCourseStudent')
-    assert('学员卡 gateLocked 收口为 courseGateLocked', b.indexOf('courseGateLocked(a, me, res)') >= 0)
-    const iGate = b.indexOf('} else if (gateLocked)'), iExp = b.indexOf('} else if (expired)')
-    assert('等待态分支先于过期分支（闸门优先于截止时间）', iGate >= 0 && iExp >= 0 && iGate < iExp)
-    assert('等待态文案按类型分流（isFinal ? courseFinal* : courseExamGate*）',
-      b.indexOf("t(isFinal ? 'courseFinalWaitTag' : 'courseExamGateWaitTag')") >= 0
-      && b.indexOf("t(isFinal ? 'courseFinalWaitHint' : 'courseExamGateWaitHint')") >= 0)
-    assert('最终考试徽章 📕 + 🔒', b.indexOf('📕 ${t(\'courseTypeCourseFinal\')}') >= 0)
-    assert('最终考试卡片显示「仅可作答一次」提示', b.indexOf("isFinal ? `<span>🔒 ${t('courseFinalOnce')}") >= 0)
-    assert('最终考试时长字段参与渲染', b.indexOf("(a.type === 'exam' || isFinal) && a.duration") >= 0)
-    const b2 = b
-    assert('★ 最终考试无重考按钮（限考一次）',
-      /a\.type === 'homework'\s*\n?\s*\?[^\n]*courseRetakeBtn/.test(b2) || b2.indexOf("// v120：最终考试与普通测评均限考一次") >= 0)
+    const cs = g('courseStart')
+    // 1. 闸门判定收口 + 分支顺序（闸门必须早于开考确认，否则截止会先拦）
+    assert('[v133 反转] courseStart 闸门判定收口为 courseGateLocked',
+      cs.indexOf('courseGateLocked(a, me, res)') >= 0)
+    const iGate = cs.indexOf('courseGateLocked(a, me, res)')
+    const iConfirm = cs.indexOf("courseFinalStartConfirm")
+    assert('[v133 反转] 等待态分支先于开考确认（闸门优先于截止/确认）',
+      iGate >= 0 && iConfirm >= 0 && iGate < iConfirm, 'gate=' + iGate + ' confirm=' + iConfirm)
+    // 2. 等待态文案按类型分流（最终考试 vs 普通测评）
+    assert('[v133 反转] 等待态提示按类型分流（isFinal ? courseFinalWait : courseExamGateWait）',
+      cs.indexOf("courseIsFinal(a) ? t('courseFinalWait') : t('courseExamGateWait')") >= 0,
+      cs.slice(cs.indexOf('_recheck'), cs.indexOf('_recheck') + 200))
+    // 3. 限考一次：最终考试有成绩直接拦（无重考入口）
+    assert('[v133 反转] 最终考试有成绩不可再进（courseExamDoneAlert，无重考）',
+      cs.indexOf("if (courseIsFinal(a) && res) { alert(t('courseExamDoneAlert')); return }") >= 0)
+    // 4. 最终考试时长参与计时（endAt 由 duration 推导）
+    assert('[v133 反转] 最终考试时长参与计时（endAt 走 duration）',
+      cs.indexOf("(a.type === 'exam' || isFinal) && a.duration ? Date.now() + a.duration * 60000 : null") >= 0)
+  }
+  {
+    // 5~6. 徽章 / 「仅可作答一次」文案 / 类型标签 —— 改查 i18n 表 + 管理端类型列
+    ;['courseTypeCourseFinal', 'courseFinalOnce', 'courseFinalWait', 'courseFinalWaitTag',
+      'courseFinalWaitHint', 'courseFinalGateLabel'].forEach(k => {
+      const n = (I18N.match(new RegExp('(^|[\\s{,])' + k + '\\s*:', 'g')) || []).length
+      assert('[v133 反转] 最终考试文案键 zh/en 成对（' + k + '）', n === 2)
+    })
+    const rc = g('courseRenderClass')
+    assert('[v133 反转] 管理端班级列表最终考试行带 📕 类型标签',
+      rc.indexOf("t('courseTypeCourseFinal')") >= 0, rc.slice(0, 200))
   }
   {
     const b = g('courseRenderClass')

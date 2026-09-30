@@ -152,12 +152,33 @@ const FILE_B = 'complimentary 免费赠送的\nreservation 预订\nhousekeeping 
   await vm.runInContext('courseTestSeedDoc()', sb3)
   vm.runInContext('renderCourseStudent()', sb3)
   const listHtml3 = sb3._getEl('page-course').innerHTML
-  const doneTagCount3 = (listHtml3.match(/course-status done/g) || []).length
-  const donePhraseCount3 = (listHtml3.match(/已完成 ·/g) || []).length
-  assert('3% 记录在列表不显示“已完成”', doneTagCount3 === 1 && donePhraseCount3 === 1, 'done=' + doneTagCount3 + ' phrase=' + donePhraseCount3)
-  assert('3% 记录显示“已看 3% · 请重看并确认刷新”', listHtml3.includes('已看 3%'), listHtml3.slice(0, 500))
-  assert('3% 记录按钮为“去观看”', listHtml3.includes('去观看'), '')
-  assert('100% 记录仍显示“已完成”', listHtml3.includes('已完成 · 100%'), listHtml3.slice(0, 600))
+  // v133 反转：「我的班级」卡片列表已移除 → 学员首页只剩「学习进度大纲 + 可加入的班级」。
+  //   3% 记录不再以卡片形式出现（旧的 course-status done / 「已看 3%」文案随卡片一起没了），
+  //   其「未完成」状态改由大纲行承载：cp-node 无 done 类 + 角标文案「待完成」。
+  //   ★ 注意：大纲行的 cp-meta 副标题只讲「类型 · 题数/时长」（courseTaskMetaText），
+  //     不含观看百分比 —— 所以这里断进度语义要看 cp-node 的状态类与角标，而不是去断百分比文案。
+  // ★ 切片纪律（本套件实撞）：cp-node 行的属性顺序是 class → onclick → title，
+  //   标题字面量既出现在 title 属性里、又出现在 .cp-lbl 里，拿它当锚点会把 class 切到区间外。
+  //   稳妥做法：按 `<div class="cp-node` 的出现位置切出「每个节点行」的区间。
+  const nodeAt = []
+  let _p = listHtml3.indexOf('<div class="cp-node')
+  while (_p >= 0) { nodeAt.push(_p); _p = listHtml3.indexOf('<div class="cp-node', _p + 1) }
+  const nodeV1 = nodeAt.length > 0 ? listHtml3.slice(nodeAt[0], nodeAt[1] >= 0 ? nodeAt[1] : undefined) : ''
+  const nodeV2 = nodeAt.length > 1 ? listHtml3.slice(nodeAt[1]) : ''
+  assert('[v133 反转] 3% 记录在大纲行为「未完成」（cp-node 无 done 类 + 待完成角标）',
+    nodeV1.includes('低进度视频') && !nodeV1.includes('cp-node done') && nodeV1.includes('待完成'),
+    'nodes=' + nodeAt.length + ' | ' + nodeV1.slice(0, 400))
+  assert('[v133 反转] 3% 记录为「下一步」（cp-node next），引导继续观看',
+    nodeV1.includes('cp-node next'), nodeV1.slice(0, 400))
+  assert('[v133 反转] 100% 记录在大纲行为「已完成」（cp-node done + 已完成角标）',
+    nodeV2.includes('cp-node done') && nodeV2.includes('已完成'), nodeV2.slice(0, 400))
+  // 反向保护：确认卡片列表确实已移除（course-status 是卡片列表专属类名，大纲行不产它）
+  assert('[v133 反转] 旧卡片列表已移除（页面不再产出 course-status done）',
+    !listHtml3.includes('course-status done'), '')
+  assert('[v133 反转] 旧卡片列表专属文案「已看 3%」已移除',
+    !listHtml3.includes('已看 3%'), '')
+  assert('[v133 反转] 两条视频作业均出现在大纲行（标题可见）',
+    listHtml3.includes('低进度视频') && listHtml3.includes('已完成视频'), '')
 
   console.log('\n② 作业保存后编辑弹窗可继续 AI 出题')
   const docRef4 = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮班', members: ['s1'], createdAt: 1,

@@ -93,7 +93,16 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   console.log('\n1️⃣  管理员默认学员视图')
   await vm.runInContext('renderCoursePage()', sandbox)
   let studentHtml = getEl('page-course').innerHTML
-  assert('默认渲染「我的班级」', studentHtml.includes('我的班级'))
+  // v133 反转：「我的班级」卡片列表已移除 —— 学员首页改为「学习进度大纲（📈 我的学习进度）+ 可加入的班级」。
+  //   旧断言断的是被移除的卡片区标题「我的班级」。
+  //   ★ 注意：本套件里 admin 不是 c1 的成员（members:['s1']），myClasses 为空 → 大纲区 courseStudentPathHtml
+  //     返回空串（有意的：没加入班级就没进度可看）。故此处断「卡片区已下线 + 可加入班级仍在」，
+  //     大纲区本身的渲染由 4️⃣ 节（学员 s1 身份，是成员）覆盖。
+  assert('[v133 反转] 学员首页不再出现「我的班级」字样', !studentHtml.includes('我的班级'))
+  // ★ 切片范围纪律：course-card-actions 仍是「可加入的班级」卡片的合法类名，
+  //   不能整页否定；只否定「我的班级」卡片区会产出的 course-card-title / course-status 组合。
+  assert('[v133 反转] 旧「我的班级」卡片专属类名已下线（不再产出 course-card-title）',
+    !studentHtml.includes('course-card-title'), '')
   assert('渲染「可加入的班级」', studentHtml.includes('可加入的班级'))
   assert('显示管理员预览横幅', studentHtml.includes('管理员预览'))
   assert('横幅有「管理模式」切换按钮', studentHtml.includes('管理模式') && studentHtml.includes('courseToggleAdminView'))
@@ -114,7 +123,8 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   vm.runInContext('courseToggleAdminView()', sandbox)
   await new Promise(r => setTimeout(r, 10))
   studentHtml = getEl('page-course').innerHTML
-  assert('再次渲染学员视图「我的班级」', studentHtml.includes('我的班级'))
+  assert('[v133 反转] 再次渲染学员视图（可加入班级 + 无卡片列表）',
+    studentHtml.includes('可加入的班级') && !studentHtml.includes('我的班级'), studentHtml.slice(0, 300))
   assert('再次显示预览横幅', studentHtml.includes('管理员预览'))
 
   // 4. 学员身份不受影响（无横幅，直接学员视图）
@@ -123,25 +133,32 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   vm.runInContext('courseState.adminView = false', sandbox)
   await vm.runInContext('renderCoursePage()', sandbox)
   const stuHtml = getEl('page-course').innerHTML
-  assert('学员渲染「我的班级」', stuHtml.includes('我的班级'))
+  assert('[v133 反转] 学员渲染大纲区（s1 是成员 → 我的学习进度 出现）', stuHtml.includes('我的学习进度'), stuHtml.slice(0, 400))
+  assert('[v133 反转] 学员视图不再出现「我的班级」卡片区', !stuHtml.includes('我的班级'), '')
   assert('学员视图无预览横幅', !stuHtml.includes('管理员预览'))
   assert('学员视图无管理模式按钮', !stuHtml.includes('管理模式'))
 
-  // 5. 截止后未提交：仍可补交（显示「已截止·可补交」+ 开始按钮）
-  console.log('\n5️⃣  截止后可补交（未提交）')
+  // 5. 截止后未提交：仍可补交（逾期判定是作业行/详情逻辑，「已截止·可补交」文案随卡片列表下线）
+  console.log('\n5️⃣  截止后仍可进入作业（未提交）')
   courseDoc.classes[0].assignments[0].deadline = Date.now() - 1000
   courseDoc.classes[0].assignments[0].results = {}
   await vm.runInContext('renderCoursePage()', sandbox)
   let openHtml = getEl('page-course').innerHTML
-  assert('显示「已截止·可补交」', openHtml.includes('已截止·可补交'))
-  assert('仍显示开始作业按钮', openHtml.includes('courseStart'))
+  // v133 反转：原「已截止·可补交」标签产自卡片列表的 courseExpiredOpen；卡片列表移除后，
+  //   学员首页只剩大纲行，逾期与否不改变「行的可点性」——点行即 courseStart，路由内部处理截止/闸门。
+  assert('[v133 反转] 大纲行仍可点击进入作业（courseStart 入口在）', openHtml.includes('courseStart'), '')
+  assert('[v133 反转] 截止后作业仍出现在大纲行', openHtml.includes('我的学习进度'), openHtml.slice(0, 400))
+  assert('[v133 反转] 卡片列表专属「已截止·可补交」标签已移除（不再由首页产出）',
+    !openHtml.includes('已截止·可补交'), '')
 
-  // 6. 逾期提交：学员视图与管理详情均显示「逾期」标签
+  // 6. 逾期提交：管理端成绩详情仍标「逾期」（学员首页本身不产逾期标签 —— 那是卡片列表形态）
   console.log('\n6️⃣  逾期提交标记展示')
   courseDoc.classes[0].assignments[0].results = { 's1': { at: Date.now(), score: 85, correct: 9, total: 10, usedSec: 60, attempts: 1, overdue: true } }
   await vm.runInContext('renderCoursePage()', sandbox)
   openHtml = getEl('page-course').innerHTML
-  assert('学员视图显示「逾期」标签', openHtml.includes('逾期'))
+  // v133 反转：学员首页原「逾期」标签产自卡片列表的 overTag；卡片列表移除后该标签只保留在管理端成绩详情表里。
+  assert('[v133 反转] 学员首页不再产出卡片态「逾期」标签', !openHtml.includes('courseOverdue'), '')
+  assert('[v133 反转] 学员首页仍渲染大纲区（逾期不阻断导航）', openHtml.includes('我的学习进度'), openHtml.slice(0, 300))
   Store.getSession = () => ({ id: 1, username: 'admin', name: '管理员', role: 'admin' })
   vm.runInContext('courseState.adminView = true', sandbox)
   await vm.runInContext('courseAssignDetail("c1","a1")', sandbox)

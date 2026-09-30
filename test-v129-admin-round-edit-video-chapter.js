@@ -192,6 +192,9 @@ assert('3.7 courseChapterStat 按 chapter 精确匹配统计（trim 归一）',
 // 沙箱真跑：分组逻辑
 function mkSandbox() {
   const sb = {
+    // v134：本函数新增「章节开关」依赖 —— 这些用例验的是其它行为，故注入「全部已开放」桩，
+    //   保持所有章节展开渲染（章节关闭态由 test-v134-chapter-switch.js 专门覆盖）。
+    courseChapterOpened: () => true,
     console, JSON, Object, Array, String, Number, Math, Promise, Date, LANG: 'zh',
     escHtml: s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;'),
     escAttr: s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'),
@@ -294,7 +297,12 @@ function mkAssign(id, title, done, extra) {
 // 管理端：分节行 + data-drag-idx 真实下标
 console.log('\n[3b] 管理端章节分块与拖拽共存')
 const renderClass = extractFn(CA, 'courseRenderClass')
-assert('3.22 管理端渲染章节分隔行 tr.chapter-sep', renderClass.includes('class="chapter-sep"'))
+// [v134 反转] v134 给分节行加了「开放/关闭」态 class（chapter-sep 后拼 chapter-sep-locked），
+//   故这里不再能匹配 `class="chapter-sep"` 这个精确字面量；改为匹配类名模板的开头，
+//   并新增一条反向断言：分节行仍然存在（不是整块被删）。
+assert('3.22 [v134 反转] 管理端渲染章节分隔行 tr.chapter-sep',
+  /class="chapter-sep\$\{/.test(renderClass) && renderClass.includes('chapter-sep-plain'),
+  '分节行类名模板已改为带动态态（chapter-sep${...}）+ 散项行保留')
 assert('3.23 ★ 分节行与作业行分开累加（assignRows += 而非 return 覆盖）',
   renderClass.includes('assignRows += `<tr${isDraft'), '作业行必须累加，否则会覆盖掉章节行')
 assert('3.24 ★ 作业行 data-drag-idx 仍是 assignments 的真实下标 idx',
@@ -343,7 +351,21 @@ assert('4.2 新键全部有实际调用方（不只是定义了没人用）',
 // ========== ⑤ CSS ==========
 console.log('\n[5] CSS 契约')
 assert('5.1 学员端章节头样式 cp-chapter-head 就位', CSS.includes('.cp-chapter-head {'))
-assert('5.2 章节头用品牌软底 + 品牌深色左条', /\.cp-chapter-head\s*\{[^}]*var\(--brand-soft\)/.test(CSS) && /\.cp-chapter-head\s*\{[^}]*border-left:4px solid var\(--primary-dark\)/.test(CSS))
+// ★ 契约已被 v133 显式推翻并重写（原断言：品牌软底 + 品牌深色左条 —— 用户反馈「Episode 部分不显眼」，
+//   v133 改为「容器分组卡 + 吸顶章节条」：深色渐变横幅 + 内嵌白底进度条 + position:sticky。
+//   反转原因：浅色小字横幅在白卡列表里对比度不足；且旧结构头体平级，sticky 活动范围是整个列表 → 头钉死不动。
+//   新契约（此处只断「显著度与吸顶」这一层，结构配平由 test-v133 负责）：
+//   ① 章节头必须是 sticky（跟随滚动）② 必须是深色渐变（对比度）③ 名字必须浅色（深底可读）。
+assert('5.2 [v133 反转] 章节头 = 吸顶深色渐横幅（旧「品牌软底 + 左条」契约作废）',
+  /\.cp-chapter-head\s*\{[^}]*position:sticky/.test(CSS) &&
+  /\.cp-chapter-head\s*\{[^}]*linear-gradient/.test(CSS) &&
+  /\.cp-chapter-name\s*\{[^}]*color:#fff/.test(CSS))
+assert('5.2a [v133] 吸顶偏移随顶栏两档（60px / 56px）',
+  /\.cp-chapter-head\s*\{[^}]*top:60px/.test(CSS) &&
+  /@media \(max-width:768px\)\s*\{[\s\S]*?\.cp-chapter-head[^}]*top:56px/.test(CSS))
+// 旧形态必须已消失（否则等于没换）
+assert('5.2b [v133] 旧「品牌软底 90deg 渐变」形态已移除',
+  !/\.cp-chapter-head\s*\{[^}]*background:linear-gradient\(90deg, var\(--brand-soft\)/.test(CSS))
 assert('5.3 章节名/计数样式就位', CSS.includes('.cp-chapter-name {') && CSS.includes('.cp-chapter-count {'))
 assert('5.4 分块容器 cp-chapter-body 就位', CSS.includes('.cp-chapter-body {'))
 assert('5.5 ★ 分块后首节点补回间距（.cp-chapter-body > .cp-node:first-child）',

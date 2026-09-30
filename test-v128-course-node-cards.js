@@ -54,6 +54,9 @@ assert('源码：cp-dot / cp-info / cp-lbl / cp-meta 结构保留（v123 行内�
 // ---------- ② 行为 ----------
 function mkSandbox() {
   const sb = {
+    // v134：本函数新增「章节开关」依赖 —— 这些用例验的是其它行为，故注入「全部已开放」桩，
+    //   保持所有章节展开渲染（章节关闭态由 test-v134-chapter-switch.js 专门覆盖）。
+    courseChapterOpened: () => true,
     console, JSON, Object, Array, String, Number, Math, Promise, Date, LANG: 'zh',
     escHtml: s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;'),
     escAttr: s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'),

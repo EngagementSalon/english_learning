@@ -1,9 +1,10 @@
 // ====== CourseStore：线下课 / 班级 / 作业 / 成绩 云端存储 ======
 // 独立 textdb 文档（与用户数据同步仓库分开，避免互相挤占 1MB 容量）
 // 文档结构：{ v: 1, classes: [ { id, name, note, createdAt, createdBy, members:[username],
+//   chInit(是否已做章节开关初始化，v134), chOpen:{ 章节名(空串=未分章): true|false }(v134),
 //   assignments: [ { id, type:'homework'|'exam'|'video', title, desc, deadline, duration, passScore,
 //     status:'draft'|(缺省=open，draft=草稿未发送，学员不可见), sentAt(发送时间),
-//     createdAt, questions:[{type,difficulty,question,options,answer,explanation}],
+//     createdAt, chapter(所属章节名，可空=未分章), questions:[{type,difficulty,question,options,answer,explanation}],
 //     results: { username: { at, score, correct, total, usedSec, attempts } } } ] } ] }
 // 写入采用「读-改-写 + 写后校验」，被并发覆盖自动重试
 
@@ -35,6 +36,11 @@ const CourseStore = {
     if (!r.ok) throw new Error('courses GET ' + r.status)
     const doc = JSON.parse(await r.text())
     if (!doc || typeof doc !== 'object' || !Array.isArray(doc.classes)) throw new Error('bad courses doc')
+    // v134：存量班级的章节开关回填（幂等，内存内完成，不做额外网络往返）。
+    //   ★ 必须放在这里而不是「某个管理员点开页面时」—— 学员端 getDoc 也走这条路，
+    //     若只在管理端回填，学员先打开就会被「无记录 = 关闭」误锁。
+    //   ★ 这里只改内存副本，落盘由下一次 mutate 顺手完成（避免读路径产生写放大）。
+    this._migrateChOpenDoc(doc)
     return doc
   },
   async _put(body) {
@@ -251,6 +257,75 @@ const CourseStore = {
   findClass(doc, cid) { return (doc.classes || []).find(c => c.id === cid) },
   findAssign(cls, aid) { return cls && (cls.assignments || []).find(a => a.id === aid) },
   newId(prefix) { return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7) },
+
+  // ================================================================
+  // v134 章节开放开关（按「班级 + 章节」）—— 学员必须等管理员逐章开放才能做题
+  //
+  // ★★★ 语义口径（本功能最容易错的地方，改前先读完）：
+  //   用户的原始需求是「默认所有内容都是关闭状态」，但线上已有一批学员正在用的班级。
+  //   若把「无记录」直接当成「关闭」，上线瞬间所有存量班级会被全部锁死 —— 这是事故，不是需求。
+  //   因此把「默认关闭」实现为**迁移事实**而不是**运行时判据**：
+  //     · 新建建时由 courseCreateClass 写入 chInit:true，并把当时已有的章节
+  //       （含未分章保留键）**逐章显式记录为已开放** → 以后新增的章节不在记录里 → 关闭；
+  //     · 存量班级（无 chInit）在首次被读取/操作时由 _migrateChOpen 就地补齐并打 chInit，
+  //       此刻存在的章节同样被显式记为已开放 → 老学员体验零变化；
+  //     · 运行时判据恒为「chOpen[键] === true 才算开放」，双空/缺字段一律视为关闭。
+  //   ★ 切换语义：管理员在管理端关闭某章 → 写 false（而不是删键）—— 删键会让该章在
+  //    下次 _migrateChOpen 回填时被当作「存量章节」重新开放（关了又自己开）。
+  //   ★ 新加章节（写作业时首次出现）不在 map 里 → 判据 false → 默认关闭，符合需求。
+  //
+  // 保留键：'' （空串）= 「未分章」组，同样受控、同样可开关。
+  //   ★ 用空串而不是 '__none__' 这类哨兵值，是为了让键与章节名同源 ——
+  //     章节名允许任意用户输入，哨兵值一旦撞名就会串味。
+  // ================================================================
+  chKey(chName) { return String(chName == null ? '' : chName).trim() },
+
+  // 该章是否已开放（口径唯一收口；缺 map / 缺键 / 值非 true 一律 false）
+  chOpen(cls, chName) {
+    if (!cls || !cls.chOpen || typeof cls.chOpen !== 'object') return false
+    return cls.chOpen[this.chKey(chName)] === true
+  },
+
+  // 该班级出现过的全部章节键（按 assignments 顺序去重，含 '' 未分章组）
+  chNames(cls) {
+    const seen = Object.create(null), out = []
+    ;((cls && cls.assignments) || []).forEach(a => {
+      const k = this.chKey(a.chapter)
+      if (seen[k]) return
+      seen[k] = 1
+      out.push(k)
+    })
+    return out
+  },
+
+  // 存量迁移：把「此刻已存在的章节」显式记为已开放，并打 chInit 一次性标记。
+  // 返回 true = 本次真的写入过 map（需要调用方落盘）。幂等：已迁移的班级直接返回 false。
+  // ★ 刻意不改动已经是 false 的键 —— 管理员关过的章不能被迁移重新打开。
+  _migrateChOpen(cls) {
+    if (!cls || cls.chInit) return false
+    cls.chInit = true
+    cls.chOpen = cls.chOpen || {}
+    let touched = false
+    this.chNames(cls).forEach(k => {
+      if (cls.chOpen[k] === undefined) { cls.chOpen[k] = true; touched = true }
+    })
+    return touched
+  },
+
+  // 文档级迁移：对每个班级做一次存量回填，返回是否有班级被改动过
+  _migrateChOpenDoc(doc) {
+    let touched = false
+    ;((doc && doc.classes) || []).forEach(c => { if (this._migrateChOpen(c)) touched = true })
+    return touched
+  },
+
+  // 建班时初始化：先打 chInit（阻断迁移路径），再把现有章节全开放
+  initChOpenForNewClass(cls) {
+    if (!cls) return
+    cls.chInit = true
+    cls.chOpen = cls.chOpen || {}
+    this.chNames(cls).forEach(k => { cls.chOpen[k] = true })
+  },
 
   // ---- 用户改名：迁移班级成员 / 创建者 / 成绩记录键 ----
   // 返回 true=已写入；null=云端没有该用户名的任何痕迹（无需写）；false=重试用尽

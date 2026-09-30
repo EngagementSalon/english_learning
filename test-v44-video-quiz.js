@@ -181,7 +181,7 @@ const docBase = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮英语班', no
     assert('任务已被删除 → drop', r4 === 'drop')
   }
 
-  console.log('\n⑤ 学员端：卡片待答题状态 / 视频页去答题入口')
+  console.log('\n⑤ 学员端：大纲待答题状态 / 视频页去答题入口')
   const docStudent = JSON.parse(JSON.stringify(docBase))
   docStudent.doc.classes[0].assignments[0].results = { s1: { at: 1, watched: true, watchedPct: 100, watchedSec: 200, duration: 200, difficulty: 3 } }
   const sbS = makeSandbox(docStudent)
@@ -189,10 +189,20 @@ const docBase = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮英语班', no
   await vm.runInContext('courseTestSeedDoc()', sbS)
   vm.runInContext('renderCourseStudent()', sbS)
   const card = sbS._els['page-course'].innerHTML
-  assert('看完未答 → 显示「待答题」徽标', card.includes('待答题'))
-  assert('看完未答 → 显示「去答题」按钮', card.includes('去答题'))
-  assert('看完未答 → 不显示已完成', !sliceBetween(card, 'course-card-title', 'course-card-actions').includes('courseDoneTag') && !sliceBetween(card, 'course-card-title', 'course-card-actions').includes('✓'))
-  // 完成后：显示测验得分
+  // v133 反转：「我的班级」卡片列表已移除 —— 旧的「待答题」徽标 + 「去答题」按钮是卡片列表专属 UI，
+  //   随卡片一起下线。待答题状态改由大纲行承载：courseTaskDone → courseVideoQuizPending 判未完成，
+  //   行上表现为「非 done + 待完成角标 + next 高亮」；答题入口由 courseStartVideo 的 quizPending 分支提供。
+  const nAt = []
+  let _p = card.indexOf('<div class="cp-node')
+  while (_p >= 0) { nAt.push(_p); _p = card.indexOf('<div class="cp-node', _p + 1) }
+  const node1 = nAt.length > 0 ? card.slice(nAt[0], nAt[1] >= 0 ? nAt[1] : undefined) : ''
+  assert('[v133 反转] 看完未答 → 大纲行标为未完成（cp-node next + 待完成角标，无 done 类）',
+    node1.includes('入住服务视频') && !node1.includes('cp-node done') && node1.includes('待完成'),
+    'nodes=' + nAt.length + ' | ' + node1.slice(0, 400))
+  assert('[v133 反转] 看完未答 → 大纲行副标题带出小测题数（2 道小测题）',
+    node1.includes('2 道小测题'), node1.slice(0, 400))
+  assert('[v133 反转] 看完未答 → 旧卡片专属「待答题」徽标已移除', !card.includes('待答题'), '')
+  // 完成后：显示测验得分 —— 得分不再进大纲行（cp-meta 只讲类型/题数），改断完成态
   const docDone = JSON.parse(JSON.stringify(docBase))
   docDone.doc.classes[0].assignments[0].results = { s1: { at: 1, watchedPct: 100, watchedSec: 200, duration: 200, difficulty: 3, quizCorrect: 9, quizTotal: 10, quizScore: 90 } }
   const sbD = makeSandbox(docDone)
@@ -200,7 +210,16 @@ const docBase = { doc: { v: 1, classes: [{ id: 'c1', name: '餐饮英语班', no
   await vm.runInContext('courseTestSeedDoc()', sbD)
   vm.runInContext('renderCourseStudent()', sbD)
   const card2 = sbD._els['page-course'].innerHTML
-  assert('答题后 → 显示完成 + 测验 9/10', card2.includes('✓') && card2.includes('9/10') && !card2.includes('待答题'))
+  const nAt2 = []
+  let _p2 = card2.indexOf('<div class="cp-node')
+  while (_p2 >= 0) { nAt2.push(_p2); _p2 = card2.indexOf('<div class="cp-node', _p2 + 1) }
+  const node2 = nAt2.length > 0 ? card2.slice(nAt2[0], nAt2[1] >= 0 ? nAt2[1] : undefined) : ''
+  assert('[v133 反转] 答题后 → 大纲行标为已完成（cp-node done + ✓ 圆点 + 已完成角标）',
+    node2.includes('cp-node done') && node2.includes('✓') && node2.includes('已完成'),
+    node2.slice(0, 400))
+  assert('[v133 反转] 答题后 → 不再出现未完成迹象（无 next 高亮）',
+    !node2.includes('cp-node next'), node2.slice(0, 400))
+  assert('答题后 → 进度计数包含该视频（1 / 2 完成）', card2.includes('1 / 2 完成'), card2.slice(0, 400))
   // 视频页 quizPending 去答题入口
   const docPend = JSON.parse(JSON.stringify(docBase))
   docPend.doc.classes[0].assignments[0].results = { s1: { at: 1, watchedPct: 100, watchedSec: 200, duration: 200, difficulty: 3 } }

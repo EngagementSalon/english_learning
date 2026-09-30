@@ -254,9 +254,24 @@ async function main() {
     await vm.runInContext('courseTestSeedDoc()', sbP)
     vm.runInContext('renderCourseStudent()', sbP)
     const card = sbP._els['page-course'].innerHTML
-    assert('作业待回顾 → 卡片含「待回顾错题」徽标', card.includes('待回顾错题') && card.includes('· 1'))
-    assert('作业待回顾 → 显示「回顾错题」按钮（courseReviewStart）', card.includes("courseReviewStart('c1','hw1')") && card.includes('回顾错题'))
-    assert('待回顾 → 不显示已完成 ✓', sliceBetween(card, '餐具英语', 'course-card-actions').indexOf('✓') < 0)
+    // v133 反转：「我的班级」卡片列表已移除 —— 旧的「待回顾错题」徽标 + 「回顾错题」按钮是卡片列表专属 UI。
+    //   待回顾状态改由大纲行承载：courseTaskDone → courseReviewPending 判未完成（行上「待完成」角标 + 无 done 类）；
+    //   回顾入口由 courseStart 的待回顾分支（return courseReviewStart(cid, aid)）保证，点击行即进入。
+    //   ★ 切片纪律：本套件旧切片右锚点 'course-card-actions' 已随卡片列表删除而不存在，
+    //     用它会 slice 到 undefined/空串让断言静默假绿 —— 改按 '<div class="cp-node' 切节点行。
+    const nAtP = []
+    let _pp = card.indexOf('<div class="cp-node')
+    while (_pp >= 0) { nAtP.push(_pp); _pp = card.indexOf('<div class="cp-node', _pp + 1) }
+    const nodeP = nAtP.length > 0 ? card.slice(nAtP[0], nAtP[1] >= 0 ? nAtP[1] : undefined) : ''
+    assert('[v133 反转] 作业待回顾 → 大纲行标为未完成（无 done 类 + 待完成角标）',
+      nodeP.includes('餐具英语') && !nodeP.includes('cp-node done') && nodeP.includes('待完成'),
+      'nodes=' + nAtP.length + ' | ' + nodeP.slice(0, 400))
+    assert('[v133 反转] 待回顾入口由 courseStart 路由承载（courseReviewStart 仍被调用）',
+      vm.runInContext("typeof courseReviewStart === 'function' && typeof courseStart === 'function'", sbP) === true
+      && vm.runInContext("courseStart.toString().includes('courseReviewStart')", sbP) === true,
+      '')
+    assert('[v133 反转] 待回顾 → 大纲行不显示已完成（节点行内无 ✓ 圆点）',
+      nodeP.indexOf('✓') < 0, nodeP.slice(0, 400))
     // 线性进度：待回顾不算完成
     // v123 反转：分栏大纲把「任务行区间」容器由 cp-path 换成 cp-list（右侧详情 cp-side 另含一个同名 cp-tip，
     // 故右边界改用 cp-side 以准确切出左侧大纲行区间）
@@ -270,8 +285,9 @@ async function main() {
     await vm.runInContext('courseTestSeedDoc()', sbD)
     vm.runInContext('renderCourseStudent()', sbD)
     const card2 = sbD._els['page-course'].innerHTML
-    assert('wrongs=[] → 显示已完成 ✓', card2.includes('✓') && !card2.includes('待回顾错题'))
-    // 测评待回顾卡片
+    assert('[v133 反转] wrongs=[] → 大纲行标为已完成（cp-node done + ✓）',
+      card2.includes('cp-node done') && card2.includes('✓'), card2.slice(0, 400))
+    // 测评待回顾
     const docE = mkDoc([{ id: 'ex1', type: 'exam', title: '定级测评', desc: '', deadline: 0, duration: 0, createdAt: 1,
       questions: JSON.parse(JSON.stringify(Q3)),
       results: { s1: { at: 100, score: 67, correct: 2, total: 3, usedSec: 10, attempts: 1, wq: [1], qn: 3, review: { at: 100, qn: 3, wrongs: [1], rounds: 0 } } } }])
@@ -280,7 +296,13 @@ async function main() {
     await vm.runInContext('courseTestSeedDoc()', sbE)
     vm.runInContext('renderCourseStudent()', sbE)
     const cardE = sbE._els['page-course'].innerHTML
-    assert('测评待回顾 → 徽标 + 回顾按钮（而不是“已完成”）', cardE.includes('待回顾错题') && cardE.includes('courseReviewStart'))
+    const nAtE = []
+    let _pe = cardE.indexOf('<div class="cp-node')
+    while (_pe >= 0) { nAtE.push(_pe); _pe = cardE.indexOf('<div class="cp-node', _pe + 1) }
+    const nodeE = nAtE.length > 0 ? cardE.slice(nAtE[0], nAtE[1] >= 0 ? nAtE[1] : undefined) : ''
+    assert('[v133 反转] 测评待回顾 → 大纲行为未完成（无 done 类 + 待完成角标，而非“已完成”）',
+      nodeE.includes('定级测评') && !nodeE.includes('cp-node done') && nodeE.includes('待完成'),
+      nodeE.slice(0, 400))
   }
 
   // ---------- ④ 作业行为级全链路 ----------

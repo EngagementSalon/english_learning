@@ -104,40 +104,6 @@ function courseToggleAdminView() {
 // ================================================================
 // 学员端
 // ================================================================
-// 学员「我的班级」卡片 —— 线下课（无作答，只展示信息与完成状态）
-function courseStudentOfflineCard(c, a, me) {
-  const res = (a.results || {})[me]
-  const done = !!(res && res.done)
-  const absentSelf = !done && a.held && Array.isArray(a.absent) && a.absent.indexOf(me) >= 0
-  const statusHtml = done
-    ? `<span class="course-status done">✓ ${t('courseDoneTag')}</span>`
-    : absentSelf
-      ? `<span class="course-status pending">🚫 ${t('courseOfflineAbsentSelf')}</span>`
-      : `<span class="course-status pending">${a.held ? t('courseOfflineMissed') : t('courseOfflinePending')}</span>`
-  const whenHtml = a.date
-    ? `<span>🕐 ${t('courseOfflineWhen')}：${courseOfflineWhen(a)}</span>`
-    : `<span>🕐 ${t('courseOfflineWhen')}：${t('courseUnlimited')}</span>`
-  const markInfo = done && res.by ? ` · ${t('courseOfflineMarkedBy', escHtml(courseMarkedByName(res.by)))}` : ''
-  return `
-    <div class="card course-card">
-      <div class="course-card-head">
-        <span class="course-type offline">📅 ${t('courseTypeOffline')}</span>
-        <span class="course-class-tag">${escHtml(c.name)}</span>
-        ${statusHtml}
-      </div>
-      <div class="course-card-title">${escHtml(a.title)}</div>
-      ${a.desc ? `<div class="course-card-desc">${escHtml(a.desc)}</div>` : ''}
-      <div class="course-card-meta">
-        ${whenHtml}
-        ${a.held ? `<span>✅ ${t('courseOfflineHeld')}</span>` : ''}
-        ${markInfo}
-      </div>
-      <div class="course-card-actions">
-        <button class="btn btn-ghost btn-sm" onclick="courseStart('${escAttr(c.id)}','${escAttr(a.id)}')">${t('courseOfflineView')}</button>
-      </div>
-    </div>`
-}
-
 // v123：任务类型的中文/英文短标签（大纲行第二行小字）
 function courseTaskKindLabel(a) {
   if (!a) return ''
@@ -211,6 +177,77 @@ function courseChapterStat(assigns, me, chName) {
   return { done, total }
 }
 
+// ================================================================
+// v134：章节开关（管理端）
+// ================================================================
+// 分节行右侧的「开放 / 关闭」切换按钮。
+// ★ 不把章节名拼进 onclick 的 JS 字面量 —— 章节名是用户自由输入，含引号/反斜杠就会
+//   截断 inline 属性（v85 老坑）。改用 data-ch 传值 + onclick="...(this)" 读 dataset。
+// ★ 「未分章」组用空串键，data-ch="" 依然可读（dataset 拿到空串，不会被当成 undefined：
+//   value 为空串时 dataset 返回 ''，与「属性不存在」的 undefined 可区分，但为稳妥
+//   这里统一按 '' 处理，见 courseChapterToggleDo）。
+function courseChapterToggleBtn(cid, chName) {
+  const open = courseChapterOpened(courseFind(cid), chName)
+  return `<button class="btn btn-sm chapter-sep-btn chapter-sep-toggle${open ? ' open' : ' locked'}"
+    data-cid="${escAttr(cid)}" data-ch="${escAttr(chName)}"
+    onclick="courseChapterToggle(this)"
+    title="${escAttr(open ? t('courseChapterCloseHint') : t('courseChapterOpenHint'))}">${open ? t('courseChapterOpenTag') : t('courseChapterLockedTag')}</button>`
+}
+
+function courseChapterToggle(btn) {
+  if (!btn) return
+  const cid = btn.getAttribute('data-cid') || ''
+  const chName = btn.getAttribute('data-ch') || ''
+  courseChapterToggleDo(cid, chName)
+}
+
+// 幂等切换：读最新文档 → 取反 → 读改写 + 写后校验（CourseStore.mutate 自带）。
+// ★ 切换必须写明确的 true/false，**不能删键** —— 删键会让该章在下次存量迁移时
+//   被当成「存量章节」重新开放（关了又自己开）。
+async function courseChapterToggleDo(cid, chName) {
+  const key = CourseStore.chKey(chName)
+  const c0 = courseFind(cid)
+  if (!c0) return
+  const nextOpen = !courseChapterOpened(c0, key)
+  const label = key || t('courseChapterNone')
+  if (!confirm(t(nextOpen ? 'courseChapterOpenConfirm' : 'courseChapterCloseConfirm',
+    label, (c0.name || '')))) return
+  try {
+    const r = await CourseStore.mutate(doc => {
+      const c = CourseStore.findClass(doc, cid)
+      if (!c) return false
+      // 幂等保护：并发下另一个人已经切成同一个值 → 直接判为「无需写入」
+      const cur = courseChapterOpened(c, key)
+      c.chInit = true            // 兜底：这次操作本身就完成了初始化
+      c.chOpen = c.chOpen || {}
+      if (cur === nextOpen) return false
+      c.chOpen[key] = nextOpen
+    })
+    if (r === null) { /* 幂等短路：值已一致，按成功处理 */ }
+  } catch (e) { alert(t('courseWriteFail')); return }
+  courseState.doc = await CourseStore.getDoc()
+  alert(t(nextOpen ? 'courseChapterOpened' : 'courseChapterClosed', label))
+  courseRenderClass()
+}
+
+// v134：章节开放态读取的**唯一收口**（学员端与管理端共用）。
+// ★ 用「防御式访问」而不是在调用点直接 CourseStore.chOpen(...)：
+//   ① 历史测试套件大量注入**精简版 CourseStore 桩**（只有 mutate/findClass 等），
+//      直接调用会让整个页面渲染抛错（一条缺失方法炸掉整页，而不是优雅降级）；
+//   ② 生产环境里若 course-store.js 因缓存未更新而落后一版，同样会白屏。
+//   故这里按「拿不到判定能力 → 视为已开放（fail-open）」处理：
+//   宁可多显示一点内容（管理员仍能在管理端看到真实状态），也不要让学员端白屏。
+//   ★ 注意 fail-open 与业务口径「默认关闭」不矛盾：业务默认关闭由数据层落地
+//     （无 chInit 的存量班回填为开放、新建班打 chInit 后新章节本就不在 map 里），
+//     这里只兜「判定函数本身不存在」这种异常态。
+function courseChapterOpened(cls, chName) {
+  try {
+    if (typeof CourseStore === 'undefined' || !CourseStore ||
+        typeof CourseStore.chOpen !== 'function') return true
+    return CourseStore.chOpen(cls, chName) === true
+  } catch (e) { return true }
+}
+
 // 学员「我的学习进度」：v123 参照课程平台分栏布局 ——
 // 电脑端（≥900px）左侧大纲（任务序列行）+ 右侧详情（进度环 + 下一步 + 去完成）；
 // 手机端隐藏右侧详情，仅保留左侧大纲（信息由各行的 cp-meta 小字承载）。
@@ -223,13 +260,29 @@ function courseStudentPathHtml(myClasses, me) {
     const total = assigns.length
     const doneCount = assigns.reduce((s, a) => s + (courseTaskDone(a, (a.results || {})[me]) ? 1 : 0), 0)
     const pct = Math.round(doneCount / total * 100)
+    // v134：进度环与总完成度仍按**全量**计算（章节开关只控制「能不能做」，不改变已完成的事实，
+    //   否则管理员一关章学员的百分比就会跳水）。
     const nextIdx = assigns.findIndex(a => !courseTaskDone(a, (a.results || {})[me]))
+    // v134：「下一步」必须落在**当前可见**的作业上 —— 否则全关态会提示
+    //   「下一步：B1」，而 B1 明明被锁着（学员看到就点，点了被 alert 拦，体验自相矛盾）。
+    //   这里独立算一个「可见的下一步」：跳过所有关闭章节内的作业。
+    let visNextIdx = -1
+    for (let i = 0; i < total; i++) {
+      if (courseTaskDone(assigns[i], (assigns[i].results || {})[me])) continue
+      if (!courseChapterOpened(c, assigns[i].chapter)) continue
+      visNextIdx = i
+      break
+    }
     let rows = ''
     let lastChapter = null
+    let lastPlain = false // v133：当前打开的块是否为「散项」块（决定收尾关一层还是两层）
+    let chOpenCur = false // v134：当前所在章节的开放态（跨行沿用，见下方 ★★ 注释）
     for (let i = 0; i < total; i++) {
       const a = assigns[i]
       const d = courseTaskDone(a, (a.results || {})[me])
-      const isNext = i === nextIdx
+      // ★ 行内「▶ 进行中」角标只在可见作业上标：被收起的行根本不渲染，nextIdx 落到它身上时
+      //   这一章里就不会有任何行被标成下一步（正确 —— 那一步学员此刻做不到）。
+      const isNext = i === nextIdx && i === visNextIdx
       const dotTxt = d ? '✓' : (isNext ? '▶' : String(i + 1))
       // v129：章节分块 —— 章节是「一段连续区间」语义（相邻同章的作业自动归为一个分块）。
       //   在章节名发生变化处插入分节头 + 开启一个新的分块容器。
@@ -237,20 +290,62 @@ function courseStudentPathHtml(myClasses, me) {
       //     历史套件 test-v53-review 用 sliceBetween(card,'cp-list','cp-side') 切「左侧大纲行区间」，
       //     若这里出现 'cp-side' 会让切片右边界提前命中，导致该断言静默变空（假绿）。
       const chName = String(a.chapter == null ? '' : a.chapter).trim()
-      if (chName !== lastChapter) {
-        if (lastChapter !== null) rows += '</div>'
+      // v134：章节开关 —— 整章收起 + 锁定态。
+      //   ★ 关闭的章节「整章」不渲染作业行（连标题都不给），只留一条锁定章节条，
+      //     否则学员能从前排作业的题面反推被锁内容（且「收起」在视觉上也不成立）。
+      //   ★ 但**不能整块跳过**：作业行虽不渲染，行序号 i 与「下一步」判定 nextIdx 都必须
+      //     仍然把它们算进去（下一章一旦被管理员开放，学员立刻回到正确的那一步）。
+      //   ★★ 关键：开放态必须**每行都算一次**并存在变量里跨行沿用，绝不能用
+      //      「chName !== lastChapter ? chOpen : undefined」——那样同一章节里第 2 行起
+      //      会拿到 undefined，而 `undefined === false` 为假 → 关闭章节的第 2 行起全部漏渲染
+      //      （实测：关闭章节里有 2 个作业时只有第 1 个被收起，第 2 个照常显示）。
+      const isNewChapter = chName !== lastChapter
+      if (isNewChapter) chOpenCur = courseChapterOpened(c, chName)
+      if (isNewChapter) {
+        // v133：分组容器（B+C 组合）。收尾时真章节要关两层（body + 容器），散项只关一层。
+        if (lastChapter !== null) rows += lastPlain ? '</div>' : '</div></div>'
         if (chName) {
           const chStat = courseChapterStat(assigns, me, chName)
-          rows += `<div class="cp-chapter-head">
+          const pctCh = chStat.total ? Math.round(chStat.done / chStat.total * 100) : 0
+          // ★ 容器 .cp-chapter 是吸顶成立的前提：sticky 的活动范围 = 最近父容器，
+          //   旧的「头/体平级兄弟」结构会让头钉死在整个列表上不下来。
+          //   头部内嵌白底进度条（chStat 驱动，纯展示）。
+          // v134：未开放的章节 → 章节条灰化锁定（🔒 + 「未开放」），进度条隐藏
+          //   （进度本身属于「被收起的内容」，露出来等于泄露完成度）。
+          rows += chOpenCur
+            ? `<div class="cp-chapter">
+          <div class="cp-chapter-head">
             <span class="cp-chapter-name">📚 ${escHtml(chName)}</span>
+            <span class="cp-chapter-bar"><span class="cp-chapter-bar-in" style="width:${pctCh}%"></span></span>
             <span class="cp-chapter-count">${t('courseChapterDoneOf', chStat.done, chStat.total)}</span>
           </div>
           <div class="cp-chapter-body">`
+            : `<div class="cp-chapter cp-chapter-closed">
+          <div class="cp-chapter-head cp-chapter-head-locked">
+            <span class="cp-chapter-name">🔒 ${escHtml(chName)}</span>
+            <span class="cp-chapter-count">${t('courseChapterLocked')}</span>
+          </div>
+          <div class="cp-chapter-body">`
+          lastPlain = false
         } else {
-          rows += '<div class="cp-chapter-body cp-chapter-plain">'
+          // v134：散项（未分章）组 —— 与真章节同样受开关控，也同样需要一条「章节条」，
+          //   否则「未分章」组被关闭时学员完全看不到任何提示（只会觉得作业凭空少了）。
+          //   开放态：保持 v133 的低调形态（无头、无吸顶，仅一个体块）。
+          //   关闭态：渲染一条锁定条（🔒 未归入章节 · 未开放），体块留空。
+          rows += chOpenCur
+            ? `<div class="cp-chapter-body cp-chapter-plain">`
+            : `<div class="cp-chapter cp-chapter-closed">
+          <div class="cp-chapter-head cp-chapter-head-locked">
+            <span class="cp-chapter-name">🔒 ${t('courseChapterNone')}</span>
+            <span class="cp-chapter-count">${t('courseChapterLocked')}</span>
+          </div>
+          <div class="cp-chapter-body">`
+          lastPlain = chOpenCur
         }
         lastChapter = chName
       }
+      // v134：关闭章节内的作业行不渲染（整体收起）。散项组同理受 '' 键控制。
+      if (chOpenCur === false) continue
       // v123：行式大纲卡片（左圆点 + 右标题/副标题）。v122 的「相邻双完成连线」随横纵链一起取消——
       // 行式列表用「已完成样式（绿点/绿字）+ 当前项高亮」表达进度，无需连线。
       // v128：每节课升级为独立分格卡片（白底描边 + 左侧状态色条），右侧加状态角标
@@ -266,7 +361,10 @@ function courseStudentPathHtml(myClasses, me) {
           <span class="cp-flag${flagCls}">${escHtml(flagTxt)}</span>
         </div>`
     }
-    if (lastChapter !== null) rows += '</div>'
+    // v133：收尾层数与开块逻辑严格配平 —— 真章节块开的是两层（.cp-chapter 容器 + .cp-chapter-body），
+    //   散项块只开一层（.cp-chapter-plain）。若这里恒写一层，真章节组会少关一个 </div>，
+    //   浏览器会把后续兄弟节点吞进容器里，导致下一章节的吸顶头失去独立活动范围（吸顶失效）。
+    if (lastChapter !== null) rows += lastPlain ? '</div>' : '</div></div>'
     // 右侧详情：进度环（SVG）+ 完成数 + 下一步任务与「去完成」入口
     const R = 34, CIRC = 2 * Math.PI * R
     const ringHtml = `<div class="cp-ring">
@@ -279,14 +377,18 @@ function courseStudentPathHtml(myClasses, me) {
         <span class="cp-ring-txt">${pct}%</span>
       </div>`
     let sideHtml
-    if (nextIdx === -1) {
+    if (visNextIdx === -1) {
+      // v134：无「可见的下一步」有两种成因，文案必须分开 ——
+      //   ① 全部做完了 → 🎉 恭喜
+      //   ② 还有未完成的，但都在未开放章节里 → 「等待老师开放」，否则学员会以为自己做完了
+      const allDone = nextIdx === -1
       sideHtml = `<div class="cp-side">
           ${ringHtml}
           <div class="cp-side-count">${t('courseProgressOf', doneCount, total)}</div>
-          <div class="cp-tip ok">🎉 ${t('courseProgressAllDone')}</div>
+          <div class="cp-tip${allDone ? ' ok' : ''}">${allDone ? '🎉 ' + t('courseProgressAllDone') : '🔒 ' + t('courseChapterWaitOpen')}</div>
         </div>`
     } else {
-      const na = assigns[nextIdx]
+      const na = assigns[visNextIdx]
       const goBtn = courseIsOffline(na)
         ? `<button class="btn btn-ghost btn-sm" onclick="courseStart('${escAttr(c.id)}','${escAttr(na.id)}')">${t('courseOfflineView')}</button>`
         : `<button class="btn btn-primary btn-sm" onclick="courseStart('${escAttr(c.id)}','${escAttr(na.id)}')">${courseTaskIcon(na)} ${t('courseProgressGo')}</button>`
@@ -328,102 +430,6 @@ function renderCourseStudent() {
   // v40：本地暂存待补传的成绩条数（云端写入失败时先落本机，恢复后自动上传）
   const pendN = (typeof CourseStore.pendingCount === 'function') ? CourseStore.pendingCount() : 0
   const pendHtml = pendN ? `<div style="padding:10px 16px;margin-bottom:16px;font-size:13px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px">⏳ ${t('coursePendingUpload', pendN)}</div>` : ''
-  const now = Date.now()
-
-  // --- 我的班级 ---
-  let myCardsHtml = ''
-  if (!myClasses.length) {
-    myCardsHtml = `<div class="card" style="text-align:center;padding:30px;color:#9ca3af">
-      <p>${t('courseNoClass')}</p></div>`
-  } else {
-    myClasses.forEach(c => {
-    // 草稿（未发送）作业对学员不可见
-    const assigns = (c.assignments || []).filter(a => a.status !== 'draft')
-    if (!assigns.length) {
-      myCardsHtml += `<div class="card course-card"><div class="course-card-head">
-        <span class="course-class-tag">${escHtml(c.name)}</span>
-        <span style="color:#9ca3af;font-size:13px">${t('courseNoAssign')}</span></div></div>`
-      return
-    }
-    assigns.forEach(a => {
-      // 线下课：无作答，走独立卡片（信息 + 管理员标注状态）
-      if (courseIsOffline(a)) { myCardsHtml += courseStudentOfflineCard(c, a, me); return }
-      const res = (a.results || {})[me]
-      const isFinal = courseIsFinal(a)
-      // v115/v120 放行闸门：未放行且未作答 → 等待态（放行后此分支消失，正常显示开始按钮）
-      const gateLocked = courseGateLocked(a, me, res)
-      const expired = a.deadline && now > a.deadline
-      const isVideo = a.type === 'video'
-      // 视频：仅完成记录 ≥90% 视为已完成；低完成度记录（如 3% 脏数据）视为未完成，引导重看刷新
-      const videoLow = isVideo && !!res && res.watchedPct != null && Number(res.watchedPct) < 90
-      // v44：配了小测且还没答 → 已看完也视为未完成，引导去答题
-      const quizPending = isVideo && !!res && !videoLow && courseVideoQuizPending(a, res)
-      // v53：首次作答有错题 → 待回顾（强制回顾至全对才算完成，成绩保留首次）
-      const reviewPending = !!res && courseReviewPending(a, res)
-      const done = !!res && !videoLow && !quizPending && !reviewPending
-      let statusHtml, actionHtml
-      if (done) {
-        const overTag = res.overdue ? ` <span class="course-status expired">${t('courseOverdue')}</span>` : ''
-        statusHtml = isVideo
-          ? `<span class="course-status done">✓ ${t('courseDoneTag')}${res.watchedPct != null ? ' · ' + Math.min(100, Math.round(res.watchedPct)) + '%' : ''}${res.quizTotal != null ? ` · 📝 ${res.quizCorrect}/${res.quizTotal}` : ''}</span>${overTag}`
-          : `<span class="course-status done">✓ ${t('courseDoneTag')} · ${res.score}${LANG === 'en' ? '' : '分'}</span>${overTag}`
-        actionHtml = isVideo
-          ? `<button class="btn btn-ghost btn-sm" onclick="courseStart('${escAttr(c.id)}','${escAttr(a.id)}')">${t('courseRetakeBtn')}</button>`
-          : (a.type === 'homework'
-            ? `<button class="btn btn-ghost btn-sm" onclick="courseStart('${escAttr(c.id)}','${escAttr(a.id)}')">${t('courseRetakeBtn')}</button>`
-            : '')   // v120：最终考试与普通测评均限考一次 → 不提供重考按钮
-      } else if (reviewPending) {
-        const left = Array.isArray(res.review.wrongs) ? res.review.wrongs.length : 0
-        statusHtml = expired
-          ? `<span class="course-status expired">🔁 ${t('courseReviewTag')} · ${left}</span>`
-          : `<span class="course-status review">🔁 ${t('courseReviewTag')} · ${left}</span>`
-        actionHtml = `<button class="btn btn-primary btn-sm" onclick="courseReviewStart('${escAttr(c.id)}','${escAttr(a.id)}')">🔁 ${t('courseReviewBtn')}</button>`
-      } else if (quizPending) {
-        statusHtml = expired
-          ? `<span class="course-status expired">📝 ${t('courseVideoQuizTag')}</span>`
-          : `<span class="course-status pending">📝 ${t('courseVideoQuizTag')}</span>`
-        actionHtml = `<button class="btn btn-primary btn-sm" onclick="courseStart('${escAttr(c.id)}','${escAttr(a.id)}')">${t('courseVideoQuizBtn')}</button>`
-      } else if (videoLow) {
-        const low = Math.min(100, Math.round(Number(res.watchedPct)))
-        statusHtml = expired
-          ? `<span class="course-status expired">${t('courseVideoLowTag', low)}</span>`
-          : `<span class="course-status pending">${t('courseVideoLowTag', low)}</span>`
-        actionHtml = `<button class="btn btn-primary btn-sm" onclick="courseStart('${escAttr(c.id)}','${escAttr(a.id)}')">${t('courseWatchBtn')}</button>`
-      } else if (gateLocked) {
-        statusHtml = `<span class="course-status pending">🔒 ${t(isFinal ? 'courseFinalWaitTag' : 'courseExamGateWaitTag')}</span>`
-        actionHtml = `<span style="font-size:12px;color:#9ca3af">${t(isFinal ? 'courseFinalWaitHint' : 'courseExamGateWaitHint')}</span>`
-      } else if (expired) {
-        statusHtml = `<span class="course-status expired">${t('courseExpiredOpen')}</span>`
-        actionHtml = `<button class="btn btn-primary btn-sm" onclick="courseStart('${escAttr(c.id)}','${escAttr(a.id)}')">${isVideo ? t('courseWatchBtn') : t('courseStartBtn')}</button>`
-      } else {
-        statusHtml = `<span class="course-status pending">${t('coursePending')}</span>`
-        actionHtml = `<button class="btn btn-primary btn-sm" onclick="courseStart('${escAttr(c.id)}','${escAttr(a.id)}')">${isVideo ? t('courseWatchBtn') : t('courseStartBtn')}</button>`
-      }
-      const typeBadge = isVideo ? `<span class="course-type video">🎬 ${t('courseTypeVideo')}</span>`
-        : (isFinal ? `<span class="course-type exam">📕 ${t('courseTypeCourseFinal')}${gateLocked || !res ? ' 🔒' : ''}</span>`
-          : (a.type === 'exam' ? `<span class="course-type exam">🧪 ${t('courseTypeExam')}${a.examGate ? ' 🔒' : ''}</span>` : `<span class="course-type hw">📝 ${t('courseTypeHomework')}</span>`))
-      myCardsHtml += `
-        <div class="card course-card">
-          <div class="course-card-head">
-            ${typeBadge}
-            <span class="course-class-tag">${escHtml(c.name)}</span>
-            ${statusHtml}
-          </div>
-          <div class="course-card-title">${escHtml(a.title)}</div>
-          ${a.desc ? `<div class="course-card-desc">${escHtml(a.desc)}</div>` : ''}
-          <div class="course-card-meta">
-            ${isVideo
-              ? `<span>🎬 ${t('courseVideoLabel')}</span>${a.quiz && a.quiz.length ? `<span>📝 ${t('courseQuizCount', a.quiz.length)}</span>` : ''}`
-              : `<span>📦 ${(a.questions || []).length}${t('courseQuestions')}</span>`}
-            <span>⏰ ${t('courseDeadline')}：${a.deadline ? courseFmtDate(a.deadline) : t('courseNoDeadline')}</span>
-            ${(a.type === 'exam' || isFinal) && a.duration ? `<span>⏱️ ${a.duration}${LANG === 'en' ? ' min' : ' 分钟'}</span>` : ''}
-            ${isFinal ? `<span>🔒 ${t('courseFinalOnce')}</span>` : ''}
-          </div>
-          <div class="course-card-actions">${actionHtml}</div>
-        </div>`
-    })
-  })
-  }
 
   // --- 可加入的班级 ---
   let availHtml = ''
@@ -452,6 +458,10 @@ function renderCourseStudent() {
   }
 
   const pathHtml = courseStudentPathHtml(myClasses, me)
+  // v133 第二项：移除「我的班级」卡片列表 —— 它与上方「我的学习进度」重复展示同一批作业
+  //   （卡片有的入口大纲行全都有：courseTaskDone 已覆盖 待回顾/待答题/低完成度，
+  //     courseStart 已内置 回顾→视频→线下课→闸门 的完整路由）。
+  //   学员首页现在 = 学习进度大纲（唯一作业导航）+ 可加入的班级。
   el.innerHTML = `
     ${Store.isAdmin() ? `<div class="card" style="padding:12px 16px;border-left:4px solid #CDCF2C;margin-bottom:16px;font-size:13px;color:#5F6121;background:#F2F3CE;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <span style="flex:1">${t('courseAdminPreviewBanner')}</span>
@@ -459,8 +469,6 @@ function renderCourseStudent() {
     </div>` : ''}
     ${pathHtml}
     ${pendHtml}
-    <h2 style="margin-bottom:16px">🎓 ${t('courseMyTitle')}</h2>
-    <div class="course-list">${myCardsHtml}</div>
     <h2 style="margin:28px 0 16px">📚 ${t('courseAvailTitle')}</h2>
     <div class="course-list">${availHtml}</div>
   ` + warn
@@ -492,6 +500,15 @@ function courseStart(cid, aid, _recheck) {
   const a = courseFindAssign(cid, aid)
   if (!c || !a) return
   if (a.status === 'draft') { alert(t('courseDraftNotOpen')); return }   // 草稿（未发送）不可作答
+  // v134：章节闸门。学员端大纲行被整章收起后本就点不到，但还有两条路子能摸进来：
+  //   ① 作业的直达链接（老师直接把链接发到群里）；
+  //   ② 学员本机页面还是「开放」的旧缓存，管理员刚关了章。
+  //   故这里必须独立拦一道，且拦在「回顾/视频/线下课/放行闸门」所有分支之前 ——
+  //   章节没开放，这一章里的任何入口都不该有反应。
+  if (!courseChapterOpened(c, a.chapter)) {
+    alert(t('courseChapterNotOpen', String(a.chapter == null ? '' : a.chapter).trim() || t('courseChapterNone')))
+    return
+  }
   const me = courseUser()
   const res = (a.results || {})[me]
   // 线下课：线下授课，无作答 → 展示课程信息
@@ -1864,7 +1881,11 @@ async function courseCreateClass() {
     await CourseStore.mutate(doc => {
       doc.classes = doc.classes || []
       if (doc.classes.some(c => c.id === id)) return false   // 幂等：重试不重复
-      doc.classes.push({ id, name, note, createdAt: Date.now(), createdBy: courseUser(), members: [], assignments: [] })
+      const cls = { id, name, note, createdAt: Date.now(), createdBy: courseUser(), members: [], assignments: [] }
+      // v134：新建班打 chInit（阻断存量回填），此前无章节 → chOpen 为空 map。
+      //   此后新加进来的章节不在 map 里 → 学员端判为「关闭」，需管理员逐章开放。
+      CourseStore.initChOpenForNewClass(cls)
+      doc.classes.push(cls)
     })
   } catch (e) { alert(t('courseWriteFail')); return }
   courseModalClose()
@@ -1916,13 +1937,15 @@ async function courseRenderClass() {
     if (chName !== lastAdminChapter) {
       if (chName) {
         const st = courseChapterStat(c.assignments, null, chName)
-        assignRows += `<tr class="chapter-sep" data-chapter="${escAttr(chName)}">
+        assignRows += `<tr class="chapter-sep${courseChapterOpened(c, chName) ? '' : ' chapter-sep-locked'}" data-chapter="${escAttr(chName)}">
           <td colspan="8"><span class="chapter-sep-name">📚 ${escHtml(chName)}</span>
             <span class="chapter-sep-count">${t('courseChapterItemCount', st.total)}</span>
             <button class="btn btn-ghost btn-sm chapter-sep-btn" onclick="courseChapterRenameModal('${escAttr(c.id)}','${escAttr(chName)}')">${t('courseChapterRename')}</button>
+            ${courseChapterToggleBtn(c.id, chName)}
           </td></tr>`
       } else {
-        assignRows += `<tr class="chapter-sep chapter-sep-plain"><td colspan="8"><span class="chapter-sep-plain-txt">${t('courseChapterNone')}</span></td></tr>`
+        // v134：散项也归为「未分章」组，同样受章节开关控（默认关闭，可在这里单独开放）
+        assignRows += `<tr class="chapter-sep chapter-sep-plain${courseChapterOpened(c, '') ? '' : ' chapter-sep-locked'}"><td colspan="8"><span class="chapter-sep-plain-txt">${t('courseChapterNone')}</span>${courseChapterToggleBtn(c.id, '')}</td></tr>`
       }
       lastAdminChapter = chName
     }

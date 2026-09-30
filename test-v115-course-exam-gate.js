@@ -84,7 +84,10 @@ function mkSandbox(doc) {
       findAssign: (cls, aid) => cls && (cls.assignments || []).find(a => a.id === aid),
       getDoc: async () => sb.courseState.doc,
       mutate: async (fn) => { const r = fn(sb.courseState.doc); calls.mutateRet.push(r); return r !== false }
-    },
+    },    // v134：courseStart 新增「章节闸门」依赖 —— 本套件验的是放行闸门，
+    //   故注入「全部已开放」桩，让章节闸门恒不拦截（章节开关由 test-v134 专门覆盖）。
+    courseChapterOpened: () => true,
+
     setTimeout, clearTimeout, setInterval: () => 0, clearInterval,
   }
   sb.window = sb
@@ -226,15 +229,35 @@ const CONFIRM_KEY = '[t:courseExamStartConfirm]'
       && b.indexOf('data-u="${escAttr(u)}"') >= 0)
     assert('已放行显示时间（courseFmtDate）', b.indexOf('openRec.at') >= 0)
   }
+  // v133 反转：原 4 条断言钉在「我的班级」卡片列表的渲染分支上
+  //   （卡片里的 gateLocked 分支 / 等待态文案 / 🔒 徽章）。卡片列表已随 v133 移除，
+  //   闸门的功能契约整体由 courseStart 的闸门链路承载 —— 见下面 ① 节已断的
+  //   courseGateLocked(a, me, res) / courseGateRecheck / if (_recheck) 三条。
+  //   这里补齐「闸门优先于截止时间」的分支顺序 + 文案键存在性两条，落到真实收口处。
   {
-    const b = g('renderCourseStudent')
-    assert('学员卡 gateLocked 判定（收口为 courseGateLocked）',
-      b.indexOf('courseGateLocked(a, me, res)') >= 0)
-    const iGate = b.indexOf('gateLocked'), iExp = b.indexOf('} else if (expired)')
-    assert('等待态分支先于过期分支（闸门优先于截止时间）', iGate >= 0 && iExp >= 0 && iGate < iExp)
-    assert('等待态文案键在（WaitTag + WaitHint，v120 起按类型分流）',
-      b.indexOf('courseExamGateWaitTag') >= 0 && b.indexOf('courseExamGateWaitHint') >= 0)
-    assert('测评类型徽章带 🔒（gated exam）', b.indexOf("a.examGate ? ' 🔒' : ''") >= 0)
+    const cs = g('courseStart')
+    // 分支顺序：闸门判定必须在「过期/截止」判定之前（否则截止会先拦，闸门永远不生效）
+    const iGate = cs.indexOf('courseGateLocked(a, me, res)')
+    const iConfirm = cs.indexOf('courseExamStartConfirm')
+    assert('[v133 反转] 闸门判定先于开考确认（courseGateLocked 在 startConfirm 之前）',
+      iGate >= 0 && iConfirm >= 0 && iGate < iConfirm, 'gate=' + iGate + ' confirm=' + iConfirm)
+    // 闸门文案键（v120 起按类型分流：最终考试 courseFinalWait / 普通测评 courseExamGateWait）
+    const gl = g('courseGateLocked')
+    assert('闸门判定收口为 courseGateLocked 单一函数（不内联展开）',
+      gl.indexOf('courseGateRequired(a)') >= 0 && gl.indexOf('courseGateOpenedFor(a, u)') >= 0,
+      gl.slice(0, 200))
+    const gw = g('courseGateOpenedFor')
+    assert('放行名单读取按类型分流（courseFinalOpened / examOpened）',
+      gw.indexOf('a.courseFinalOpened') >= 0 && gw.indexOf('a.examOpened') >= 0, gw.slice(0, 200))
+  }
+  {
+    // 等待态文案键存在性（v133 起不再从 renderCourseStudent 里 grep —— 卡片列表已移除；
+    //   改查 i18n 源码表：键必须 zh/en 成对出现。行为侧由上面 courseStart 闸门链路覆盖）
+    ;['courseExamGateWaitTag', 'courseExamGateWaitHint', 'courseExamGateWait',
+      'courseFinalWait', 'courseExamGateLabel', 'courseExamGateCol'].forEach(k => {
+      const n = (I18N.match(new RegExp('(^|[\\s{,])' + k + '\\s*:', 'g')) || []).length
+      assert('[v133 反转] 闸门文案键 zh/en 成对（' + k + '）', n === 2)
+    })
   }
   {
     const b = g('courseDraftTypeChange')
