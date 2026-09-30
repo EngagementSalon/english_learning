@@ -19,9 +19,9 @@
   text-align:center;
 }
 .auth-logo { font-size:48px; margin-bottom:8px; }
-/* 平台品牌 Logo（登录页） */
+/* 平台品牌 Logo（登录页）——v126：缩小三分之一（280×110 → 187×73，用户反馈太大） */
 .auth-logo img.brand-img {
-  display:inline-block; max-width:280px; max-height:110px; object-fit:contain;
+  display:inline-block; max-width:187px; max-height:73px; object-fit:contain;
   border-radius:8px; vertical-align:middle;
 }
 .auth-title { font-size:24px; font-weight:800; color:#1f2937; }
