@@ -161,6 +161,56 @@ function courseTaskMetaText(a) {
   return `${kind} · ${t('courseProgressQN', qn)}${dur}`
 }
 
+// v129：章节整体改名 —— 一章可能包含多个作业，逐个改太麻烦，故支持按章节名批量改。
+//   语义：把所有 chapter === oldName 的作业统一改成 newName（空 = 清除章节归属）。
+function courseChapterRenameModal(cid, oldName) {
+  const c = courseFind(cid)
+  if (!c) return
+  const st = courseChapterStat(c.assignments, null, oldName)
+  courseModalOpen(t('courseChapterRenameTitle'), `
+    <div class="form-group"><label>${t('courseChapterCurrent')}</label>
+      <p style="font-size:13px;color:#374151;background:#f3f4f6;border-radius:6px;padding:8px 10px;margin-bottom:12px">📚 ${escHtml(oldName)} <span style="color:#6b7280">· ${t('courseChapterItemCount', st.total)}</span></p></div>
+    <div class="form-group"><label>${t('courseChapterNewName')}</label>
+      <input type="text" id="ccrNewName" value="${escAttr(oldName)}" /></div>
+    <p class="form-hint" style="margin:4px 0 0">${t('courseChapterRenameHint')}</p>
+  `,
+    `<button class="btn btn-primary" onclick="courseChapterRenameDo('${escAttr(cid)}','${escAttr(oldName)}')">${t('courseEditSave')}</button>
+     <button class="btn btn-ghost" onclick="courseModalClose()">${t('cancelBtn')}</button>`)
+}
+
+async function courseChapterRenameDo(cid, oldName) {
+  const el = document.getElementById('ccrNewName')
+  const next = (el ? el.value : '').trim()
+  if (next === oldName) { courseModalClose(); return }
+  if (!confirm(t('courseChapterRenameConfirm', oldName, next || t('courseChapterNoneShort')))) return
+  try {
+    await CourseStore.mutate(doc => {
+      const c = CourseStore.findClass(doc, cid)
+      if (!c) return false
+      ;(c.assignments || []).forEach(a => {
+        if (String(a.chapter == null ? '' : a.chapter).trim() !== oldName) return
+        if (next) a.chapter = next
+        else delete a.chapter
+      })
+    })
+  } catch (e) { alert(t('courseWriteFail')); return }
+  courseModalClose()
+  alert(t('courseChapterRenamed'))
+  courseState.doc = await CourseStore.getDoc()
+  courseRenderClass()
+}
+
+// v129：统计某章节内（同名连续区间）某学员的完成度 —— 只用于分节头的「x / y」小字
+function courseChapterStat(assigns, me, chName) {
+  let done = 0, total = 0
+  ;(assigns || []).forEach(a => {
+    if (String(a.chapter == null ? '' : a.chapter).trim() !== chName) return
+    total++
+    if (courseTaskDone(a, (a.results || {})[me])) done++
+  })
+  return { done, total }
+}
+
 // 学员「我的学习进度」：v123 参照课程平台分栏布局 ——
 // 电脑端（≥900px）左侧大纲（任务序列行）+ 右侧详情（进度环 + 下一步 + 去完成）；
 // 手机端隐藏右侧详情，仅保留左侧大纲（信息由各行的 cp-meta 小字承载）。
@@ -175,11 +225,32 @@ function courseStudentPathHtml(myClasses, me) {
     const pct = Math.round(doneCount / total * 100)
     const nextIdx = assigns.findIndex(a => !courseTaskDone(a, (a.results || {})[me]))
     let rows = ''
+    let lastChapter = null
     for (let i = 0; i < total; i++) {
       const a = assigns[i]
       const d = courseTaskDone(a, (a.results || {})[me])
       const isNext = i === nextIdx
       const dotTxt = d ? '✓' : (isNext ? '▶' : String(i + 1))
+      // v129：章节分块 —— 章节是「一段连续区间」语义（相邻同章的作业自动归为一个分块）。
+      //   在章节名发生变化处插入分节头 + 开启一个新的分块容器。
+      //   ★ 注意：分块容器与分节头一律不得使用含 'cp-side' 的类名/文案 ——
+      //     历史套件 test-v53-review 用 sliceBetween(card,'cp-list','cp-side') 切「左侧大纲行区间」，
+      //     若这里出现 'cp-side' 会让切片右边界提前命中，导致该断言静默变空（假绿）。
+      const chName = String(a.chapter == null ? '' : a.chapter).trim()
+      if (chName !== lastChapter) {
+        if (lastChapter !== null) rows += '</div>'
+        if (chName) {
+          const chStat = courseChapterStat(assigns, me, chName)
+          rows += `<div class="cp-chapter-head">
+            <span class="cp-chapter-name">📚 ${escHtml(chName)}</span>
+            <span class="cp-chapter-count">${t('courseChapterDoneOf', chStat.done, chStat.total)}</span>
+          </div>
+          <div class="cp-chapter-body">`
+        } else {
+          rows += '<div class="cp-chapter-body cp-chapter-plain">'
+        }
+        lastChapter = chName
+      }
       // v123：行式大纲卡片（左圆点 + 右标题/副标题）。v122 的「相邻双完成连线」随横纵链一起取消——
       // 行式列表用「已完成样式（绿点/绿字）+ 当前项高亮」表达进度，无需连线。
       // v128：每节课升级为独立分格卡片（白底描边 + 左侧状态色条），右侧加状态角标
@@ -195,6 +266,7 @@ function courseStudentPathHtml(myClasses, me) {
           <span class="cp-flag${flagCls}">${escHtml(flagTxt)}</span>
         </div>`
     }
+    if (lastChapter !== null) rows += '</div>'
     // 右侧详情：进度环（SVG）+ 完成数 + 下一步任务与「去完成」入口
     const R = 34, CIRC = 2 * Math.PI * R
     const ringHtml = `<div class="cp-ring">
@@ -1834,8 +1906,27 @@ async function courseRenderClass() {
   }).join('')
 
   const assignTotal = (c.assignments || []).length
-  const assignRows = (c.assignments || []).map((a, idx) => {
-    if (a.type === 'offline') return courseOfflineAdminRow(c, a, idx, assignTotal)
+  // v129：章节分块（管理端）。在章节名变化处插入一行分节标题行。
+  //   ★ data-drag-idx 必须仍等于 assignments 的真实下标（下面用 idx 传入），否则 v127 拖拽落位会错。
+  //   ★ 分节行不带 data-drag-aid/data-drag-idx，故它天然不参与拖拽排序。
+  let assignRows = ''
+  let lastAdminChapter = null
+  ;(c.assignments || []).forEach((a, idx) => {
+    const chName = String(a.chapter == null ? '' : a.chapter).trim()
+    if (chName !== lastAdminChapter) {
+      if (chName) {
+        const st = courseChapterStat(c.assignments, null, chName)
+        assignRows += `<tr class="chapter-sep" data-chapter="${escAttr(chName)}">
+          <td colspan="8"><span class="chapter-sep-name">📚 ${escHtml(chName)}</span>
+            <span class="chapter-sep-count">${t('courseChapterItemCount', st.total)}</span>
+            <button class="btn btn-ghost btn-sm chapter-sep-btn" onclick="courseChapterRenameModal('${escAttr(c.id)}','${escAttr(chName)}')">${t('courseChapterRename')}</button>
+          </td></tr>`
+      } else {
+        assignRows += `<tr class="chapter-sep chapter-sep-plain"><td colspan="8"><span class="chapter-sep-plain-txt">${t('courseChapterNone')}</span></td></tr>`
+      }
+      lastAdminChapter = chName
+    }
+    if (a.type === 'offline') { assignRows += courseOfflineAdminRow(c, a, idx, assignTotal); return }
     const members = c.members || []
     const isDraft = a.status === 'draft'
     const isVideo = a.type === 'video'
@@ -1843,7 +1934,7 @@ async function courseRenderClass() {
     const scores = Object.values(a.results || {}).map(r => r.score || 0)
     const avg = scores.length ? Math.round(scores.reduce((s, x) => s + x, 0) / scores.length) : 0
     const draftTag = isDraft ? `<span class="course-draft-tag">⏳ ${t('courseDraftTag')}</span> ` : ''
-    return `<tr${isDraft ? ' class="row-draft"' : ''} data-drag-aid="${escAttr(a.id)}" data-drag-idx="${idx}">
+    assignRows += `<tr${isDraft ? ' class="row-draft"' : ''} data-drag-aid="${escAttr(a.id)}" data-drag-idx="${idx}">
       <td class="course-sort-cell">${courseSortBtns(c.id, a.id, idx, assignTotal)}</td>
       <td>${draftTag}${escHtml(a.title)}</td>
       <td>${isVideo ? t('courseTypeVideo') : (a.type === 'coursefinal' ? t('courseTypeCourseFinal') : (a.type === 'exam' ? t('courseTypeExam') : t('courseTypeHomework')))}${a.type === 'coursefinal' ? ` <span title="${escAttr(t('courseFinalGateLabel'))}">🔒</span>` : (a.type === 'exam' && a.examGate ? ` <span title="${escAttr(t('courseExamGateLabel'))}">🔒</span>` : '')}</td>
@@ -1859,7 +1950,8 @@ async function courseRenderClass() {
             ? `<button class="btn btn-primary btn-sm" onclick="courseSendAssign('${escAttr(c.id)}','${escAttr(a.id)}')">📨 ${t('courseSendBtn')}</button>`
             : `<button class="btn btn-ghost btn-sm" onclick="courseAssignDetail('${escAttr(c.id)}','${escAttr(a.id)}')">${t('courseDetailBtn')}</button>`}
           ${isVideo
-            ? `<button class="btn btn-ghost btn-sm" onclick="courseEditVideoUrlModal('${escAttr(c.id)}','${escAttr(a.id)}')">${t('courseEditVideoUrl')}</button>
+            ? `<button class="btn btn-ghost btn-sm" onclick="courseEditAssignModal('${escAttr(c.id)}','${escAttr(a.id)}')">${t('courseEditBtn')}</button>
+               <button class="btn btn-ghost btn-sm" onclick="courseEditVideoUrlModal('${escAttr(c.id)}','${escAttr(a.id)}')">${t('courseEditVideoUrl')}</button>
                <button class="btn btn-ghost btn-sm" onclick="courseEditQuizModal('${escAttr(c.id)}','${escAttr(a.id)}')">${t('courseEditQuizBtn')}</button>`
             : `<button class="btn btn-ghost btn-sm" onclick="courseEditAssignModal('${escAttr(c.id)}','${escAttr(a.id)}')">${t('courseEditBtn')}</button>`}
           ${courseWrongDetailable(a)
@@ -1870,7 +1962,7 @@ async function courseRenderClass() {
         </div>
       </td>
     </tr>`
-  }).join('')
+  })
 
   el.innerHTML = `
     <div class="course-back"><a onclick="courseBackAdmin()">← ${t('courseBackAdmin')}</a></div>
@@ -3756,8 +3848,13 @@ function courseEditAssignModal(cid, aid) {
       deadline: a.deadline || 0,
       duration: a.duration || 0,
       passScore: a.passScore || 60,
-      examGate: !!a.examGate
+      examGate: !!a.examGate,
+      // v129：章节名（一级，连续区间语义）。空串 = 不归属任何章节（散项）。
+      chapter: a.chapter || ''
     },
+    // v129：视频作业没有 questions（用的是 quiz[]），此处刻意保持空数组，
+    //   由 courseSaveAssignEdit 的 video 分支跳过题目写入 —— 否则会把 quiz 作业的
+    //   questions 写成 []，而 video 的判分走 quiz，等于把该作业掏空。
     questions: (a.questions || []).map(q => ({
       type: q.type,
       difficulty: q.difficulty || 1,
@@ -3795,6 +3892,10 @@ function courseRenderEditModal() {
     </div>
     <div class="form-group"><label>${t('courseDescPh')}</label>
       <input type="text" id="ceDesc" value="${escAttr(m.meta.desc)}" /></div>
+    <div class="form-group"><label>🏷️ ${t('courseChapterLabel')}</label>
+      <input type="text" id="ceChapter" value="${escAttr(m.meta.chapter)}" placeholder="${escAttr(t('courseChapterPh'))}" list="ceChapterList" />
+      <datalist id="ceChapterList">${courseChapterOptionsHtml(m.cid)}</datalist>
+      <p class="form-hint" style="margin:4px 0 0">${t('courseChapterHint')}</p></div>
     <div class="form-row2">
       <div class="form-group"><label>${t('courseDeadlineLabel')}</label>
         <input type="datetime-local" id="ceDeadline" value="${deadlineStr}" /></div>
@@ -3813,8 +3914,10 @@ function courseRenderEditModal() {
         🔒 ${t('courseFinalGateHint')}</p>
     </div>
 
+    <div id="ceQSection" style="${m.meta.type === 'video' ? 'display:none' : ''}">
     <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0" />
     <h4 style="margin:0 0 8px;color:#374151">${t('courseEditQuestions')}</h4>
+    <p class="form-hint" id="ceVideoHint" style="margin:0 0 10px;display:${m.meta.type === 'video' ? 'block' : 'none'};padding:10px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;color:#1d4ed8">🎬 ${t('courseEditVideoHint')}</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
       <button class="btn btn-ghost btn-sm" onclick="courseEditAiToggle()">🧠 ${t('courseEditAiOpen')}</button>
     </div>
@@ -3838,6 +3941,7 @@ function courseRenderEditModal() {
     </div>
     <div id="ceQList">${qCards}</div>
     <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="courseEditAddQ()">${t('courseEditAddQ')}</button>
+    </div>
   `,
     `<button class="btn btn-primary" onclick="courseSaveAssignEdit()">${t('courseEditSave')}</button>
      <button class="btn btn-ghost" onclick="courseModalClose()">${t('cancelBtn')}</button>`)
@@ -3869,6 +3973,27 @@ function courseEditToggleExamFields() {
   if (pass) pass.style.display = examLike ? '' : 'none'
   if (gate) gate.style.display = type === 'exam' ? '' : 'none'
   if (finalGate) finalGate.style.display = type === 'coursefinal' ? '' : 'none'
+  // v129：视频作业无 questions（判分走 quiz[]）→ 题目编辑区整块隐藏，改由「改课后小测」入口维护。
+  //   不隐藏的话管理员会以为「题目没了」，而且误操作保存会把 quiz 作业的 questions 写成空。
+  const qSection = document.getElementById('ceQSection')
+  if (qSection) qSection.style.display = type === 'video' ? 'none' : ''
+  const vHint = document.getElementById('ceVideoHint')
+  if (vHint) vHint.style.display = type === 'video' ? 'block' : 'none'
+}
+
+// v129：章节名候选（datalist）——列出该班级已用过的章节，方便复用同名而不是打错字
+//   （同一个章节名只要拼写不同就是两个章节，故用候选列表降低出错概率）
+function courseChapterOptionsHtml(cid) {
+  try {
+    const c = courseFind(cid)
+    if (!c) return ''
+    const seen = []
+    ;(c.assignments || []).forEach(a => {
+      const ch = String(a.chapter == null ? '' : a.chapter).trim()
+      if (ch && seen.indexOf(ch) < 0) seen.push(ch)
+    })
+    return seen.map(ch => `<option value="${escAttr(ch)}"></option>`).join('')
+  } catch (e) { return '' }
 }
 
 function courseRenderEditQCard(q, i) {
@@ -4080,6 +4205,8 @@ async function courseSaveAssignEdit() {
   const type = document.getElementById('ceType').value
   const title = document.getElementById('ceTitle').value.trim()
   const desc = document.getElementById('ceDesc').value.trim()
+  const chapterEl = document.getElementById('ceChapter')
+  const chapter = (chapterEl ? chapterEl.value : '').trim()
   const deadlineRaw = document.getElementById('ceDeadline').value
   const deadline = deadlineRaw ? new Date(deadlineRaw).getTime() : 0
   // v120：最终考试与测评同型（限时 + 及格分），共用读取
@@ -4090,6 +4217,36 @@ async function courseSaveAssignEdit() {
   const gateEl = document.getElementById('ceExamGate')
   const examGate = type === 'exam' && !!(gateEl && gateEl.checked)
   if (!title) { alert(t('courseErrTitle')); return }
+
+  // v129：视频作业走「只改元信息」分支 —— 它没有 questions，判分靠 quiz[]。
+  //   若照下面通用流程走，questions 会被算成空数组而触发「无有效题目」拦截，
+  //   即便放行也会把 a.questions 写成 []，等于掏空该作业（video 的作答/判分全在 quiz）。
+  //   故这里只写 title/desc/deadline/chapter，quiz / videoUrl / results 一概不碰。
+  if (type === 'video') {
+    if (!confirm(t('courseEditConfirm'))) return
+    try {
+      await CourseStore.mutate(doc => {
+        const c = CourseStore.findClass(doc, m.cid)
+        const a = CourseStore.findAssign(c, m.aid)
+        if (!a) return false
+        a.type = 'video'
+        a.title = title
+        a.desc = desc
+        a.deadline = deadline
+        if (chapter) a.chapter = chapter
+        else delete a.chapter
+        // 刻意不动：a.quiz / a.videoUrl / a.results
+      })
+    } catch (e) { alert(t('courseWriteFail')); return }
+    courseModalClose()
+    courseEditAssign = null
+    alert(t('courseEditSaveOk'))
+    courseState.doc = await CourseStore.getDoc()
+    try { if (courseState.doc && courseState.doc.classes && typeof Store !== 'undefined' && Store.rebuildBankFromCourse) Store.rebuildBankFromCourse(courseState.doc.classes) } catch (e) { /* ignore */ }
+    courseRenderClass()
+    return
+  }
+
   // 验证题目：至少 1 道有效题
   const questions = m.questions.map(q => {
     // v107：清理空选项，并按「保留的原始下标」重映射 answer —— 原先只 filter 掉空串却让 answer
@@ -4134,6 +4291,9 @@ async function courseSaveAssignEdit() {
       if (examGate) a.examGate = true
       else delete a.examGate
       a.questions = questions
+      // v129：章节归属（空 = 清除归属，回落到「散项」）
+      if (chapter) a.chapter = chapter
+      else delete a.chapter
     })
   } catch (e) { alert(t('courseWriteFail')); return }
   courseModalClose()

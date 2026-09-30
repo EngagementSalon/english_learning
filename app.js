@@ -3759,6 +3759,92 @@ async function dashToggleChOpen(btn) {
   }
 }
 
+// v129：营次「编辑」按钮（操作列）。原来是「建了就改不了」——只能删了重建，
+//   但删除会连带丢掉该营次的成绩归属线索，代价太大。现改为就地编辑名称/起止时间/适用部门。
+function dashEditRoundBtnHtml(r) {
+  return `<button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:12px;margin-right:4px" data-rid="${escAttr(r.id)}" onclick="dashOpenEditRound(this)">${t('dashRoundEdit')}</button>`
+}
+// 时间戳 → datetime-local 值（本地时区，yyyy-MM-ddTHH:mm）；与 dashParseLocalDT 互逆
+function dashTsToLocalDT(ts) {
+  const v = Number(ts) || 0
+  if (!v) return ''
+  const d = new Date(v)
+  const p = n => String(n).padStart(2, '0')
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes())
+}
+// 编辑营次弹窗：直接在看板面板顶部插入内嵌表单（不另开 modal，避免与看板重绘生命期打架）
+let _dashEditRoundId = ''
+function dashOpenEditRound(el) {
+  const rid = (el && el.dataset && el.dataset.rid) || ''
+  const rec = dashRoundList().find(r => r.id === rid)
+  if (!rec) return
+  _dashEditRoundId = rid
+  const host = document.getElementById('dashRoundForm')
+  if (!host) return
+  host.style.display = 'block'
+  // 与「新建」表单共用同一容器：编辑态下标题/按钮/字段都换成编辑语义
+  host.innerHTML = `
+    <div style="font-weight:700;font-size:14px;margin-bottom:10px">✏️ ${t('dashRoundEditTitle')} — ${escHtml(rec.name)}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px">
+      <input id="dashEditRoundName" class="input-answer" style="flex:1;min-width:180px" placeholder="${escAttr(t('dashRoundNamePh'))}" value="${escAttr(rec.name)}" />
+      <input id="dashEditRoundStart" type="datetime-local" class="input-answer" style="flex:1;min-width:180px" title="${escAttr(t('dashRoundStartPh'))}" value="${escAttr(dashTsToLocalDT(rec.startAt))}" />
+      <input id="dashEditRoundEnd" type="datetime-local" class="input-answer" style="flex:1;min-width:180px" title="${escAttr(t('dashRoundEndPh'))}" value="${escAttr(dashTsToLocalDT(rec.endAt))}" />
+    </div>
+    <p class="form-hint" style="margin:0 0 10px">⏰ ${t('dashRoundEditScheduleHint')}</p>
+    <div style="border-top:1px dashed #c7d2fe;padding-top:10px;margin-bottom:10px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:6px">🏷️ ${t('roundDeptLabel')}</div>
+      <div class="dashEditRoundDeptBox">${dashDeptOptionsHtml(rec.depts || [])}</div>
+      <p class="form-hint" style="margin:0">${t('dashRoundDeptHint')}</p>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary btn-sm" id="dashEditRoundSaveBtn" onclick="dashSaveRoundEdit()">${t('dashRoundEditSave')}</button>
+      <button class="btn btn-ghost btn-sm" onclick="dashCloseEditRound()">${t('dashRoundCancel')}</button>
+    </div>`
+}
+// 编辑态下部门复选框也在同一容器内 —— 取值时必须只取编辑表单里的（新建表单已整体替换，不会同名冲突）
+function dashPickedEditDepts() {
+  const box = document.querySelector('.dashEditRoundDeptBox')
+  if (!box) return []
+  const out = []
+  box.querySelectorAll('input[type=checkbox]').forEach(cb => { if (cb.checked) out.push(cb.value) })
+  return out
+}
+function dashCloseEditRound() {
+  _dashEditRoundId = ''
+  const host = document.getElementById('dashRoundForm')
+  if (host) { host.style.display = 'none'; host.innerHTML = '' }
+  // 还原为「新建」表单（下次点「新建营次」仍可用）
+  const p = document.getElementById('dashRoundsPanel')
+  if (p) p.innerHTML = dashRoundsPanelHtml()
+}
+async function dashSaveRoundEdit() {
+  const rid = _dashEditRoundId
+  if (!rid || typeof CloudSync === 'undefined' || !CloudSync.setChallengeRound) return
+  const nameEl = document.getElementById('dashEditRoundName')
+  const startEl = document.getElementById('dashEditRoundStart')
+  const endEl = document.getElementById('dashEditRoundEnd')
+  const name = (nameEl && nameEl.value || '').trim()
+  const startAt = dashParseLocalDT(startEl && startEl.value)
+  const endAt = dashParseLocalDT(endEl && endEl.value)
+  const depts = dashPickedEditDepts()
+  if (startAt && endAt && endAt <= startAt) { alert(t('dashRoundCreateFail')); return }
+  const btn = document.getElementById('dashEditRoundSaveBtn')
+  if (btn) btn.disabled = true
+  try {
+    const res = await CloudSync.setChallengeRound(rid, { name, startAt, endAt, depts })
+    if (res && res.ok) {
+      _dashEditRoundId = ''
+      alert(t('dashRoundEditSaved', name || rid))
+      renderDashboard()
+    } else {
+      alert(t('dashRoundEditFail'))
+      if (btn) btn.disabled = false
+    }
+  } catch (e) {
+    alert(t('dashRoundEditFail'))
+    if (btn) btn.disabled = false
+  }
+}
 // ====== 管理员看板：七天挑战营次管理（v88） ======
 // 管理员自助新建营次（可设起止时间 → 到点自动开放、到期自动关闭），切换当前营次，删除营次。
 // 云端结构见 cloud-store.js 顶部「营次（Round）」说明；此处只负责渲染与调用。
@@ -3862,6 +3948,7 @@ function dashRoundsPanelHtml() {
       ${dashChExamCellHtml(r)}
       <td style="white-space:nowrap;text-align:center">
         ${viewed ? '' : `<button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:12px;margin-right:4px" data-rid="${escAttr(r.id)}" onclick="dashViewRound(this)">${t('dashRoundView')}</button>`}
+        ${dashEditRoundBtnHtml(r)}
         ${isCur ? '' : `<button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:12px;margin-right:4px" data-rid="${escAttr(r.id)}" onclick="dashSetRoundCur(this)">${t('dashRoundMakeCur')}</button>`}
         <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:12px;color:#dc2626" data-rid="${escAttr(r.id)}" data-n="${escAttr(r.name)}" onclick="dashDelRound(this)">${t('dashRoundDel')}</button>
       </td>

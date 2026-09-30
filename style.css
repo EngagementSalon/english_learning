@@ -1103,6 +1103,20 @@ tr.course-drop-below > td { box-shadow:inset 0 -3px 0 0 #2f6fed; }
 .cp-path { display:flex; flex-direction:column; margin-top:12px; }
 .cp-grid { margin-top:12px; }
 .cp-list { display:flex; flex-direction:column; }
+/* v129 章节分块（学员端）：章节头 + 章节体。
+   ★ 类名一律避开 'cp-side' 前缀 —— test-v53-review 用 sliceBetween(card,'cp-list','cp-side')
+     切「左侧大纲行区间」，若此处出现该子串会让切片提前收尾、断言语义静默丢失。 */
+.cp-chapter-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;
+  margin:16px 0 8px; padding:8px 12px; border-radius:9px;
+  background:linear-gradient(90deg, var(--brand-soft) 0%, rgba(239,241,196,.35) 100%);
+  border-left:4px solid var(--primary-dark); }
+.cp-chapter-head:first-child { margin-top:0; }
+.cp-chapter-name { font-size:13px; font-weight:700; color:var(--brand-soft-text); }
+.cp-chapter-count { font-size:11px; font-weight:600; color:var(--brand-soft-text); opacity:.85; }
+.cp-chapter-body { display:flex; flex-direction:column; }
+/* 分块后的「每章第一个节点」不再满足 .cp-node + .cp-node，需补回卡片间距 */
+.cp-chapter-body > .cp-node:first-child { margin-top:0; }
+.cp-chapter-body + .cp-chapter-head { margin-top:16px; }
 /* v128 分格卡片：每节课独立成格（白底描边 + 圆角 + 左侧状态色条 + 右侧状态角标），
    NovoEd 参考版式。cp-node / cp-dot / cp-lbl / cp-meta 的类名与字号契约不变（v123 套件钉住）。 */
 .cp-node { position:relative; display:flex; align-items:flex-start; gap:10px; cursor:pointer; padding:10px 12px; border-radius:10px; background:#fff; border:1px solid #e5e7eb; box-shadow:0 1px 2px rgba(17,24,39,.04); transition:border-color .15s, box-shadow .15s; overflow:hidden; }
@@ -1147,6 +1161,15 @@ tr.course-drop-below > td { box-shadow:inset 0 -3px 0 0 #2f6fed; }
 }
 .course-off-members .course-off-member { display:inline-flex; align-items:center; gap:6px; border:1px solid #e5e7eb; border-radius:999px; padding:6px 12px; font-size:13px; cursor:pointer; background:#fff; }
 .course-off-members .course-off-member:has(input:checked) { border-color:var(--primary); background:var(--brand-soft); }
+
+/* v129 章节分块（管理端作业表）：章节标题分隔行。该行不带拖拽 data 属性 → 天然不参与排序。 */
+tr.chapter-sep > td { background:linear-gradient(90deg, var(--brand-soft) 0%, rgba(239,241,196,.25) 100%);
+  border-left:4px solid var(--primary-dark); padding:8px 12px; }
+tr.chapter-sep .chapter-sep-name { font-size:13px; font-weight:700; color:var(--brand-soft-text); }
+tr.chapter-sep .chapter-sep-count { font-size:11px; font-weight:600; color:var(--brand-soft-text); opacity:.85; margin-left:8px; }
+tr.chapter-sep .chapter-sep-btn { padding:2px 8px; font-size:11px; margin-left:10px; }
+tr.chapter-sep-plain > td { background:#fafafa; border-left:4px solid #e5e7eb; padding:6px 12px; }
+tr.chapter-sep-plain .chapter-sep-plain-txt { font-size:12px; color:#9ca3af; }
 
 /* v60：在线 TTS 全源失败提示 */
 .tts-toast { position: fixed; left: 50%; bottom: 18%; transform: translateX(-50%); background: rgba(17,24,39,.88); color: #fff; padding: 9px 16px; border-radius: 10px; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 9999; max-width: 80vw; text-align: center; }
