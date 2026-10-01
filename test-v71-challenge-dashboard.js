@@ -55,6 +55,19 @@ function makeSandbox() {
   vm.runInContext(extractFn(appSrc, 'dashRoundList'), sb)
   vm.runInContext(extractFn(appSrc, 'dashRoundCurId'), sb)
   vm.runInContext(extractFn(appSrc, 'dashRoundSlug'), sb)
+  // v89：看板挑战统计的部门筛选（dashChDept / normDept）——沙箱按「全部部门」口径，行为与 v88 一致
+  vm.runInContext('let dashChDept = "all"', sb)
+  vm.runInContext(extractFn(appSrc, 'normDept'), sb)
+  vm.runInContext(extractFn(appSrc, 'normDeptSub'), sb)
+  vm.runInContext(extractFn(appSrc, '_deptSubIndex'), sb)
+  vm.runInContext(extractFn(appSrc, 'deptTree'), sb)
+  vm.runInContext('const DEPT_MAJOR_KEYS = ["dining", "rooms", "other"]', sb)
+  vm.runInContext('const DEPT_CANON = { dining: ["标帜餐厅", "艳中餐厅", "酒吧团队", "客房送餐"], rooms: ["迎宾前台", "礼宾部", "随时随需", "客房造型", "健身及水疗中心"] }', sb)
+  vm.runInContext('const DEPT_SUB_SLUGS = { dining: { "标帜餐厅": "sig", "艳中餐厅": "yan", "酒吧团队": "bar", "客房送餐": "ird" }, rooms: { "迎宾前台": "fo", "礼宾部": "concierge", "随时随需": "ww", "客房造型": "styling", "健身及水疗中心": "spa" } }', sb)
+  vm.runInContext('const DEPT_SUB_BY_SLUG = (() => { const o = {}; Object.keys(DEPT_SUB_SLUGS).forEach(mk => Object.keys(DEPT_SUB_SLUGS[mk]).forEach(s => { o[mk + "/" + DEPT_SUB_SLUGS[mk][s]] = s })); return o })()', sb)
+  vm.runInContext(extractFn(appSrc, 'deptSlug'), sb)
+  vm.runInContext(extractFn(appSrc, 'deptSlugName'), sb)
+  vm.runInContext(extractFn(appSrc, 'deptGroupKey'), sb)
 
   vm.runInContext(extractFn(appSrc, 'dashChStageWeight'), sb)   // v78：积分环节权重（第七天期末考试 3 倍）
   vm.runInContext('const TYPE_LABELS = new Proxy({}, { get: (_, k) => k })', sb)

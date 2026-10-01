@@ -321,9 +321,20 @@ const Store = {
         const nu = ev.d && ev.d.nu
         if (!nu || nu === ev.u) { if (ev.ts > maxTs) maxTs = ev.ts; return }
         const idx = users.findIndex(u => u.username === ev.u)
-        if (idx >= 0 && !users.some(u => u.username === nu)) {
-          users[idx] = Object.assign({}, users[idx], { username: nu })
-          applied.renamed.push({ from: ev.u, to: nu }); dirty = true
+        if (idx >= 0) {
+          if (!users.some(u => u.username === nu)) {
+            // 普通改名：本机源账号直接改名为目标
+            users[idx] = Object.assign({}, users[idx], { username: nu })
+            applied.renamed.push({ from: ev.u, to: nu }); dirty = true
+          } else {
+            // v137 账号合并：**目标账号本机已存在** → 源账号是被吸收的一方，本机记录必须删除。
+            //   旧代码此分支什么都不做，源账号会以「本机独有行」永远残留在账号管理页，
+            //   看起来就是「合并了但重复账号还在」。
+            users = users.filter(u => u && u.username !== ev.u)
+            applied.renamed.push({ from: ev.u, to: nu, merged: true })
+            applied.deleted.push(ev.u)
+            dirty = true
+          }
         }
       } else if (ev.ty === 'role') {
         const newRole = ev.d && ev.d.role
@@ -393,7 +404,11 @@ const Store = {
     const s = this.getSession()
     if (s && s.username) {
       const sessionUser = users.find(u => u.username === s.username)
-      if (!sessionUser && cloudMap[s.username]) {
+      if (!sessionUser && applied.renamed.some(r => r.merged && r.from === s.username)) {
+        // v137：本机会话所在的账号刚被管理员合并吸收 → 强制登出，避免继续以不存在的账号产生事件
+        //   （不能走下面那条 `cloudMap[s.username]` 判据：合并后云端也没有这个用户名了，判据为假）
+        this.logout()
+      } else if (!sessionUser && cloudMap[s.username]) {
         // session 用户没了（被删除），强制登出
         this.logout()
       } else if (sessionUser) {
@@ -653,6 +668,37 @@ const Store = {
       if (s && s.id === Number(id)) CloudSync.setUser(nu, u.name)
     }
     return { ok: true, old, nu }
+  },
+  // v137：管理员「合并账号」——本机侧的吸收（**刻意不产生云端 delete 事件**）
+  //   不能复用 deleteUser()：它只按 id 删本机账号表，且会 enqueue({ty:'delete'})。
+  //   合并后源记录已并入保留账号，云端那条 delete 虽是无害空操作，但多一条破坏性事件无益；
+  //   真正缺的是「活动日志 + 定级历史」的用户名迁移（与 renameUser 同口径），否则本机统计会
+  //   把已被吸收的旧用户名的历史算在空处。
+  // 返回 { ok, removedLocal, relogged }；removedLocal=1 表示本机确实存在该源账号并已移除。
+  mergeUsersLocal(sourceUsername, targetUsername) {
+    const src = String(sourceUsername || '').trim()
+    const tgt = String(targetUsername || '').trim()
+    if (!src || !tgt || src === tgt) return { ok: false, msg: '参数不合法', removedLocal: 0, relogged: 0 }
+    let removedLocal = 0
+    const users = this.getUsers()
+    if (users.some(u => u && u.username === src)) {
+      this.saveUsers(users.filter(u => u && u.username !== src))
+      removedLocal = 1
+    }
+    let relogged = 0
+    try {
+      const acts = this.getActivity()
+      let dirty = false
+      acts.forEach(a => { if (a && a.username === src) { a.username = tgt; dirty = true; relogged++ } })
+      if (dirty) localStorage.setItem(STORAGE_KEYS.ACTIVITY, JSON.stringify(acts))
+    } catch (e) { /* ignore */ }
+    try {
+      const ph = this.getPlacementHistory()
+      let dirty = false
+      ph.forEach(h => { if (h && h.username === src) { h.username = tgt; dirty = true; relogged++ } })
+      if (dirty) localStorage.setItem(STORAGE_KEYS.PLACEMENT, JSON.stringify(ph))
+    } catch (e) { /* ignore */ }
+    return { ok: true, removedLocal, relogged }
   },
   async resetPassword(id, newPassword) {
     const users = this.getUsers()

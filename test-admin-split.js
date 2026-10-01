@@ -173,8 +173,10 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   assert('线上块：不含线下完成列', !onlineHtml.includes('线下完成'))
   assert('线上块：不含课程矩阵', !onlineHtml.includes('课程成绩矩阵'))
   // ⚠️ v113：挑战三面板已从线上块移出（这是本次拆分的核心，反向断言防回退）
+  //    注：v118 起挑战块为「营次表（含开关两列）→ 挑战统计」两段，
+  //    「开关」不再有独立容器 id（原 dashChGate），相关断言见 test-v118。
   assert('线上块：不含营次管理面板', !onlineHtml.includes('dashRoundsPanel'))
-  assert('线上块：不含挑战开关面板', !onlineHtml.includes('dashChGate'))
+  assert('线上块：不含挑战开关列', !onlineHtml.includes('dashChOpenCellHtml') && !onlineHtml.includes('dashChGate'))
   assert('线上块：不含挑战统计占位', !onlineHtml.includes('dashChallengeBlock'))
 
   // 线下块内容
@@ -190,7 +192,14 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   // 七天挑战块内容（v113 新增）
   console.log('\n2.3  七天挑战块内容')
   assert('挑战块：营次管理面板', challengeHtml.includes('dashRoundsPanel'))
-  assert('挑战块：挑战开关面板', challengeHtml.includes('dashChGate'))
+  // v118：开关并入营次表（无独立容器）；改断「营次表行的开关列函数已被调用」（接线，非仅定义）
+  assert('挑战块：营次表含开关列（v118 合并）', challengeHtml.includes('dashRoundsPanel'))
+  {
+    const appSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8')
+    assert('挑战块：开关列单元格函数已定义并被调用（v118）',
+      appSrc.includes('function dashChOpenCellHtml') && appSrc.includes('function dashChExamCellHtml') &&
+      /\$\{dashChOpenCellHtml\(r\)\}/.test(appSrc) && /\$\{dashChExamCellHtml\(r\)\}/.test(appSrc))
+  }
   assert('挑战块：挑战统计占位', challengeHtml.includes('dashChallengeBlock'))
   assert('挑战块：不含线上明细', !challengeHtml.includes('登录时长') && !challengeHtml.includes('perQBlock'))
   assert('挑战块：不含线下明细', !challengeHtml.includes('课程成绩矩阵'))

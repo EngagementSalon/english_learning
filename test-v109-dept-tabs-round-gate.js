@@ -247,13 +247,22 @@ const i18nSrc = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8')
   assert('管理员切房务部 → noRound 卡',
     run('challengeEntryHtml()').includes(run("t('chDeptNoRound')")))
 
+  // v110 语义演进：一级部门视角改为「汇总展示其下所有分部门的挑战」
+  //   · 饮食部（其下 sig 有 r1、yan 有 r2）→ 正常卡 + 列出两期（不再是 noRound 卡）
+  //   · 通用（无任何分部门）→ 无营次可汇总 → 仍为 noRound 卡
   run(`setPracticeDept('all')`)
-  assert('管理员切通用 → noRound 卡',
+  assert('管理员切通用 → noRound 卡（无下属分部门可汇总）',
     run('challengeEntryHtml()').includes(run("t('chDeptNoRound')")))
 
   run(`setPracticeDept('dining')`)
-  assert("管理员切「饮食部」一级（整包无专属营次）→ noRound 卡",
-    run('challengeEntryHtml()').includes(run("t('chDeptNoRound')")))
+  const admDining = run('challengeEntryHtml()')
+  assert('管理员切「饮食部」一级 → 正常卡（v110：汇总其下各分队挑战）',
+    !admDining.includes(run("t('chDeptNoRound')")) && admDining.includes("navigate('challenge')"),
+    admDining.slice(0, 200))
+  assert('饮食部一级视角列出下属各期（标帜 r1 + 艳中 r2）',
+    admDining.includes(R1_NAME) && admDining.includes(R2_NAME))
+  assert('饮食部一级视角列出分队标签（标帜餐厅/艳中餐厅）',
+    admDining.includes('标帜餐厅') && admDining.includes('艳中餐厅'))
 
   run('practiceDept = ""')
   const admAll = run('challengeEntryHtml()')

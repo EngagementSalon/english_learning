@@ -160,11 +160,16 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   assert('线上块仍含分类进度', onlineHtml.includes('dashCatBlock'))
   assert('线上块仍含每题正确率', onlineHtml.includes('perQBlock'))
   assert('线上块【不含】营次管理面板', !onlineHtml.includes('dashRoundsPanel'))
-  assert('线上块【不含】挑战开关面板', !onlineHtml.includes('dashChGate'))
+  assert('线上块【不含】挑战开关列', !onlineHtml.includes('dashChOpenCellHtml') && !onlineHtml.includes('dashChGate'))
   assert('线上块【不含】挑战统计占位', !onlineHtml.includes('dashChallengeBlock'))
 
   assert('挑战块含营次管理面板', challengeHtml.includes('dashRoundsPanel'))
-  assert('挑战块含挑战开关面板', challengeHtml.includes('dashChGate'))
+  // ⚠️ 契约反转（v118）：开关不再有独立容器 dashChGate，已并入营次表两列。
+  //   故这里改断「开关列单元格函数存在且被营次表行模板调用」——「函数存在≠功能存在」，
+  //   必须断接线（v100 缺陷逃逸的教训）。
+  assert('挑战块含挑战开关列（v118 并入营次表）',
+    APP.includes('function dashChOpenCellHtml') && APP.includes('function dashChExamCellHtml') &&
+    /\$\{dashChOpenCellHtml\(r\)\}/.test(APP) && /\$\{dashChExamCellHtml\(r\)\}/.test(APP))
   assert('挑战块含挑战统计占位', challengeHtml.includes('dashChallengeBlock'))
 
   // ⚠️ 本套件 CourseStore stub 为无班级（classes: []），此时线下块渲染的是空态。
@@ -176,19 +181,20 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   assert('线下块不含挑战面板',
     !offlineHtml.includes('dashRoundsPanel') && !offlineHtml.includes('dashChGate'))
 
-  // 训练营三面板相对顺序不变（v76/v77/v107 历史约束）
-  console.log('\n3.1  挑战块内三面板相对顺序（v76/v77/v107 约束保持不变）')
+  // 训练营面板相对顺序不变（v76/v77/v107 历史约束；v118 由三面板缩为两段）
+  console.log('\n3.1  挑战块内面板相对顺序（v76/v77/v118 约束保持不变）')
   {
     const iR = APP.indexOf('${dashRoundsPanelHtml()}')
-    const iG = APP.indexOf('${dashChGatePanelHtml()}')
     const iB = APP.indexOf('<div id="dashChallengeBlock"></div>')
-    assert('三面板顺序：营次管理 → 开关 → 挑战统计', iR >= 0 && iG > iR && iB > iG, `r=${iR} g=${iG} b=${iB}`)
+    // v118：开关面板撤销，营次表（含开关两列）→ 挑战统计
+    assert('两段顺序：营次管理（含开关列）→ 挑战统计', iR >= 0 && iB > iR, `r=${iR} b=${iB}`)
+    assert('独立开关面板已下线（v118）', APP.indexOf('${dashChGatePanelHtml()}') < 0, 'iG=' + APP.indexOf('${dashChGatePanelHtml()}'))
   }
   {
     const iR = challengeHtml.indexOf('dashRoundsPanel')
-    const iG = challengeHtml.indexOf('dashChGate')
     const iB = challengeHtml.indexOf('dashChallengeBlock')
-    assert('渲染后挑战块内顺序一致', iR >= 0 && iG > iR && iB > iG, `r=${iR} g=${iG} b=${iB}`)
+    assert('渲染后挑战块内顺序一致', iR >= 0 && iB > iR, `r=${iR} b=${iB}`)
+    assert('渲染后挑战块内无独立开关容器', challengeHtml.indexOf('dashChGate') < 0)
   }
 
   // ---- 4. 切换行为：三块互斥 ----

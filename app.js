@@ -3480,6 +3480,7 @@ async function renderUsers() {
     <div class="admin-toolbar">
       <span style="font-size:14px;color:#6b7280;flex:1">${t('usersPageTitle')}</span>
       <button class="btn btn-ghost" onclick="openLogoModal()">🖼 ${t('logoUploadBtn')}</button>
+      <button class="btn btn-ghost" onclick="openMergeModal()" style="color:#b45309;border-color:#fde68a">🔗 ${t('mergeBtn')}</button>
       <button class="btn btn-ghost" onclick="clearAllPlacements()" style="color:#dc2626;border-color:#fecaca">${t('clearPlacementBtn')}</button>
       <button class="btn btn-primary" onclick="openUserModal()">${t('newAccount')}</button>
     </div>
@@ -5000,6 +5001,244 @@ async function deleteUserAccount(id, username) {
     await CloudSync.pushPending()
   }
   renderUsers()
+}
+// ====== v137：账号合并（仅管理员）======
+// 场景：同一名学员注册了两次（用户名不同或前后有空格/别名），数据被劈成两条 →
+//   登录时长、刷题数、考试成绩、七天挑战记录、线下课作业分散在两个账号上。
+// 做法：把「被合并账号」的全部数据并入「保留账号」，被合并账号随后从名单消失。
+//   复用既有的 rename 通道（云端聚合 + 班级成绩都会合并），另加：
+//     ① doc.merges 不灭标记（源账号设备的迟到事件也会被吸收，不会长出幽灵账号）
+//     ② 本机账号表/日志吸收（Store.mergeUsersLocal，刻意不发云端 delete 事件）
+// 安全：仅管理员；管理员账号不得参与（避免权限被合并吞掉）；执行前云端留档备份；
+//   必须手工输入被合并账号的用户名才可执行（不可逆操作，防误点）。
+let mergeState = { src: '', tgt: '', rows: [], q: '', busy: false }
+
+function mergeNormName(u) {
+  const n = String((u && u.name) || '').trim().toLowerCase()
+  return n || ('@' + String((u && u.username) || '').trim().toLowerCase())
+}
+// 同名分组：剔除管理员后，按「姓名」归组，返回出现 2 次及以上的组（同名账号的典型现场）
+function mergeDupGroups(rows) {
+  const g = {}
+  ;(rows || []).forEach(u => {
+    if (!u || u.role === 'admin') return
+    const k = mergeNormName(u)
+    ;(g[k] = g[k] || []).push(u)
+  })
+  return Object.keys(g).map(k => g[k]).filter(list => list.length > 1)
+}
+function mergeFmtLast(ts) {
+  if (!ts) return '—'
+  return new Date(ts).toLocaleString(LANG === 'en' ? 'en-US' : 'zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+function mergeChyCount(u) { return (u && Array.isArray(u.chy)) ? u.chy.length : 0 }
+// 合并预览：源 / 保留 / 合计 三列口径（合计只对可加量求和，比率类按合计重算）
+function mergePreviewHtml(srcRow, tgtRow) {
+  const sum = (a, b) => (a || 0) + (b || 0)
+  const pTot = sum(srcRow.practiceTotal, tgtRow.practiceTotal)
+  const pCor = sum(srcRow.practiceCorrect, tgtRow.practiceCorrect)
+  const eCnt = sum(srcRow.examCount, tgtRow.examCount)
+  const eSum = Math.round(sum(srcRow.examScoreSum, tgtRow.examScoreSum))
+  const lvl = Math.max(srcRow.placementLevel || 0, tgtRow.placementLevel || 0)
+  const line = (label, a, b, m) => `<tr><td style="color:#6b7280">${label}</td><td>${a}</td><td>${b}</td><td style="font-weight:700;color:#b45309">${m}</td></tr>`
+  return `<table class="admin-table dash-table" style="margin-top:8px">
+    <thead><tr>
+      <th>${t('mergeColItem')}</th>
+      <th>${escHtml(srcRow.username)}<div style="font-weight:400;font-size:11px;color:#6b7280">${t('mergeColSrc')}</div></th>
+      <th>${escHtml(tgtRow.username)}<div style="font-weight:400;font-size:11px;color:#6b7280">${t('mergeColTgt')}</div></th>
+      <th>${t('mergeColMerged')}</th>
+    </tr></thead>
+    <tbody>
+      ${line(t('mergeMLoginCount'), srcRow.loginCount || 0, tgtRow.loginCount || 0, sum(srcRow.loginCount, tgtRow.loginCount))}
+      ${line(t('mergeMDuration'), Store._fmtDuration(srcRow.loginSec || 0), Store._fmtDuration(tgtRow.loginSec || 0), Store._fmtDuration(sum(srcRow.loginSec, tgtRow.loginSec)))}
+      ${line(t('mergeMPractice'), srcRow.practiceCount || 0, tgtRow.practiceCount || 0, sum(srcRow.practiceCount, tgtRow.practiceCount))}
+      ${line(t('mergeMAccuracy'), (srcRow.practiceAccuracy || 0) + '%', (tgtRow.practiceAccuracy || 0) + '%', (pTot > 0 ? Math.round(pCor / pTot * 100) : 0) + '%')}
+      ${line(t('mergeMExamCount'), srcRow.examCount || 0, tgtRow.examCount || 0, eCnt)}
+      ${line(t('mergeMExamAvg'), srcRow.examCount ? (srcRow.examAvg + '') : '—', tgtRow.examCount ? (tgtRow.examAvg + '') : '—', eCnt ? Math.round(eSum / eCnt) : '—')}
+      ${line(t('mergeMExamBest'), srcRow.examBest || 0, tgtRow.examBest || 0, Math.max(srcRow.examBest || 0, tgtRow.examBest || 0))}
+      ${line(t('mergeMLevel'), lvl ? ('L' + lvl) : '—', (tgtRow.placementLevel ? 'L' + tgtRow.placementLevel : '—'), lvl ? ('L' + lvl) : '—')}
+      ${line(t('mergeMChallenge'), mergeChyCount(srcRow), mergeChyCount(tgtRow), sum(mergeChyCount(srcRow), mergeChyCount(tgtRow)))}
+      ${line(t('mergeMCourse'), (srcRow.courseDone || 0) + '/' + (srcRow.courseTotal || 0), (tgtRow.courseDone || 0) + '/' + (tgtRow.courseTotal || 0), (sum(srcRow.courseDone, tgtRow.courseDone)) + '/' + (sum(srcRow.courseTotal, tgtRow.courseTotal)))}
+    </tbody>
+  </table>`
+}
+
+async function openMergeModal() {
+  if (!Store.isAdmin()) return                       // 双重保险：仅管理员可开
+  const old = document.getElementById('mergeModal')
+  if (old) old.remove()
+  mergeState = { src: '', tgt: '', rows: [], q: '', busy: false }
+  const modal = document.createElement('div')
+  modal.id = 'mergeModal'
+  modal.className = 'modal-overlay'
+  modal.style.display = 'flex'
+  modal.innerHTML = `
+    <div class="modal" style="max-width:780px">
+      <div class="modal-header">
+        <h3>🔗 ${t('mergeTitle')}</h3>
+        <span class="modal-close" onclick="closeMergeModal()">✕</span>
+      </div>
+      <div class="modal-body" id="mergeBody">
+        <div style="text-align:center;padding:32px;color:#6b7280">${t('cloudLoading')}</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-danger" id="mergeRunBtn" disabled onclick="mergeUsersRun()">${t('mergeRunBtn')}</button>
+        <button class="btn btn-ghost" onclick="closeMergeModal()">${t('cancelBtn')}</button>
+      </div>
+    </div>`
+  document.body.appendChild(modal)
+  let rows = []
+  try {
+    const d = await loadAdminRows()
+    rows = (d && d.rows) || []
+  } catch (e) { rows = [] }
+  mergeState.rows = rows
+  renderMergeBody()
+}
+function closeMergeModal() {
+  const m = document.getElementById('mergeModal')
+  if (m) m.remove()
+}
+// 选择：kind='src' 被合并方（将被吸收） / 'tgt' 保留方
+function mergePick(kind, username) {
+  if (kind === 'src') {
+    mergeState.src = username
+    if (mergeState.tgt === username) mergeState.tgt = ''
+  } else {
+    mergeState.tgt = username
+    if (mergeState.src === username) mergeState.src = ''
+  }
+  renderMergeBody()
+}
+function mergeSearch(val) {
+  mergeState.q = String(val || '').trim().toLowerCase()
+  // 只重画列表：整块重渲染会把输入框一起换掉 → 用户每敲一个字就丢焦点
+  const w = document.getElementById('mergeListWrap')
+  if (w) w.innerHTML = mergeListHtml()
+  else renderMergeBody()
+}
+function mergeSyncRunBtn() {
+  const btn = document.getElementById('mergeRunBtn')
+  if (!btn) return
+  const ok = mergeState.src && mergeState.tgt && mergeState.src !== mergeState.tgt
+  btn.disabled = !ok || mergeState.busy
+}
+function mergeTailHtml() {
+  const srcRow = mergeState.rows.find(u => u.username === mergeState.src)
+  const tgtRow = mergeState.rows.find(u => u.username === mergeState.tgt)
+  if (!srcRow || !tgtRow) return `<p class="form-hint" style="margin-top:12px">${t('mergePickHint')}</p>`
+  return `
+    <div style="margin-top:14px;padding:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;font-size:13px;color:#92400e">
+      ${t('mergeOrderHint')}
+    </div>
+    ${mergePreviewHtml(srcRow, tgtRow)}
+    <div class="form-group" style="margin-top:14px">
+      <label>${t('mergeConfirmLabel', srcRow.username)}</label>
+      <input type="text" id="mergeConfirmInput" autocomplete="off" placeholder="${escAttr(srcRow.username)}"
+             oninput="mergeSyncRunBtn()" />
+    </div>`
+}
+// 账号列表区（可单独重画：搜索时不能让搜索框本身被重建，否则每敲一个字就丢焦点）
+function mergeListHtml() {
+  const q = mergeState.q
+  const listable = (mergeState.rows || [])
+    .filter(u => u && u.role !== 'admin')
+    .filter(u => !q
+      || String(u.username || '').toLowerCase().includes(q)
+      || String(u.name || '').toLowerCase().includes(q))
+  const rowHtml = (u) => `<tr>
+      <td>${escHtml(u.username)}${u.cloudOnly ? ` <span style="color:#2563eb;font-size:10px" title="${t('cloudUserTip')}">☁</span>` : ''}</td>
+      <td>${escHtml(u.name || '—')}</td>
+      <td>${escHtml(u.dept || '—')}</td>
+      <td style="font-size:12px;color:#6b7280">${mergeFmtLast(u.lastActive)}</td>
+      <td style="font-size:12px;color:#6b7280">${u.loginCount || 0}</td>
+      <td style="font-size:12px;color:#6b7280">${u.practiceCount || 0}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" onclick="mergePick('src', ${escAttr(JSON.stringify(u.username))})">${t('mergeSetSrc')}</button>
+        <button class="btn btn-ghost btn-sm" onclick="mergePick('tgt', ${escAttr(JSON.stringify(u.username))})">${t('mergeSetTgt')}</button>
+      </td>
+    </tr>`
+  return `<div style="max-height:220px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px">
+      <table class="admin-table dash-table">
+        <thead><tr><th>${t('thUsername')}</th><th>${t('thName')}</th><th>${t('thDept')}</th><th>${t('thLastActive')}</th><th>${t('mergeColLogin')}</th><th>${t('mergeColPractice')}</th><th>${t('thAction')}</th></tr></thead>
+        <tbody>${listable.length ? listable.map(rowHtml).join('') : `<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:16px">${t('mergeNoMatch')}</td></tr>`}</tbody>
+      </table>
+    </div>`
+}
+function renderMergeBody() {
+  const el = document.getElementById('mergeBody')
+  if (!el) return
+  const dups = mergeDupGroups(mergeState.rows)
+  const dupHtml = dups.length ? `
+    <div style="margin:6px 0 12px;padding:10px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px">
+      <div style="font-size:13px;font-weight:700;color:#1d4ed8;margin-bottom:6px">${t('mergeDupTitle', dups.length)}</div>
+      ${dups.map(list => `<div style="font-size:13px;color:#1e3a8a;margin:2px 0">👥 ${escHtml(list[0].name || list[0].username)}：
+        ${list.map(u => `<a href="javascript:;" onclick="mergePick('src', ${escAttr(JSON.stringify(u.username))})" style="color:#1d4ed8;text-decoration:underline">${escHtml(u.username)}</a>`).join(' / ')}
+        <span style="color:#6b7280;font-size:12px">（${t('mergeDupTip')}）</span></div>`).join('')}
+    </div>` : `<div style="margin:6px 0 12px;font-size:13px;color:#6b7280">${t('mergeNoDup')}</div>`
+  const pickChip = (label, name, kind) => `<div style="flex:1;min-width:200px;padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb">
+      <div style="font-size:12px;color:#6b7280">${label}</div>
+      <div style="font-weight:700;color:${name ? '#111827' : '#9ca3af'}">${name ? escHtml(name) : t('mergeNotPicked')}</div>
+    </div>`
+  el.innerHTML = `
+    <p class="form-hint" style="margin-bottom:10px">${t('mergeIntro')}</p>
+    ${dupHtml}
+    <div style="display:flex;gap:10px;margin-bottom:10px">
+      ${pickChip(t('mergeColSrc') + '（被吸收）', mergeState.src, 'src')}
+      ${pickChip(t('mergeColTgt') + '（保留）', mergeState.tgt, 'tgt')}
+    </div>
+    <input type="text" id="mergeSearchInput" value="${escAttr(mergeState.q)}" placeholder="${t('mergeSearchPh')}"
+           oninput="mergeSearch(this.value)" style="width:100%;margin-bottom:8px" />
+    <div id="mergeListWrap">${mergeListHtml()}</div>
+    <div id="mergeTail">${mergeTailHtml()}</div>`
+  mergeSyncRunBtn()
+}
+async function mergeUsersRun() {
+  if (!Store.isAdmin()) return alert(t('mergeAdminOnly'))       // 权限闸门：仅管理员
+  const src = String(mergeState.src || '').trim()
+  const tgt = String(mergeState.tgt || '').trim()
+  if (mergeState.busy) return
+  if (!src || !tgt || src === tgt) return alert(t('mergeNeedPick'))
+  const srcRow = mergeState.rows.find(u => u.username === src)
+  const tgtRow = mergeState.rows.find(u => u.username === tgt)
+  if (!srcRow || !tgtRow) return alert(t('mergeNeedPick'))
+  // 管理员账号不得参与：源被吸收会把管理员权限一起吞掉；目标被合并则统计被污染
+  if (srcRow.role === 'admin' || tgtRow.role === 'admin') return alert(t('mergeNoAdminAccount'))
+  const inp = document.getElementById('mergeConfirmInput')
+  if (String((inp && inp.value) || '').trim() !== src) return alert(t('mergeConfirmMismatch', src))
+  if (!confirm(t('mergeFinalConfirm', src, tgt))) return
+  mergeState.busy = true
+  mergeSyncRunBtn()
+  try {
+    // ① 云端留档备份（不可逆操作，先留一份本机快照，最多保留最近 3 份）
+    let backupOk = false
+    try {
+      const s = await CloudSync.fetchSyncSummary()
+      if (s && s.ok && s.doc) {
+        const key = 'eq_merge_backup_' + Date.now()
+        localStorage.setItem(key, JSON.stringify(s.doc))
+        backupOk = true
+        const keys = Object.keys(localStorage).filter(k => k.indexOf('eq_merge_backup_') === 0).sort()
+        while (keys.length > 3) { localStorage.removeItem(keys.shift()) }
+      }
+    } catch (e) { /* 备份失败不阻断，但会在结果里提示 */ }
+    // ② 云端合并：不灭标记 + rename 事件 + 回读校验
+    const r = (typeof CloudSync !== 'undefined' && CloudSync.mergeAccounts)
+      ? await CloudSync.mergeAccounts(src, tgt)
+      : { ok: false, reason: 'no-cloudsync' }
+    // ③ 本机侧吸收：删本机源账号 + 活动日志/定级历史重挂（不发云端 delete）
+    let local = { removedLocal: 0, relogged: 0 }
+    try { local = Store.mergeUsersLocal(src, tgt) } catch (e) { /* ignore */ }
+    // ④ 线下课：班级成员 / 创建者 / 成绩记录迁移（复用改名通道，内部会合并历次成绩）
+    try { applyCourseRename(src, tgt) } catch (e) { /* ignore */ }
+    alert(r.ok
+      ? t('mergeDone', src, tgt) + (backupOk ? '' : '\n\n' + t('mergeBackupWarn'))
+      : t('mergePartial', src, tgt) + (backupOk ? '' : '\n\n' + t('mergeBackupWarn')))
+    closeMergeModal()
+    if (typeof renderUsers === 'function') renderUsers()
+  } finally {
+    mergeState.busy = false
+  }
 }
 // 设置 / 取消管理员权限
 async function setUserRoleUI(id, username, role) {

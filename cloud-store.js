@@ -1190,7 +1190,25 @@ const CloudSync = {
           tgt.examPassCount = (tgt.examPassCount || 0) + (r.examPassCount || 0)
           tgt.createdAt = Math.min(tgt.createdAt || ev.ts, r.createdAt || ev.ts)
           tgt.lastActive = Math.max(tgt.lastActive || 0, r.lastActive || 0)
-          if (ev.n) tgt.name = ev.n
+          // v137：合并时**保留账号（tgt）的身份优先** —— 名字/部门/角色都取 tgt，
+          //   只有 tgt 缺省时才继承源账号；角色绝不因合并被提升（源是管理员也不能把目标变管理员）。
+          //   旧写法 `if (ev.n) tgt.name = ev.n` 会让**源账号的名字覆盖保留账号**，
+          //   在两个账号名字不完全一致时（中间空格/大小写/别名）会让看板显示错人。
+          if (!tgt.name && ev.n) tgt.name = ev.n
+          if (!tgt.dept && r.dept) tgt.dept = r.dept
+          // 定级：按「整体三元组」继承，不逐字段取，避免 level 来自 A、perLevel 来自 B 导致的错配
+          if (!tgt.placementLevel && r.placementLevel) {
+            tgt.placementLevel = r.placementLevel
+            if (r.placementPerLevel) tgt.placementPerLevel = r.placementPerLevel
+            if (r.placementScore != null) tgt.placementScore = r.placementScore
+            if (r.placementTotal != null) tgt.placementTotal = r.placementTotal
+          }
+          // 挑战重置标记：取较晚的一次（决定看板「已重置/未重置」的口径）
+          {
+            const rt = Number(r.chResetAt) || 0, tt = Number(tgt.chResetAt) || 0
+            if (rt > tt) { tgt.chResetAt = r.chResetAt; tgt.chResetMode = r.chResetMode }
+            else if (!tgt.chResetMode && r.chResetMode) tgt.chResetMode = r.chResetMode
+          }
           // 合并每道题答题明细
           if (r.perQ) {
             tgt.perQ = tgt.perQ || {}
@@ -1412,6 +1430,91 @@ const CloudSync = {
     }
   },
 
+  // ---------- v137：账号合并的「不灭标记」吸收 ----------
+  // 为什么需要它：合并 = 一条 rename 事件（把源账号聚合并入保留账号）。但**事件会被折叠进 base**
+  //   （pushPending 中 doc.events 超限时 slice 掉旧事件），折叠后事件流里再没有那条 rename；
+  //   而源账号**那台设备**此刻可能还留着旧会话与未上报队列（心跳/刷题），它下一次推送会以
+  //   源用户名写事件 → 重放时凭空长出一条「幽灵账号」，看板上刚合并掉的重复账号又出现了。
+  // 解法：合并时把映射写进 doc.merges（顶层字段，不随事件折叠消失），读取聚合表时对
+  //   **仍然残留的源记录**再吸收一次。三重好处：
+  //     ① 折叠前后都生效（不依赖事件是否还在流里）；
+  //     ② 幂等 —— 吸收完 map[源] 即被 delete，再跑一次找不到源记录、直接返回，绝不重复计数；
+  //     ③ 零成本 —— 正常情况（源已不存在）一次 key 判断就过。
+  _absorbMerges(map, doc) {
+    const mg = (doc && doc.merges) || null
+    if (!mg) return
+    Object.keys(mg).forEach(src => {
+      const to = String((mg[src] && mg[src].to) || '')
+      if (!to || to === src) return
+      if (!map[src]) return                     // 源已不存在 → 无需处理（幂等关键）
+      // 复用 rename 的合并语义，保证与「事件流合并」完全同一套口径（计数/明细/挑战记录）
+      this._apply(map, { u: src, n: '', ty: 'rename', ts: Date.now(), d: { nu: to } })
+    })
+  },
+
+  // 记录一条合并映射（顶层字段 doc.merges，读-改-写 + 写后校验重试，与 setCloudLogo 同套路）
+  // 调用时机：管理员执行合并时。它是合并的**权威凭据** —— 即使 rename 事件被折叠/丢失，吸收仍然成立。
+  async _recordMerge(src, to) {
+    const s = String(src || ''), t = String(to || '')
+    if (!s || !t || s === t) return { ok: false, reason: 'bad-args' }
+    let saved = false
+    for (let attempt = 0; attempt < 4 && !saved; attempt++) {
+      try {
+        const doc = await this._getDoc()
+        doc.merges = doc.merges || {}
+        doc.merges[s] = { to: t, at: Date.now() }
+        await this._putDoc(doc)
+        const check = await this._getDoc()
+        const c = (check && check.merges && check.merges[s]) || null
+        if (c && String(c.to) === t) saved = true
+      } catch (e) { /* 网络波动 → 重试 */ }
+    }
+    return saved ? { ok: true } : { ok: false, reason: 'network' }
+  },
+
+  // ---------- v137：账号合并（管理员专用）—— 云端归一入口 ----------
+  // 语义：把「被合并账号 source」的全部学习数据并入「保留账号 target」，source 随后从名单消失。
+  //   等价于一次 rename（_apply 里目标已存在 → 合并计数），但额外做两件事：
+  //     ① 先写 doc.merges 不灭标记 → 源账号设备的迟到事件也会被吸收，不会长出幽灵账号；
+  //     ② 回读校验（事件在流里，或已折叠进 base 且 base 中源消失、目标存在）。
+  // 幂等：合并是「移动 + 相加」；源记录一旦被 delete，重放同一条 rename 找不到源 → 直接返回，
+  //   所以重复执行/事件重复投递都**不会**把计数翻倍。已合并过的源再合并 → 自然空操作。
+  // 注意：调用方（UI）负责权限、自选校验与本机侧吸收；本方法只碰云端。
+  //
+  // ⚠️⚠️ 刻意**不迁移**「挑战重置标记」（doc.chResets / doc.chRoundLevels[*].chResets 与
+  //   chResetModes 里以源用户名为键的条目）。它们不是学习数据，而是**发给那台设备的指令**：
+  //   cloud-store 每 5 分钟把 _roundLevels().chResets 挂到侧信道 `CloudSync._chResets`，
+  //   学员端 challenge.js 的 chCheckRemoteReset() 读到「比自己本地水位更新的时间戳」就会
+  //   **清掉本机两场水平测试记录**（Day1 摸底 / Day7 期末）。
+  //   若把源账号的重置标记搬到保留账号名下：保留账号的学员一打开挑战页，**本人成绩就会被误清空**
+  //   —— 一次合并变成一次数据事故。留在已删除的源用户名下则永远不会被任何设备读到，无害。
+  //   （看板里那条「已重置」元数据另走聚合字段 r.chResetAt/r.chResetMode，那部分**已**合并。）
+  async mergeAccounts(sourceUsername, targetUsername) {
+    const src = String(sourceUsername || '').trim()
+    const tgt = String(targetUsername || '').trim()
+    if (!src || !tgt) return { ok: false, reason: 'bad-args' }
+    if (src === tgt) return { ok: false, reason: 'same-user' }
+    const evId = 'merge_' + src + '__' + tgt
+    // ① 不灭标记（权威凭据）
+    const marker = await this._recordMerge(src, tgt)
+    // ② rename 事件（固定 id：重复执行不会在队列里堆多条；推送端也按 id 去重）
+    const q = this._queue()
+    if (!q.some(e => e && e.id === evId)) {
+      this.enqueue({ id: evId, u: src, n: '', ty: 'rename', d: { nu: tgt, merge: true } })
+    }
+    try { await this.pushPending() } catch (e) { /* 保留在队列，下次周期推送 */ }
+    // ③ 回读校验
+    let verified = false, inStream = false, markerOk = false, baseClean = false
+    try {
+      const doc = await this._getDoc()
+      inStream = (doc.events || []).some(e => e && e.id === evId)
+      markerOk = !!(doc.merges && doc.merges[src] && String(doc.merges[src].to) === tgt)
+      baseClean = !!(doc.base && doc.base[tgt]) && !(doc.base && doc.base[src])
+      verified = markerOk && (inStream || baseClean)
+    } catch (e) { /* 读不到 → 判定未验证成功，由调用方提示重试/下次周期完成 */ }
+    return { ok: verified, verified, marker: marker.ok, inStream, markerOk, baseClean }
+  },
+
   // ---------- 拉取云端 events 并应用到本地 users 表（跨设备角色/改名/删除同步） ----------
   // 调用方应负责把 CloudSync 暴露的字段名（username）映射回本地的账号表主键（id）
   // 返回结构：{ ok, doc, base, appliedUsers, appliedRole, appliedRename, appliedDelete, appliedRegister }
@@ -1438,6 +1541,7 @@ const CloudSync = {
     })
     const events = (doc.events || []).concat(this._queue())
     events.forEach(ev => this._apply(map, ev))
+    this._absorbMerges(map, doc)   // v137：吸收合并后仍残留的源账号（幽灵）
     return { ok: true, doc, map }
   },
 
@@ -1466,6 +1570,7 @@ const CloudSync = {
     })
     const events = (doc.events || []).concat(this._queue())
     events.forEach(ev => this._apply(map, ev))
+    this._absorbMerges(map, doc)   // v137：吸收合并后仍残留的源账号（幽灵）
     // v75：缓存全局每题聚合与云端文档体积（正确率看板/存储用量指示条用；
     // 挂在实例上而不改返回结构——学员端挑战页也复用本方法取数组）
     this._lastQStats = map.__q || {}
@@ -1525,6 +1630,7 @@ const CloudSync = {
       const map = {}
       Object.keys(doc.base || {}).forEach(u => { map[u] = Object.assign({}, doc.base[u]) })
       ;(doc.events || []).forEach(ev => this._apply(map, ev))
+      this._absorbMerges(map, doc)   // v137：口径与看板一致（合并残留的源账号不计入）
 
       // 从原始事件流中找每个用户最新的 placement 事件（可能含 score/perLevel）
       const latestEv = {}
@@ -1603,6 +1709,7 @@ const CloudSync = {
       const map = {}
       Object.keys(doc.base || {}).forEach(u => { map[u] = Object.assign({}, doc.base[u]) })
       ;(doc.events || []).forEach(ev => this._apply(map, ev))
+      this._absorbMerges(map, doc)   // v137：不把已合并掉的源账号当成待清空对象
 
       const targets = []
       Object.keys(map).forEach(u => {

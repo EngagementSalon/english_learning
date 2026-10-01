@@ -249,9 +249,12 @@ function makeChSandbox(chOpen, chOpenAt) {
   console.log('\n[6] app.js 接线 + i18n 双语 + style.css hover 修复')
   {
     const appSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8')
-    // v107：单张「挑战开放」卡已被「按营期逐个渲染」取代 —— 每期一张卡，各带两个按钮。
-    assert('v107：开关面板按营期渲染（dashChGatePanelHtml + 逐卡 dashChRoundGateCardHtml）',
-      appSrc.includes('function dashChGatePanelHtml') && appSrc.includes('function dashChRoundGateCardHtml'))
+    // v107：单张「挑战开放」卡已被「按营期逐个渲染」取代 —— 每期各自两个按钮。
+    // ⚠️ 契约反转（v118）：v107 的**独立开关卡片区**已撤销，改为**营次管理表两列**
+    //    （dashChOpenCellHtml / dashChExamCellHtml）；原因见 test-v118-round-switch-columns.js 顶部。
+    assert('v118：挑战开关按营期渲染（并入营次表列 dashChOpenCellHtml + 真接线）',
+      appSrc.includes('function dashChOpenCellHtml') && /\$\{dashChOpenCellHtml\(r\)\}/.test(appSrc) &&
+      !appSrc.includes('function dashChGatePanelHtml'))
     assert('v107：挑战按钮按期传 roundId（不再只改指针那期）',
       appSrc.includes('async function dashToggleChOpen') && appSrc.includes('CloudSync.setChallengeOpen({ open: next, roundId: rid })'))
     // v88：renderDashboard 的开/关两行被「营次面板」取代 —— 排期自动开放/关闭不再需要常驻手动开关

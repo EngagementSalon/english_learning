@@ -89,8 +89,10 @@ function makeChSandbox(chResets, localStore, chResetModes) {
   sb.window = sb
   vm.createContext(sb)
   // 依赖：challengeUid（会话用户名）、challengeSave、Store、CHALLENGE_DAYS
+  // v88：再补营次存根（chRoundSlug/chCurrentRound/chStorageKey）——challengeLoad 存档键与重置标记按营次隔离
   vm.runInContext(`
     const CHALLENGE_KEY = 'eq_challenge_v2'
+    const CHALLENGE_KEY_PREFIX = 'eq_challenge_v2_'
     const CHALLENGE_DAYS = ${JSON.stringify(DAYS_MINI)}
     let challengeState = null
     let chs = { phase: 'quiz' }
@@ -101,6 +103,9 @@ function makeChSandbox(chResets, localStore, chResetModes) {
     const CloudSync = { _chResets: window.__resets, _chResetModes: window.__resetModes }
   `, sb)
   const chSrc = fs.readFileSync(path.join(__dirname, 'challenge.js'), 'utf-8')
+  // v88：营次解析函数（从 challenge.js 提取，保证与线上同一实现）
+  vm.runInContext(extractFn(chSrc, 'chRoundSlug'), sb)
+  vm.runInContext(extractFn(chSrc, 'chCurrentRound'), sb)
   vm.runInContext(extractFn(chSrc, 'challengeUid'), sb)
   vm.runInContext(extractFn(chSrc, 'chClearExamStageRecs'), sb)
   vm.runInContext(extractFn(chSrc, 'chCheckRemoteReset'), sb)
@@ -218,7 +223,7 @@ function makeChSandbox(chResets, localStore, chResetModes) {
     assert('存根保留完成时间与题量（进度条/天数链不受影响）', day1['0'].at === 5 && day1['0'].total === 20)
     assert('Day1 练习阶段原样保留', day1['1'].done === true && day1['1'].correct === 9 && day1['1'].wrong.length === 0)
     assert('其他天（Day2）进度原样保留', st.days['2'].stages['0'].done === true && st.days['2'].stages['0'].correct === 28)
-    assert('已处理标记落盘（按用户）', localStore['eq_ch_reset_seen_alice'] === '1700000000000', String(localStore['eq_ch_reset_seen_alice']))
+    assert('已处理标记落盘（按用户）', localStore['eq_ch_reset_seen_alice_第一期'] === '1700000000000', String(localStore['eq_ch_reset_seen_alice_第一期']))
     assert('提示态激活且为考试成绩模式', vm.runInContext('chResetNoticeActive()', sb) === true && vm.runInContext('chResetNoticeIsExam()', sb) === true)
     assert('再次调用不重复触发', vm.runInContext('chCheckRemoteReset()', sb) === false)
   }
@@ -235,7 +240,7 @@ function makeChSandbox(chResets, localStore, chResetModes) {
     const localStore = { eq_challenge_v2: JSON.stringify({ uid: 'alice', days: { 2: { stages: { 0: { done: true } } } } }) }
     const sb = makeChSandbox({ alice: 1700000000000 }, localStore, { alice: 'exam' })
     assert('无考试成绩可清 → 返回 false（不弹提示）', vm.runInContext('__loadState(); chCheckRemoteReset()', sb) === false)
-    assert('标记已消费（不再重复检查）', localStore['eq_ch_reset_seen_alice'] === '1700000000000' && vm.runInContext('chCheckRemoteReset()', sb) === false)
+    assert('标记已消费（不再重复检查）', localStore['eq_ch_reset_seen_alice_第一期'] === '1700000000000' && vm.runInContext('chCheckRemoteReset()', sb) === false)
     assert('未完成的记录不被动', JSON.parse(localStore.eq_challenge_v2).days['2'].stages['0'].done === true)
   }
   {
@@ -244,7 +249,7 @@ function makeChSandbox(chResets, localStore, chResetModes) {
     const s1 = { eq_challenge_v2: mk() }
     const sb1 = makeChSandbox({}, s1, {})
     assert('云端无该学员标记 → 不重置', vm.runInContext('chCheckRemoteReset()', sb1) === false && JSON.parse(s1.eq_challenge_v2).days['1'] !== undefined)
-    const s2 = { eq_challenge_v2: mk(), eq_ch_reset_seen_alice: '1800000000000' }
+    const s2 = { eq_challenge_v2: mk(), eq_ch_reset_seen_alice_第一期: '1800000000000' }
     const sb2 = makeChSandbox({ alice: 1700000000000 }, s2, { alice: 'exam' })   // 云端更旧（已被处理过）
     assert('云端标记不比本地新 → 不重置（保进度）', vm.runInContext('chCheckRemoteReset()', sb2) === false && JSON.parse(s2.eq_challenge_v2).days['1'] !== undefined)
     const s3 = { eq_challenge_v2: mk() }
@@ -281,9 +286,12 @@ function makeChSandbox(chResets, localStore, chResetModes) {
   assert('明细表含操作列与重置按钮（按行索引 id）', appSrc.includes('dashChThOps') && appSrc.includes('dashChResetBtn_${pi}') && appSrc.includes('data-u="${escAttr(p.username)}"'))
   // v85：按钮改为从 data-* 取用户名后，函数前段多了解析代码 → 窗口放宽到 700 字符
   assert('重置按钮带二次确认（confirm）', /async function dashResetChUser[\s\S]{0,700}?confirm\(t\('dashChResetConfirm'/.test(appSrc))
-  assert('challenge.js 在 challengeLoad / chLoadLeaderboard 中检测重置', /function challengeLoad[\s\S]{0,900}?return chCheckRemoteReset\(\)/.test(chSrc) && chSrc.includes('if (chCheckRemoteReset()) renderChallenge()'))
-  assert('cloud-store 侧信道与写后校验齐备', cloudSrc.includes('this._chResets = (doc.chResets') && cloudSrc.includes('this._chResetModes = (doc.chResetModes')
-    && cloudSrc.includes("case 'chreset':") && cloudSrc.includes('check.chResets'))
+  // v88：challengeLoad 末尾的返回值可能复合「营次切换」结果，窗口放宽
+  assert('challenge.js 在 challengeLoad / chLoadLeaderboard 中检测重置', /function challengeLoad[\s\S]{0,1600}?chCheckRemoteReset\(\)/.test(chSrc) && chSrc.includes('if (chCheckRemoteReset()) renderChallenge()'))
+  // v88：重置标记改按营次存（doc.chRoundLevels[营次]），老数据由 _roundLevels 回落到 doc 顶层
+  assert('cloud-store 侧信道与写后校验齐备', cloudSrc.includes('this._chResets = lv.chResets') && cloudSrc.includes('this._chResetModes = lv.chResetModes')
+    && cloudSrc.includes('function _roundLevels') && cloudSrc.includes("id === 'r1' || id === '第一期'")
+    && cloudSrc.includes("case 'chreset':") && cloudSrc.includes('box.chResets'))
   const keys = ['dashChThOps:', 'dashChResetBtn:', 'dashChResetWorking:', 'dashChResetConfirm:', 'dashChResetOk:', 'dashChResetFail:', 'dashChResetHint:', 'chResetNotice:', 'chResetNoticeHint:', 'chResetExamNotice:', 'chResetExamNoticeHint:', 'chResetExamRetake:']
   const bad = keys.filter(k => i18nSrc.split(k).length - 1 !== 2)
   assert('i18n 12 键 zh/en 成对', bad.length === 0, bad.join(','))

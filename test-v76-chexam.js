@@ -203,30 +203,40 @@ function makeChSandbox(examOpen) {
   {
     const appSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8')
     // ⚠️ v107：v76 的「单张考试开关卡」已被「按营期逐个渲染」取代（修「一开都开」）。
-    //    新结构：dashChGatePanelHtml() 逐期出卡（dashChRoundGateCardHtml），每期各有挑战/考试两个按钮，
     //    点击带该期 roundId → cloud-store setChallengeOpen/setChallengeExamOpen({open, roundId})。
-    assert('v107：按营期逐卡渲染函数 dashChChRoundGateCardHtml 定义',
-      appSrc.includes('function dashChRoundGateCardHtml'))
-    assert('v107：开关面板 dashChGatePanelHtml 定义（逐期聚合）',
-      appSrc.includes('function dashChGatePanelHtml'))
-    assert('v107：面板按期过滤（跟随看板部门筛选）',
-      appSrc.includes('function dashRoundsForGate') && appSrc.includes('dashRoundUnderDept(r, dashChDept)'))
+    // ⚠️ 契约反转（v118）：v107 的**独立开关卡片区**（dashChGatePanelHtml 逐期出卡 + dashChRoundGateCardHtml）
+    //    已被撤销，改为**营次管理表的两列**（dashChOpenCellHtml / dashChExamCellHtml）。
+    //    反转原因：① 同一营次要跨两个面板看，信息割裂；② 卡片区跟随看板部门筛选
+    //    （dashRoundsForGate 按 dashChDept 过滤）→ 管理员切到某餐厅后误以为「其他餐厅的开关没了」。
+    //    → 本段断言随之改写为「单元格函数 + 真接线」；细节见 test-v118-round-switch-columns.js。
+    assert('v118：挑战列单元格函数定义（取代 v107 独立卡）',
+      appSrc.includes('function dashChOpenCellHtml'))
+    assert('v118：考试列单元格函数定义（取代 v107 独立卡）',
+      appSrc.includes('function dashChExamCellHtml'))
+    assert('v118：两个单元格真被营次表行模板调用（接线，非仅定义）',
+      /\$\{dashChOpenCellHtml\(r\)\}/.test(appSrc) && /\$\{dashChExamCellHtml\(r\)\}/.test(appSrc))
+    assert('v118：v107 独立开关卡片区已下线（面板/单卡/按期过滤三函数均移除）',
+      !appSrc.includes('function dashChGatePanelHtml') &&
+      !appSrc.includes('function dashChRoundGateCardHtml') &&
+      !appSrc.includes('function dashRoundsForGate'))
     assert('v107：考试按钮按期传 roundId（不再只改指针那期）',
       appSrc.includes('CloudSync.setChallengeExamOpen({ open: next, roundId: rid })'))
     assert('v107：挑战按钮按期传 roundId',
       appSrc.includes('CloudSync.setChallengeOpen({ open: next, roundId: rid })'))
-    assert('v107：每期卡同时渲染「开放挑战」与「开放考试」两个按钮',
+    assert('v118：营次表同时渲染「开放挑战」与「开放考试」两个按钮',
       /dashToggleChOpen\(this\)/.test(appSrc) && /dashToggleChExam\(this\)/.test(appSrc))
     assert('renderDashboard 插入营次面板', appSrc.includes('${dashRoundsPanelHtml()}'))
     assert('营次面板插入于 dashChallengeBlock 占位之前', appSrc.indexOf('${dashRoundsPanelHtml()}') >= 0 && appSrc.indexOf('${dashRoundsPanelHtml()}') < appSrc.indexOf('<div id="dashChallengeBlock"></div>'))
     // ⚠️ v100 修复：v88 加营次面板时误删了考试开关卡的插入（v76 只断言「函数定义存在」→ 缺陷逃逸两个版本，
     //    管理员看板上根本没有「开放考试」按钮）。此处改为断言「真的被渲染进看板 HTML」。
-    assert('v100→v107：开关面板真的插入看板（dashChGatePanelHtml 被调用，非仅定义）',
-      /<div id="dashChGate">\$\{dashChGatePanelHtml\(\)\}<\/div>/.test(appSrc))
-    assert('v100→v107：开关面板位于营次面板之后、挑战统计之前',
-      appSrc.indexOf('${dashChGatePanelHtml()}') > appSrc.indexOf('${dashRoundsPanelHtml()}') &&
-      appSrc.indexOf('${dashChGatePanelHtml()}') < appSrc.indexOf('<div id="dashChallengeBlock"></div>'))
-    assert('v100→v107：开关成功后就地刷新开关面板', appSrc.includes('function dashRefreshChGate') && appSrc.includes('dashRefreshChGate()'))
+    // v118：开关不再有独立容器，但「真接线」这条纪律必须继续守住 → 改断营次表容器 + 单元格调用。
+    assert('v100→v118：开关真的被渲染进看板（营次表容器 + 单元格调用，非仅定义）',
+      /<div id="dashRoundsPanel">\$\{dashRoundsPanelHtml\(\)\}<\/div>/.test(appSrc) &&
+      /\$\{dashChExamCellHtml\(r\)\}/.test(appSrc))
+    assert('v118：开关位于营次面板内、挑战统计之前',
+      appSrc.indexOf('${dashRoundsPanelHtml()}') < appSrc.indexOf('<div id="dashChallengeBlock"></div>'))
+    assert('v118：开关成功后就地刷新营次表（dashRefreshRoundsPanel 定义 + 被调用）',
+      appSrc.includes('function dashRefreshRoundsPanel') && appSrc.includes('dashRefreshRoundsPanel()'))
     const chSrc = fs.readFileSync(path.join(__dirname, 'challenge.js'), 'utf-8')
     assert('challenge.js 门禁判定与拦截接线', chSrc.includes('function chFinalExamLocked') && chSrc.includes('function chIsFinalExam') && chSrc.includes('chExamLockedAlert'))
     const i18nSrc = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8')
