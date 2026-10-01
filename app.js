@@ -34,6 +34,11 @@ var TTS_WATCH_MS = 3000     // v60：每个在线源等待出声的看门狗时�
 function _isAndroid() {
   try { return /Android/i.test((navigator && navigator.userAgent) || '') } catch (e) { return false }
 }
+// v138：微信内置浏览器（iOS WKWebView / 安卓 XWeb）普遍不暴露 speechSynthesis，
+// 系统语音兜底失效 → 在线源全挂时提示的应是「跳出微信 / 换流量」，而不是笼统的「检查网络」
+function _isWeChat() {
+  try { return /MicroMessenger/i.test((navigator && navigator.userAgent) || '') } catch (e) { return false }
+}
 function _refreshListenVoices() {
   if (!('speechSynthesis' in window) || !window.speechSynthesis.getVoices) return
   try { _listenVoices = window.speechSynthesis.getVoices() || [] } catch (e) { _listenVoices = [] }
@@ -128,7 +133,7 @@ function playListenOnline(text) {
       if (cur) { try { cur.pause(); cur.removeAttribute && cur.removeAttribute('src') } catch (e) {} cur = null }
       if (k >= order.length) {
         dead = true
-        if (!_speakLocal(txt, true)) _ttsToast(t('ttsFail'))
+        if (!_speakLocal(txt, true)) _ttsToast(_isWeChat() ? t('ttsFailWeChat') : t('ttsFail'))
         return
       }
       const myK = k
