@@ -113,17 +113,17 @@ const countOf = (s, k) => s.split(k).length - 1
   assert('表头含 D1–D7 列组标注（v139 合并为单格）', html.includes('（D1–D7）'), '')
   {
     const r = rowOf(html, 'alice')
-    // v139：D 列 = 绿色 1（全部完成）/ 琥珀色 1（部分）/ -1（未完成）
+    // v141：D 列 = 绿 ✓（全部完成）/ 蓝 ✓（部分）/ −（未参与）
     assert('alice：D1 1 D2 1（绿色）其余 5 天 -1', countOf(r, 'color:#059669;font-weight:700">✓</span>') === 2 && countOf(r, '>−</span>') === 5, r.slice(-200))
-    assert('alice 行无琥珀色部分完成', countOf(r, 'color:#d97706') === 0)
+    assert('alice 行无蓝色部分完成', countOf(r, 'color:#2563eb') === 0)
   }
   {
     const r = rowOf(html, 'bob')
-    assert('bob：Day1 双阶段只完成 1 → 琥珀色 1 ×1（其余 6 天 -1）', countOf(r, 'color:#d97706') === 1 && countOf(r, 'color:#059669;font-weight:700">✓</span>') === 0 && countOf(r, '>−</span>') === 6, r.slice(-200))
+    assert('bob：Day1 双阶段只完成 1 → 蓝色 1 ×1（其余 6 天 -1）', countOf(r, 'color:#2563eb') === 1 && countOf(r, 'color:#059669;font-weight:700">✓</span>') === 0 && countOf(r, '>−</span>') === 6, r.slice(-200))
   }
   {
     const r = rowOf(html, 'carol')
-    assert('carol：Day3 单阶段完成 → 绿色 1 ×1', countOf(r, 'color:#059669;font-weight:700">✓</span>') === 1 && countOf(r, 'color:#d97706') === 0)
+    assert('carol：Day3 单阶段完成 → 绿色 1 ×1', countOf(r, 'color:#059669;font-weight:700">✓</span>') === 1 && countOf(r, 'color:#2563eb') === 0)
   }
   {
     const r = rowOf(html, 'eve')
@@ -146,7 +146,7 @@ const countOf = (s, k) => s.split(k).length - 1
   {
     const h2 = renderDash([{ username: 'zoe', name: 'Zoe', dept: '礼宾部', role: 'student', chy: [{ day: 1, si: 0, kind: 'test', correct: 5, total: 20, at: 1, usedSec: 100 }], chQ: {} }])
     const r = rowOf(h2, 'zoe')
-    assert('zoe：仅 Day1 半完成 → 绿色 1 ×0 琥珀色 1 ×1', countOf(r, 'color:#059669;font-weight:700">✓</span>') === 0 && countOf(r, 'color:#d97706') === 1)
+    assert('zoe：仅 Day1 半完成 → 绿色 1 ×0 蓝色 1 ×1', countOf(r, 'color:#059669;font-weight:700">✓</span>') === 0 && countOf(r, 'color:#2563eb') === 1)
   }
   {
     const h3 = renderDash([])
