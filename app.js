@@ -4747,13 +4747,14 @@ function renderDashChallengeBlock(rows) {
   const chgCell = v => (v === '-'
     ? '<span style="color:#9ca3af">-</span>'
     : `<span style="font-weight:700;color:${v > 0 ? '#059669' : v < 0 ? '#dc2626' : '#6b7280'}">${v > 0 ? '+' + v : v}</span>`)
-  // D1–D7 单元格：值与原表一致（只有 1 / -1）；额外用颜色与 tooltip 保留「部分完成」这一档信息
-  //（原表把「做了一半」也记成 1，网页上仍能一眼看出哪几天没做全）
+  // D1–D7 单元格（网页显示，v141 按用户拍板改为 ✓/− 两态）：参与=绿色 ✓；部分完成=琥珀色 ✓+tooltip；
+  // 未参与=灰色 −。**导出 Excel 仍是原表的 1 / −1 两态**（dashChDayMark 负责导出值，别在这里取）——
+  // 别再引入第二套打卡渲染，否则口径会分叉。
   const dayCell = (p, d) => {
     const c = ((p && p.checkin) || [])[d - 1]
-    if (c === 2) return '<span style="color:#059669;font-weight:700">1</span>'
-    if (c === 1) return `<span title="${escAttr(t('dashChDayPartialHint'))}" style="color:#d97706;font-weight:700">1</span>`
-    return '<span style="color:#d1d5db">-1</span>'
+    if (c === 2) return '<span style="color:#059669;font-weight:700">✓</span>'
+    if (c === 1) return `<span title="${escAttr(t('dashChDayPartialHint'))}" style="color:#d97706;font-weight:700">✓</span>`
+    return '<span style="color:#d1d5eb">−</span>'
   }
   const detailGroups = dashChScoreBlocks(list).map(b => {
     const n = b.rows.length

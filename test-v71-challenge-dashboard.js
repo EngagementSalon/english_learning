@@ -168,7 +168,7 @@ function makeSandbox() {
     // v139：进度列（最高天/完成阶段）已并入「三段分组 + D1–D7」形态 → 改断分组横幅与 D 标记
     assert('v139 三段分组横幅渲染', html.includes('完全有效组(Fully Valid)')
       && html.includes('单边缺失组(Partial Missing)') && html.includes('无效/未参与组(Invalid/Non-participant)'))
-    assert('v139 D 标记渲染（1 / -1 两态）', html.includes('>1</span>') && html.includes('>-1</span>'))
+    assert('v141 D 标记渲染（✓ / − 两态）', html.includes('>✓</span>') && html.includes('>−</span>'))
     assert('v139 明细列标题（答题数/正确率/前测/后测/提分）',
       ['答题数', '正确率', '前测', '后测', '提分'].every(h => html.includes('>' + h + '<')))
     assert('Day1 测试分 80 与 40 显示', html.includes('80') && html.includes('40'))

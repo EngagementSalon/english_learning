@@ -151,7 +151,7 @@ function fullChy(cleared) {
     const r = rowOf(html, 'alice')
     assert('未重置学员：Day1/Day7 成绩可见（40 / 90）', r.includes('>40<') && r.includes('>90<'), r.slice(0, 400))
     assert('未重置学员：7 天 D1–D7 全记为 1（当日全部阶段完成）',
-      countOf(r, '>1</span>') === 7 && countOf(r, '>-1</span>') === 0, r.slice(0, 400))
+      countOf(r, '>✓</span>') === 7 && countOf(r, '>−</span>') === 0, r.slice(0, 400))
   }
   {
     const r = rowOf(html, 'bob')
@@ -159,7 +159,7 @@ function fullChy(cleared) {
     assert('已重置学员：不会出现考试分数 40 / 90', !r.includes('>40<') && !r.includes('>90<'))
     // v139：原「9/9 环节」进度列并入三段分组形态 → 改断 D1–D7 全为 1（存根算完成，练习进度不倒退）
     assert('已重置学员：7 天 D1–D7 全为 1（存根算完成，进度不倒退）',
-      countOf(r, '>1</span>') === 7 && countOf(r, '>-1</span>') === 0, r.slice(-240))
+      countOf(r, '>✓</span>') === 7 && countOf(r, '>−</span>') === 0, r.slice(-240))
   }
   {
     // 积分：练习部分（160 对×100 − 700s = 15300）保留；考试部分（Day1 500 + Day7 期末 5000）被扣除
@@ -222,7 +222,7 @@ function fullChy(cleared) {
     assert('重考后 Day7 成绩列恢复（80 分）', r.includes('>80<'), r.slice(0, 400))
     assert('Day1 仍为「—」（未重考）', countOf(r, '>—</span>') === 1, r.slice(0, 400))
     assert('重考的期末成绩按 3 倍权重计入积分（15300+4800−250 = 19850）', html2.includes('>19850<'), '')
-    assert('Day7 打卡仍为 1（重考不重复计数，v139 两态形态）', countOf(r, '>1</span>') === 7, r.slice(-240))
+    assert('Day7 打卡仍为 ✓（重考不重复计数，v141 两态形态）', countOf(r, '>✓</span>') === 7, r.slice(-240))
   }
 
   // ---------- ④ 口径与接线 ----------
