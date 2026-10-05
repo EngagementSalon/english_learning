@@ -3438,7 +3438,7 @@ async function courseFinalGateRevoke(el) {
 // 新建作业 / 测评（题库抽题 或 上传课程文件生成）
 // ================================================================
 function courseCreateAssignModal(cid) {
-  courseDraft = { cid, mode: 'bank', preview: [], file: null, files: [], fileName: '', quiz: [] }
+  courseDraft = { cid, mode: 'bank', preview: [], file: null, files: [], fileName: '', quiz: [], chapter: '' }
   const cats = Store.getCategories()
   courseModalOpen(t('courseNewAssign'), `
     <div class="form-row2">
@@ -3454,6 +3454,10 @@ function courseCreateAssignModal(cid) {
     </div>
     <div class="form-group"><label>${t('courseDescPh')}</label>
       <input type="text" id="caDesc" placeholder="${t('courseDescPh2')}" /></div>
+    <div class="form-group"><label>🏷️ ${t('courseChapterLabel')}</label>
+      <input type="text" id="caChapter" placeholder="${escAttr(t('courseChapterPh'))}" list="caChapterList" />
+      <datalist id="caChapterList">${courseChapterOptionsHtml(cid)}</datalist>
+      <p class="form-hint" style="margin:4px 0 0">${t('courseChapterHint')}</p></div>
     <div class="form-row2">
       <div class="form-group"><label>${t('courseDeadlineLabel')}</label>
         <input type="datetime-local" id="caDeadline" /></div>
@@ -3965,6 +3969,11 @@ async function courseSubmitAssign(status) {
   // v120 线下课最终考试：闸门是定义性特征，恒开，无需勾选
   const gateEl = document.getElementById('caExamGate')
   const examGate = type === 'exam' && !!(gateEl && gateEl.checked)
+  // v145：新建作业/测评时即可直接归入章节（此前只能发布后再到编辑弹窗 / 批量分章补填）。
+  //   与「新增线下课」弹窗（v131 的 #coChapter）同一语义：留空 = 不归章节（不写字段，保持数据干净）。
+  const chEl = document.getElementById('caChapter')
+  const chapter = (chEl && chEl.value ? String(chEl.value) : '').trim()
+  const withChapter = obj => (chapter ? Object.assign({}, obj, { chapter }) : obj)
   if (!title) { alert(t('courseErrTitle')); return }
   // 截止时间校验：仅发布时检查（草稿可先存，发布/发送时再校验）
   if (status !== 'draft' && deadline && deadline < Date.now()) { alert(t('courseErrDeadline')); return }
@@ -3993,7 +4002,7 @@ async function courseSubmitAssign(status) {
       if (!qr.ok) return
       const extra = { videoUrl }
       if (qr.quiz.length) extra.quiz = qr.quiz
-      await commit(CourseStore.newId('a'), extra)
+      await commit(CourseStore.newId('a'), withChapter(extra))
     } else {
       const questions = courseDraft.preview.filter(x => x.checked).map(x => {
         const q = x.q
@@ -4001,7 +4010,7 @@ async function courseSubmitAssign(status) {
       })
       // 草稿允许暂缺题目（稍后编辑补充）；发布时必须有题
       if (status !== 'draft' && !questions.length) { alert(t('courseErrNoQ')); return }
-      await commit(CourseStore.newId('a'), { questions })
+      await commit(CourseStore.newId('a'), withChapter({ questions }))
     }
   } catch (e) { return }
   courseModalClose()
