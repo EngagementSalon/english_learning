@@ -167,6 +167,8 @@ function makeSandbox() {
   {
     const sb = { console, String }
     vm.createContext(sb)
+    // v144：_normSpeakText 先做英文片段提取（_pickEnText）再规范化，必须一并注入
+    vm.runInContext(extractFn(appSrc, '_pickEnText'), sb)
     vm.runInContext(extractFn(appSrc, '_normSpeakText'), sb)
     const f = s => vm.runInContext(`_normSpeakText(${JSON.stringify(s)})`, sb)
     assert("'Starter / Appetizer' → 'Starter, Appetizer'", f('Starter / Appetizer') === 'Starter, Appetizer', f('Starter / Appetizer'))
@@ -177,6 +179,10 @@ function makeSandbox() {
     assert("无斜杠文本原样保留（仅 trim）", f('medium rare') === 'medium rare' && f('  Medium-rare  ') === 'Medium-rare')
     assert("空值安全（null / '' → ''）", f(null) === '' && f('') === '')
     assert("'5oz / 150g.' → '5oz, 150g.'（数字单位分隔同样生效）", f('5oz / 150g.') === '5oz, 150g.')
+    // v144：听音题「中文指令 + 英文 + 中文尾注」题干 → 只朗读英文片段并规范化斜杠
+    assert('听音题干 → 仅英文片段（v144 提取在规范化之前）',
+      f('听音：Starter / Appetizer 选出正确中文。') === 'Starter, Appetizer', f('听音：Starter / Appetizer 选出正确中文。'))
+    assert('纯中文题干回退原文（不判空）', f('以下哪个是旅途') === '以下哪个是旅途')
   }
 
   // ---------- ③ 音频包 key 与规范化一致 ----------
@@ -193,7 +199,7 @@ function makeSandbox() {
     assert("首源音频 src = tts/<规范化 key>.mp3", p.playCalls === 1 && p.lastAudio.src === 'tts/' + expectKey + '.mp3', 'src=' + p.lastAudio.src + ' expect=tts/' + expectKey + '.mp3')
     assert("规范化确实改变 key（带 / 旧包自然失效，CI 自动补新）", rawKey !== expectKey)
     assert("三入口统一走 _normSpeakText（speakEnglish/speakLocalForce/playListenOnline）",
-      (appSrc.match(/_normSpeakText\(/g) || []).length === 4 && appSrc.includes('const txt = _normSpeakText(text).slice(0, 260)') && appSrc.includes('text = _normSpeakText(text)') && appSrc.includes('!_speakLocal(_normSpeakText(text), true)'),
+      (appSrc.match(/_normSpeakText\(/g) || []).length === 4 && appSrc.includes('const txt = _normSpeakText(text).slice(0, 260)') && appSrc.includes('text = _normSpeakText(text)') && appSrc.includes('const txt = _normSpeakText(text)'),
       'count=' + (appSrc.match(/_normSpeakText\(/g) || []).length)
     assert("空文本规范化后不再发起播放（防脏 key）", vm.runInContext(`(function(){ playListenOnline('  /  '); return true })()`, sb) === true)
   }

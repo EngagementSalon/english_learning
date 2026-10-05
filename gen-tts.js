@@ -104,7 +104,20 @@ async function dl(text, OUT) {
 // 3. 主流程：种子库 + CSV 附加 + 云端课库 → 全量去重 → 增量下载
 // v74：与网页端 _normSpeakText（app.js）一致 —— 斜杠读作停顿（'Starter / Appetizer' → 'Starter, Appetizer'），
 // 音频包文件名 key 基于规范化后的文本（网页端朗读前先规范化再算 key，两端严格一致）
-const normSpeak = s => String(s == null ? '' : s).replace(/\s*\/\s*/g, ', ').trim()
+// v144：同步网页端新增的英文片段提取（_pickEnText）——「听音：<英文> 选出正确中文。」这类题干
+//       只应朗读英文片段，key 必须与网页端一致，否则音频包永远命中不了。**改动此函数必须两端同步**
+function pickEnText(s) {
+  const raw = String(s == null ? '' : s)
+  const t = raw.replace(/^\s*听音\s*[：:]\s*/, '')
+  if (!/[\u4e00-\u9fa5]/.test(t)) return t.trim()
+  const frags = t.split(/[\u4e00-\u9fa5\u3001\u3002\uff0c\uff01\uff1f\uff1a\uff1b\u201c\u201d\u2018\u2019\uff08\uff09\u3010\u3011\u300a\u300b]+/g)
+    .map(x => x.replace(/^[\s,.:;!?\-–—"']+|[\s,.:;!?\-–—"']+$/g, '').trim())
+    .filter(x => /[A-Za-z]/.test(x))
+  if (!frags.length) return raw.trim()
+  frags.sort((a, b) => b.length - a.length)
+  return frags[0]
+}
+const normSpeak = s => pickEnText(s).replace(/\s*\/\s*/g, ', ').trim()
 ;(async () => {
   await pullCloudCourseTexts(uniq)
   const finalTexts = [...new Set([...uniq, ...texts].map(t => normSpeak(t)).filter(Boolean))]

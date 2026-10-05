@@ -108,11 +108,29 @@ function _speakLocal(text, force) {
     return true
   } catch (e) { return false }
 }
+// v144：听音题朗读文本提取 —— 题库里存在「听音：<英文原文> 选出正确中文。」这类题干
+// （中文指令与要朗读的英文挤在同一个 question 字段，云端课库新导入的听音题多为该格式）。
+// 旧逻辑把整句送去朗读 → 英文引擎硬读中文（杂音/整体失败），且同源音频包 key 基于整句
+// → 永远命中不了（学员网络不通时彻底无声，红米等无系统语音机型直接「做不了语音题」）。
+// 规则：含中文字符时切出最长的英文片段（剔除「听音：」标记与「选出正确中文/英文」尾注）；
+// 切不出英文（纯中文题干，如 voicematch 的中文提问）则**回退原文**——保持旧行为，避免点了没反应。
+function _pickEnText(s) {
+  const raw = String(s == null ? '' : s)
+  const t = raw.replace(/^\s*听音\s*[：:]\s*/, '')
+  if (!/[\u4e00-\u9fa5]/.test(t)) return t.trim()
+  const frags = t.split(/[\u4e00-\u9fa5\u3001\u3002\uff0c\uff01\uff1f\uff1a\uff1b\u201c\u201d\u2018\u2019\uff08\uff09\u3010\u3011\u300a\u300b]+/g)
+    .map(x => x.replace(/^[\s,.:;!?\-–—"']+|[\s,.:;!?\-–—"']+$/g, '').trim())
+    .filter(x => /[A-Za-z]/.test(x))
+  if (!frags.length) return raw.trim()
+  frags.sort((a, b) => b.length - a.length)
+  return frags[0]
+}
 // v74：朗读文本规范化 —— 斜杠读作停顿（'Starter / Appetizer' → 'Starter, Appetizer'），
 // 避免引擎把 '/' 读成 "slash" 或生硬连读；本地合成 / 在线源 / 音频包 key 共用同一规范
 // （gen-tts.js 生成音频包时做同样规范化，key 严格一致；带 / 的旧包文件自然失效，由 CI 自动补新）
+// v144：先做英文片段提取（_pickEnText），再规范化斜杠 —— gen-tts.js 同步该口径
 function _normSpeakText(s) {
-  return String(s == null ? '' : s).replace(/\s*\/\s*/g, ', ').trim()
+  return _pickEnText(s).replace(/\s*\/\s*/g, ', ').trim()
 }
 // 在线发音（v61 增强版）：多源自动降级——播放报错立即切下一源；看门狗每 TTS_WATCH_MS 检查一次，
 // 有加载进度（loadstart/progress/canplay 等）就续等一轮（弱网慢加载不误杀），完全无进度才切换；
@@ -217,9 +235,20 @@ function speakEnglish(text) {
   } catch (e) { playListenOnline(text) }
 }
 // v62：强制系统语音（listen 题的 🔉 按钮，在线被网络拦截时的自救通道）
+// v144：本机根本没有语音引擎时（红米等 WebView，'speechSynthesis' 都不存在）**自动改用在线发音**
+// —— 旧行为只弹一句「本设备没有可用的语音引擎」，学员既听不懂也没法自救；能出声才是硬道理，
+// 同时照样弹提示说明已切换（避免学员以为按错了）。
 function speakLocalForce(text) {
   if (!text) return
-  if (!_speakLocal(_normSpeakText(text), true)) _ttsToast(t('ttsNone'))
+  const txt = _normSpeakText(text)
+  if (!txt) return
+  if (_speakLocal(txt, true)) return
+  if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
+    _ttsToast(t('ttsNoEngineOnline'))
+    playListenOnline(text)
+    return
+  }
+  _ttsToast(t('ttsNone'))
 }
 // v74：发音按钮 SVG 图标（替代 emoji——部分安卓机型 emoji 字体把图标渲染得过大/拉伸变形；
 // SVG 固定 viewBox + currentColor 填充，随按钮 font-size 等比缩放且永不变形；样式见 style.css .ic-svg）
