@@ -35,6 +35,9 @@ function renderDash(rows) {
   vm.runInContext(extractFn(appSrc, 'escHtml'), sb)
   vm.runInContext(extractFn(appSrc, 'escAttr'), sb)   // v85：重置按钮 data-u/data-n 转义
   vm.runInContext(extractFn(appSrc, 'dashChStageWeight'), sb)
+  // v139：明细表改为「三段分组」→ renderDashChallengeBlock 依赖 v139 整块（顶层 const）
+  vm.runInContext(appSrc.slice(appSrc.indexOf('// ====== v139：三段分组口径'),
+    appSrc.indexOf('function dashChExportSheets(list) {')), sb)
   vm.runInContext(extractFn(appSrc, 'renderDashChallengeBlock'), sb)
   // v88：营次筛选依赖（dashRoundView/dashRoundCurId/dashRoundList）——从 app.js 提取真实实现，
   // 沙箱无云端营次 → dashRoundList 返回空数组、dashRoundCurId 兜底 'r1'，等价单期（第一期）口径
@@ -107,32 +110,33 @@ const countOf = (s, k) => s.split(k).length - 1
   const html = renderDash(rows)
 
   assert('表头含「每日打卡」列组（colspan 7）', html.includes('每日打卡') && html.includes('colspan="7"'), '')
-  assert('表头含 D1–D7 小列', [1, 2, 3, 4, 5, 6, 7].every(d => html.includes('>D' + d + '<')))
+  assert('表头含 D1–D7 列组标注（v139 合并为单格）', html.includes('（D1–D7）'), '')
   {
     const r = rowOf(html, 'alice')
-    assert('alice：D1 ✅ D2 ✅ 其余 5 天 —（✅×2）', countOf(r, '✅') === 2, r.slice(-200))
-    assert('alice 行无 ◐', countOf(r, '◐') === 0)
+    // v139：D 列 = 绿色 1（全部完成）/ 琥珀色 1（部分）/ -1（未完成）
+    assert('alice：D1 1 D2 1（绿色）其余 5 天 -1', countOf(r, 'color:#059669;font-weight:700">1</span>') === 2 && countOf(r, '>-1</span>') === 5, r.slice(-200))
+    assert('alice 行无琥珀色部分完成', countOf(r, 'color:#d97706') === 0)
   }
   {
     const r = rowOf(html, 'bob')
-    assert('bob：Day1 双阶段只完成 1 → ◐ ×1', countOf(r, '◐') === 1 && countOf(r, '✅') === 0, r.slice(-200))
+    assert('bob：Day1 双阶段只完成 1 → 琥珀色 1 ×1（其余 6 天 -1）', countOf(r, 'color:#d97706') === 1 && countOf(r, 'color:#059669;font-weight:700">1</span>') === 0 && countOf(r, '>-1</span>') === 6, r.slice(-200))
   }
   {
     const r = rowOf(html, 'carol')
-    assert('carol：Day3 单阶段 ✅ ×1', countOf(r, '✅') === 1 && countOf(r, '◐') === 0)
+    assert('carol：Day3 单阶段完成 → 绿色 1 ×1', countOf(r, 'color:#059669;font-weight:700">1</span>') === 1 && countOf(r, 'color:#d97706') === 0)
   }
   {
     const r = rowOf(html, 'eve')
-    assert('eve：Day7 双阶段 ✅ ×1（其余 6 天 —）', countOf(r, '✅') === 1 && countOf(r, '◐') === 0)
+    assert('eve：Day7 双阶段完成 → 绿色 1 ×1（其余 6 天 -1）', countOf(r, 'color:#059669;font-weight:700">1</span>') === 1 && countOf(r, '>-1</span>') === 6)
   }
   {
     const r = rowOf(html, 'boss')
-    assert('boss（管理员）：明细表打卡列仍渲染 ✅ ×1', countOf(r, '✅') === 1)
+    assert('boss（管理员）：明细表 D 列仍渲染 绿色 1 ×1', countOf(r, 'color:#059669;font-weight:700">1</span>') === 1)
   }
 
   // ---------- ② 打卡汇总 ----------
   console.log('\n[2] 图例与各天打卡人数')
-  assert('图例含 ✅/◐/— 说明', html.includes('✅ 当天全部完成') && html.includes('◐ 部分完成') && html.includes('— 未完成'))
+  assert('图例改为 D 标记两态说明（v139）', html.includes('1 = 当日全部阶段完成') && html.includes('−1 = 未完成全部阶段'), html.slice(html.indexOf('D1–D7：'), html.indexOf('D1–D7：') + 120))
   // 各天全勤人数：D1 alice+boss=2；D2 alice=1；D3 carol=1；D7 eve=1；D4-6=0
   const statsOk = ['D1 2', 'D2 1', 'D3 1', 'D4 0', 'D5 0', 'D6 0', 'D7 1'].every(s => html.includes(s))
   assert('各天打卡人数 D1 2 · D2 1 · D3 1 · D4 0 · D5 0 · D6 0 · D7 1（含管理员）', statsOk, ['D1 2','D2 1','D3 1','D4 0','D5 0','D6 0','D7 1'].filter(s => !html.includes(s)).join(','))
@@ -142,7 +146,7 @@ const countOf = (s, k) => s.split(k).length - 1
   {
     const h2 = renderDash([{ username: 'zoe', name: 'Zoe', dept: '礼宾部', role: 'student', chy: [{ day: 1, si: 0, kind: 'test', correct: 5, total: 20, at: 1, usedSec: 100 }], chQ: {} }])
     const r = rowOf(h2, 'zoe')
-    assert('zoe：仅 Day1 半完成 → ✅×0 ◐×1', countOf(r, '✅') === 0 && countOf(r, '◐') === 1)
+    assert('zoe：仅 Day1 半完成 → 绿色 1 ×0 琥珀色 1 ×1', countOf(r, 'color:#059669;font-weight:700">1</span>') === 0 && countOf(r, 'color:#d97706') === 1)
   }
   {
     const h3 = renderDash([])

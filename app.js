@@ -2953,14 +2953,30 @@ function impTemplateCsv(lang) {
 // 通用 xlsx 组装（复用 course-app 的全局 OOXML 写入器；不存在时返回 null）
 function impXlsxFromSheets(sheets) {
   if (typeof xlsxBuildZip !== 'function' || typeof xlsxSheetXml !== 'function') return null
+  const list = Array.isArray(sheets) ? sheets.filter(Boolean) : []
+  if (!list.length) return null
+  // v139：只要任一 sheet 声明了 merges/cols，或单元格写成对象 → 启用富版式（附带 styles.xml）。
+  // 否则完全走老路径 —— 产物与升级前逐字节相同（别让线下课导出等旧功能受影响）。
+  const rich = (typeof xlsxSheetXmlRich === 'function' && typeof xlsxStyleBook === 'function')
+    && list.some(s => s.merges || s.cols
+      || (Array.isArray(s.rows) && s.rows.some(r => (r || []).some(c => c && typeof c === 'object'))))
+  const bk = rich ? xlsxStyleBook() : null
+  const styleOverride = bk ? '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' : ''
+  const styleRel = bk ? '<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' : ''
   const files = [
-    { name: '[Content_Types].xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${sheets.map((s, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>` },
+    { name: '[Content_Types].xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${list.map((s, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}${styleOverride}</Types>` },
     { name: '_rels/.rels', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>` },
-    { name: 'xl/workbook.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((s, i) => `<sheet name="${xlsxXmlEscape(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets></workbook>` },
-    { name: 'xl/_rels/workbook.xml.rels', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((s, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}</Relationships>` }
+    { name: 'xl/workbook.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${list.map((s, i) => `<sheet name="${xlsxXmlEscape(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets></workbook>` },
+    { name: 'xl/_rels/workbook.xml.rels', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${list.map((s, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}${styleRel}</Relationships>` }
   ]
-  sheets.forEach((s, i) => files.push({ name: 'xl/worksheets/sheet' + (i + 1) + '.xml', data: xlsxSheetXml(s.rows) }))
-  return xlsxBuildZip(files)
+  // ⚠️ 次序要紧：必须先渲染 sheet（样式注册表在这期间被填充），styles.xml 才能最后生成
+  const sheetFiles = list.map((s, i) => ({
+    name: 'xl/worksheets/sheet' + (i + 1) + '.xml',
+    data: bk ? xlsxSheetXmlRich(s, bk) : xlsxSheetXml(s.rows)
+  }))
+  const out = files.concat(sheetFiles)
+  if (bk) out.push({ name: 'xl/styles.xml', data: bk.xml() })
+  return xlsxBuildZip(out)
 }
 function impDownloadBlob(bytes, fname, mime) {
   const blob = bytes instanceof Uint8Array ? new Blob([bytes], { type: mime }) : new Blob([bytes], { type: mime })
@@ -4365,34 +4381,159 @@ async function dashToggleChExam(btn) {
 // ====== 管理员看板：七天挑战统计（v71） ======
 // 数据来源：chy 事件（阶段完成：参与名单 / 进度 / 每阶段分数 / Day1-Day7 测试分）
 //          + perq 的 ch 标记（chQ[qid] = { correct:0, total:错次 }，错题排行）
+// ====== v139：三段分组口径（看板与导出共用，保证「所见即所得」）======
+// 参照线下报表《七天挑战成绩》把学员按「前测/后测齐全度」分三段：
+//   完全有效组(Fully Valid)      前测 + 后测都有成绩
+//   单边缺失组(Partial Missing)  只有其中之一
+//   无效/未参与组(Invalid/Non-participant)  两个都没有，或答题数低于门槛
+// ⚠️ DASH_CH_MIN_Q 是「事实性」配置，不是随便取的：原表里答 20 题的 Iris Zhang 被归入
+//    无效组，而答 30 题的 Star Zhang 留在单边缺失组 → 门槛落在 (20, 30]，取 30
+//    （30 = 完整做完 Day1 一天的量：摸底测试 20 题 + 练习 10 题）。要调只改这一个数。
+const DASH_CH_MIN_Q = 30
+const DASH_CH_GROUPS = ['full', 'partial', 'invalid']
+// D1–D7：1 = 当日全部阶段完成，-1 = 未完成全部阶段。
+// ⚠️ 原表只有 1 / -1 两态（不是看板的三态 ✅/◐/—）：证据是原表 Star Zhang 答 30 题
+//    = Day1 的「测试 20 + 练习 10」，且 D1=1、D2–D7 全为 -1 —— 说明「整日全部完成」才算 1。
+function dashChDayMark(p, d) {
+  const ck = (p && p.checkin) || []
+  return ck[d - 1] === 2 ? 1 : -1
+}
+function dashChGroupKey(p) {
+  // ⚠️ 判据次序要紧：门槛先判，再判成绩齐全度。
+  //    「答题数够、但两场测试分都没有」是真实存在的形态——管理员用「重置考试成绩」
+  //    （v84 的 exam 模式只删两场水平测试的阶段记录）之后就是这样：练习进度 q 还在，
+  //    分数没了。这种人绝不能归进「无效/未参与组」（他就是参与了，只是成绩被清了），
+  //    所以「两侧都缺」与「缺一侧」同归「单边缺失组」= 成绩不成对。
+  const q = Number((p && p.q) || 0)
+  if (q < DASH_CH_MIN_Q) return 'invalid'
+  const has1 = !!(p && p.s1 != null), has7 = !!(p && p.s7 != null)
+  return (has1 && has7) ? 'full' : 'partial'
+}
+function dashChGroupLabel(key) {
+  return key === 'full' ? t('dashChGrpFull') : key === 'partial' ? t('dashChGrpPartial') : t('dashChGrpInvalid')
+}
+// 提分 = 后测 − 前测；任一侧缺考 → '-'（半角连字符，与原表一致，不是 0）
+function dashChScoreChange(p) {
+  const a = (p && p.s1), b = (p && p.s7)
+  if (a == null || b == null) return '-'
+  return b - a
+}
+// 三段分组：保留原数组顺序，组内按答题数降序（与原表一致）
+function dashChScoreBlocks(list) {
+  const rows0 = Array.isArray(list) ? list.filter(Boolean) : []
+  return DASH_CH_GROUPS.map(k => ({
+    key: k,
+    label: dashChGroupLabel(k),
+    rows: rows0.filter(p => dashChGroupKey(p) === k).slice().sort((a, b) => (Number(b.q) || 0) - (Number(a.q) || 0))
+  }))
+}
+// 明细表列宽（px → 写入器换算成字符宽）；顺序与 dashChExportHeader 一一对应
+const DASH_CH_COL_PX = [179, 151, 120, 147, 147, 100, 100, 111, 60, 60, 60, 60, 60, 60, 60]
+// 明细表列标题。⚠️ 英文值刻意与原表逐字一致（Department / Questions Answered / Accuracy Rate /
+//    Pre-test / Final Test / Score Change）——先把站点切到 EN 再导出，得到的表头就和原文件一模一样。
+function dashChExportHeader() {
+  return [t('dashChColDept'), t('dashChColName'), t('dashChColUser'), t('dashChColQ'), t('dashChColAcc'),
+    t('dashChColPre'), t('dashChColFinal'), t('dashChColChange')]
+    .concat([1, 2, 3, 4, 5, 6, 7].map(d => 'D' + d))
+}
+
 // v116：七天挑战成绩导出（Excel，双 sheet：成绩明细 + 积分榜）。
 // 数据口径与看板完全一致：直接吃 renderDashChallengeBlock 算好的 _chDashRows
 //（已是当前部门 + 营次筛选结果）——「所见即所得」，看板上是什么就导出什么。
+// v139：成绩明细按参考文件改成「三段纵向堆叠」——分组横幅（整行合并）+ 列标题 + 数据行
+//        + Average 汇总行，并还原版式：部门列纵向合并、表头灰底 #747373、外框加粗内框细、
+//        数字格式（前测/后测一位小数、提分两位小数、正确率百分比）、提分写成公式。
 function dashChExportSheets(list) {
   const rows0 = Array.isArray(list) ? list : []
-  const chk = c => (c === 2 ? t('dashChChkFull') : c === 1 ? t('dashChChkHalf') : '—')
-  const sc = (s, manual) => (s == null ? '—' : String(s) + (manual ? '(' + t('dashChManualBadge') + ')' : ''))
+  const cols = DASH_CH_COL_PX.slice()
+  const nCol = cols.length
+  const lastCol = xlsxColRef(nCol - 1)
+  const rows = [], merges = []
+  const HDR = dashChExportHeader()
+  // 单元格样式工厂：边线按「外框 medium / 内框 thin」算，与原文件一致
+  const edge = (c, i, n) => ({
+    align: 'center',
+    bl: c === 0 ? 'medium' : 'thin',
+    br: c === nCol - 1 ? 'medium' : 'thin',
+    bt: 'thin',
+    bb: i === n - 1 ? 'medium' : 'thin',
+  })
+  const head = v => ({ v, s: { fill: '747373', align: 'center', valign: 'center', bl: 'thin', br: 'thin', bt: 'medium', bb: 'thin' } })
+  const num = (v, s, fmt, color) => {
+    const st = Object.assign({}, s)
+    if (fmt) st.fmt = fmt
+    if (color) st.color = color
+    return { v, s: st }
+  }
+  dashChScoreBlocks(rows0).forEach(b => {
+    const n = b.rows.length
+    // ---- 分组横幅（整行合并；左右两端补上空单元格，合并区的边框才有来源）----
+    const bannerAt = rows.length + 1
+    const banner = new Array(nCol).fill(null)
+    banner[0] = { v: b.label, s: { align: 'left', valign: 'center', bl: 'medium', bt: 'thin', bb: 'thin' } }
+    banner.forEach((_, ci) => { if (ci && ci < nCol - 1) banner[ci] = { v: null, s: { bt: 'thin', bb: 'thin' } } })
+    banner[nCol - 1] = { v: null, s: { br: 'medium', bt: 'thin', bb: 'thin' } }
+    rows.push(banner)
+    merges.push('A' + bannerAt + ':' + lastCol + bannerAt)
+    // ---- 列标题 ----
+    rows.push(HDR.map(h => head(h)))
+    // ---- 数据行（部门列纵向合并：连续同部门合成一段）----
+    const start = rows.length + 1
+    const runs = []
+    b.rows.forEach((p, i) => {
+      const d = String(p.dept || '')
+      const tail = runs[runs.length - 1]
+      if (tail && tail.dept === d) tail.to = i
+      else runs.push({ dept: d, from: i, to: i })
+    })
+    b.rows.forEach((p, i) => {
+      const E = c => edge(c, i, n)
+      const row = new Array(nCol).fill(null)
+      const run = runs.filter(r => r.from === i)[0]
+      // 合并段内除首行外留空；但空单元格仍要带样式，否则合并区的边线会缺一截
+      row[0] = num(run ? (p.dept || '') : null, E(0))
+      row[1] = num(p.name || '', E(1))
+      row[2] = num(p.username || '', E(2))
+      row[3] = num(Number(p.q) || 0, E(3), '0')
+      const hasQ = (Number(p.q) || 0) > 0
+      row[4] = hasQ ? num((Number(p.acc) || 0) / 100, E(4), '0%') : num('-', E(4))
+      row[5] = p.s1 == null ? num('-', E(5)) : num(p.s1, E(5), '0.0', p.m1 ? 'FF0000' : null)
+      row[6] = p.s7 == null ? num('-', E(6)) : num(p.s7, E(6), '0.0', p.m7 ? 'FF0000' : null)
+      const chg = dashChScoreChange(p)
+      const rn = start + i
+      row[7] = (chg === '-')
+        ? num('-', E(7))
+        : { v: chg, f: xlsxColRef(6) + rn + '-' + xlsxColRef(5) + rn, s: Object.assign({}, E(7), { fmt: '0.0' }) }
+      for (let d = 1; d <= 7; d++) row[7 + d] = num(dashChDayMark(p, d), E(7 + d))
+      rows.push(row)
+    })
+    runs.forEach(rr => { if (rr.to > rr.from) merges.push('A' + (start + rr.from) + ':A' + (start + rr.to)) })
+    // ---- Average 汇总行（原表只在「完全有效组」末尾有；有数据时才出；原表拼写 Avearge 已按用户拍板改正）----
+    if (b.key === 'full' && n > 0) {
+      const at = rows.length + 1
+      const arow = new Array(nCol).fill(null)
+      arow[0] = { v: t('dashChAvgLabel'), s: { align: 'center', valign: 'center', bl: 'medium', bt: 'thin', bb: 'medium' } }
+      for (let ci = 1; ci < nCol; ci++) {
+        arow[ci] = { v: null, s: { bl: 'thin', br: ci === nCol - 1 ? 'medium' : 'thin', bt: 'thin', bb: 'medium' } }
+      }
+      ;[5, 6, 7].forEach(ci => {
+        const L = xlsxColRef(ci)
+        const vals = b.rows.map(p => (ci === 5 ? p.s1 : ci === 6 ? p.s7 : dashChScoreChange(p)))
+          .filter(v => typeof v === 'number')
+        if (!vals.length) return
+        const avg = Math.round(vals.reduce((s, v) => s + v, 0) / vals.length * 100) / 100
+        arow[ci] = {
+          v: avg, f: 'AVERAGE(' + L + start + ':' + L + (start + n - 1) + ')',
+          s: { align: 'center', fmt: '0.00', bl: 'thin', br: 'thin', bt: 'thin', bb: 'medium' },
+        }
+      })
+      rows.push(arow)
+      merges.push('A' + at + ':C' + at)
+    }
+  })
   // 积分榜口径与看板一致：管理员不参加排名；同分用时短者在前，再比答对数（v73/v78）
   const lb = rows0.filter(p => p.role !== 'admin').slice()
     .sort((a, b) => (b.lbScore - a.lbScore) || (a.lbT - b.lbT) || (b.lbC - a.lbC))
-  const detailRows = [[
-    t('thUsername'), t('thName'), t('thDept'), t('dashChThMaxDay'), t('dashChThStages'),
-    t('dashChThAns'), t('dashChThAcc'), t('dashChThDay1'), t('dashChThDay7'),
-    t('dashChThScore'), t('dashChThCorrect'), t('dashChThUseSec'),
-    'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7'
-  ]]
-  rows0.forEach(p => {
-    const ck = p.checkin || []
-    const chkRow = []
-    for (let d = 1; d <= 7; d++) chkRow.push(chk(ck[d - 1]))
-    detailRows.push([
-      p.username || '', p.name || '', p.dept || '',
-      p.maxDay || 0, p.stagesDone || 0,
-      p.q || 0, (p.acc || 0) + '%',
-      sc(p.s1, p.m1), sc(p.s7, p.m7),
-      p.lbScore || 0, p.lbC || 0, p.lbT || 0
-    ].concat(chkRow))
-  })
   const rankRows = [[
     t('dashChThRank'), t('thUsername'), t('thName'), t('thDept'),
     t('dashChThScore'), t('dashChThCorrect'), t('dashChThUseSec')
@@ -4402,7 +4543,7 @@ function dashChExportSheets(list) {
       p.lbScore || 0, p.lbC || 0, p.lbT || 0])
   })
   return [
-    { name: t('dashChSheetDetail'), rows: detailRows },
+    { name: t('dashChSheetDetail'), rows: rows, merges: merges, cols: cols },
     { name: t('dashChSheetRank'), rows: rankRows }
   ]
 }
@@ -4567,9 +4708,8 @@ function renderDashChallengeBlock(rows) {
   // v82 每日打卡汇总：每天完成（全部阶段）的人数
   const checkinStats = [0, 0, 0, 0, 0, 0, 0]
   list.forEach(p => (p.checkin || []).forEach((c, i) => { if (c === 2) checkinStats[i]++ }))
-  const checkinCell = c => c === 2
-    ? '<span style="color:#059669;font-weight:700">✅</span>'
-    : c === 1 ? '<span style="color:#d97706;font-weight:700">◐</span>' : '<span style="color:#d1d5db">—</span>'
+  // v139：原三态打卡单元格（✅/◐/—）随「三段分组 + D1–D7 用 1/-1」的改造下线，
+  // 由下面的 dayCell 取代 —— 别再引入第二套打卡渲染，否则口径会分叉。
   // v73 积分榜排序：积分（答对×权重×100−用时秒）高者在前；同分用时短者在前，再比答对数
   // v78：管理员账号不参加排名（进度明细表与汇总仍含管理员，便于自查）
   const lbList = list.filter(p => p.role !== 'admin').slice().sort((a, b) => (b.lbScore - a.lbScore) || (a.lbT - b.lbT) || (b.lbC - a.lbC))
@@ -4603,6 +4743,88 @@ function renderDashChallengeBlock(rows) {
     : `<span style="font-weight:700;color:${s >= 80 ? '#059669' : s >= 60 ? '#d97706' : '#dc2626'}">${s}</span>`)
     // v105：手动补录的成绩加标记，避免事后与真实考试成绩混淆
     + (manual && s != null ? `<span title="${escAttr(t('dashChManualBadgeHint'))}" style="margin-left:4px;font-size:10px;color:#92400e;background:#fef3c7;border-radius:6px;padding:1px 5px;vertical-align:middle">${t('dashChManualBadge')}</span>` : '')
+  // v139：明细表 = 三段分组（部门列 rowspan 合并、D1–D7 用 1/-1）——与导出的 Excel 同形态
+  const chgCell = v => (v === '-'
+    ? '<span style="color:#9ca3af">-</span>'
+    : `<span style="font-weight:700;color:${v > 0 ? '#059669' : v < 0 ? '#dc2626' : '#6b7280'}">${v > 0 ? '+' + v : v}</span>`)
+  // D1–D7 单元格：值与原表一致（只有 1 / -1）；额外用颜色与 tooltip 保留「部分完成」这一档信息
+  //（原表把「做了一半」也记成 1，网页上仍能一眼看出哪几天没做全）
+  const dayCell = (p, d) => {
+    const c = ((p && p.checkin) || [])[d - 1]
+    if (c === 2) return '<span style="color:#059669;font-weight:700">1</span>'
+    if (c === 1) return `<span title="${escAttr(t('dashChDayPartialHint'))}" style="color:#d97706;font-weight:700">1</span>`
+    return '<span style="color:#d1d5db">-1</span>'
+  }
+  const detailGroups = dashChScoreBlocks(list).map(b => {
+    const n = b.rows.length
+    // 部门列纵向合并：连续同部门合成一段（与 Excel 的 rowspan/mergeCell 同口径）
+    const runs = []
+    b.rows.forEach((p, i) => {
+      const d = String(p.dept || '')
+      const tail = runs[runs.length - 1]
+      if (tail && tail.dept === d) tail.to = i
+      else runs.push({ dept: d, from: i, to: i })
+    })
+    const body = b.rows.map((p, i) => {
+      const pi = list.indexOf(p)   // 供操作按钮定位（沿用原 pi 语义）
+      const run = runs.filter(r => r.from === i)[0]
+      const accCell = (Number(p.q) || 0) > 0
+        ? `<span class="perq-rate ${p.acc >= 80 ? 'perq-good' : p.acc >= 60 ? 'perq-ok' : 'perq-bad'}">${p.acc}%</span>`
+        : '<span style="color:#9ca3af">-</span>'
+      return `<tr>
+        ${run ? `<td rowspan="${run.to - run.from + 1}" style="vertical-align:middle;text-align:center;color:#6b7280;font-size:12px">${escHtml(p.dept || '—')}</td>` : ''}
+        <td style="white-space:nowrap">${escHtml(p.name || '—')}</td>
+        <td style="white-space:nowrap;color:#6b7280;font-size:12px">${escHtml(p.username || '—')}</td>
+        <td style="text-align:center">${Number(p.q) || 0}</td>
+        <td style="text-align:center">${accCell}</td>
+        <td style="text-align:center;border-left:2px solid #e5e7eb">${scoreCell(p.s1, p.m1)}</td>
+        <td style="text-align:center">${scoreCell(p.s7, p.m7)}</td>
+        <td style="text-align:center">${chgCell(dashChScoreChange(p))}</td>
+        ${[1, 2, 3, 4, 5, 6, 7].map(d => `<td style="text-align:center;border-left:${d === 1 ? '2px solid #e5e7eb' : 'none'}">${dayCell(p, d)}</td>`).join('')}
+        <td style="text-align:center;border-left:2px solid #e5e7eb;white-space:nowrap">
+          <button class="btn btn-ghost" id="dashChResetBtn_${pi}" style="padding:4px 10px;font-size:12px;white-space:nowrap"
+            data-u="${escAttr(p.username)}" data-n="${escAttr(p.name || '')}"
+            onclick="dashResetChUser(this, ${pi})">${t('dashChResetBtn')}</button>
+          <button class="btn btn-ghost" id="dashChManualBtn_${pi}" style="padding:4px 10px;font-size:12px;white-space:nowrap;margin-left:4px"
+            data-u="${escAttr(p.username)}" data-n="${escAttr(p.name || '')}"
+            onclick="dashManualScoreFromBtn(this)">${t('dashChManualBtn')}</button>
+        </td>
+      </tr>`
+    }).join('')
+    // Average 汇总行：原表只在「完全有效组」末尾出现（缺考组求平均没有意义；原表拼写 Avearge 已改正）
+    let avgRow = ''
+    if (b.key === 'full' && n > 0) {
+      const avgOf = ci => {
+        const vals = b.rows.map(p => (ci === 5 ? p.s1 : ci === 6 ? p.s7 : dashChScoreChange(p)))
+          .filter(v => typeof v === 'number')
+        return vals.length ? Math.round(vals.reduce((s, v) => s + v, 0) / vals.length * 100) / 100 : null
+      }
+      const fmtAvg = v => (v == null ? '-' : v)
+      avgRow = `<tr style="background:#f9fafb;font-weight:700">
+        <td colspan="3" style="text-align:center;color:#6b7280">${escHtml(t('dashChAvgLabel'))}</td>
+        <td colspan="2"></td>
+        <td style="text-align:center">${fmtAvg(avgOf(5))}</td>
+        <td style="text-align:center">${fmtAvg(avgOf(6))}</td>
+        <td style="text-align:center">${fmtAvg(avgOf(7))}</td>
+        <td colspan="8"></td>
+      </tr>`
+    }
+    return `<tbody>
+      <tr><td colspan="16" style="background:#eef2f7;font-weight:700;text-align:left;padding:6px 10px">${escHtml(b.label)} · ${t('dashChJoinCount', n)}</td></tr>
+      <tr>
+        <th style="text-align:center">${t('dashChColDept')}</th><th>${t('dashChColName')}</th><th>${t('dashChColUser')}</th>
+        <th style="text-align:center">${t('dashChColQ')}</th>
+        <th style="text-align:center">${t('dashChColAcc')}</th>
+        <th style="text-align:center;border-left:2px solid #e5e7eb">${t('dashChColPre')}</th>
+        <th style="text-align:center">${t('dashChColFinal')}</th>
+        <th style="text-align:center">${t('dashChColChange')}</th>
+        <th colspan="7" style="text-align:center;border-left:2px solid #e5e7eb">📅 ${t('dashChThCheckin')}（D1–D7）</th>
+        <th style="text-align:center;border-left:2px solid #e5e7eb">${t('dashChThOps')}</th>
+      </tr>
+      ${body || `<tr><td colspan="16" style="text-align:center;color:#9ca3af;padding:14px">${t('dashChGrpEmpty')}</td></tr>`}
+      ${avgRow}
+    </tbody>`
+  }).join('')
   el.innerHTML = `
     <div class="card" style="margin-top:16px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px">
@@ -4651,44 +4873,15 @@ function renderDashChallengeBlock(rows) {
           </tbody>
         </table>
       </div>
+      <h4 style="margin:18px 0 6px">📋 ${t('dashChSheetDetail')}</h4>
+      <p class="form-hint" style="margin:0 0 4px">${t('dashChGrpRuleHint', DASH_CH_MIN_Q)}</p>
+      <p class="form-hint" style="margin:0 0 10px">${t('dashChDayMarkHint')}</p>
       <div style="overflow-x:auto">
         <table class="admin-table ch-detail" style="font-size:13px">
-          <thead><tr>
-            <th>${t('thUsername')}</th><th>${t('thName')}</th><th>${t('thDept')}</th>
-            <th>${t('dashChThProgress')}</th>
-            <th style="text-align:center">${t('dashChThQAcc')}</th>
-            <th style="text-align:center">${t('dashChThDay1')}</th>
-            <th style="text-align:center">${t('dashChThDay7')}</th>
-            <th colspan="7" style="text-align:center;border-left:2px solid #e5e7eb">📅 ${t('dashChThCheckin')}</th>
-            <th style="text-align:center;border-left:2px solid #e5e7eb">${t('dashChThOps')}</th>
-          </tr><tr>
-            <th colspan="7" style="border:none;background:none"></th>
-            ${[1, 2, 3, 4, 5, 6, 7].map(d => `<th style="text-align:center;border-left:${d === 1 ? '2px solid #e5e7eb' : 'none'};font-weight:600">D${d}</th>`).join('')}
-            <th style="border-left:2px solid #e5e7eb"></th>
-          </tr></thead>
-          <tbody>
-            ${list.map((p, pi) => `<tr>
-              <td>${escHtml(p.username)}</td>
-              <td>${escHtml(p.name || '—')}</td>
-              <td>${escHtml(p.dept || '—')}</td>
-              <td class="ch-prog">${t('chDashProgress', p.maxDay, p.stagesDone)}</td>
-              <td style="text-align:center">${p.q} · <span class="perq-rate ${p.acc >= 80 ? 'perq-good' : p.acc >= 60 ? 'perq-ok' : 'perq-bad'}">${p.acc}%</span></td>
-              <td style="text-align:center">${scoreCell(p.s1, p.m1)}</td>
-              <td style="text-align:center">${scoreCell(p.s7, p.m7)}</td>
-              ${(p.checkin || []).map((c, i) => `<td style="text-align:center;border-left:${i === 0 ? '2px solid #e5e7eb' : 'none'}">${checkinCell(c)}</td>`).join('')}
-              <td style="text-align:center;border-left:2px solid #e5e7eb;white-space:nowrap">
-                <button class="btn btn-ghost" id="dashChResetBtn_${pi}" style="padding:4px 10px;font-size:12px;white-space:nowrap"
-                  data-u="${escAttr(p.username)}" data-n="${escAttr(p.name || '')}"
-                  onclick="dashResetChUser(this, ${pi})">${t('dashChResetBtn')}</button>
-                <button class="btn btn-ghost" id="dashChManualBtn_${pi}" style="padding:4px 10px;font-size:12px;white-space:nowrap;margin-left:4px"
-                  data-u="${escAttr(p.username)}" data-n="${escAttr(p.name || '')}"
-                  onclick="dashManualScoreFromBtn(this)">${t('dashChManualBtn')}</button>
-              </td>
-            </tr>`).join('')}
-          </tbody>
+          ${detailGroups}
         </table>
       </div>
-      <p class="form-hint" style="margin:8px 0 0">${t('dashChCheckinLegend')} · ${t('dashChCheckinStatsLabel')}：${checkinStats.map((n, i) => `D${i + 1} ${n}`).join(' · ')}</p>
+      <p class="form-hint" style="margin:8px 0 0">${t('dashChCheckinStatsLabel')}：${checkinStats.map((n, i) => `D${i + 1} ${n}`).join(' · ')}</p>
       <p class="form-hint" style="margin:4px 0 0">♻️ ${t('dashChResetHint')}</p>
       <p class="form-hint" style="margin:4px 0 0">${t('dashChHint')}</p>
     </div>

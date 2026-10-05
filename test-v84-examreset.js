@@ -42,6 +42,9 @@ function renderDash(rows) {
   vm.runInContext(extractFn(APP, 'escHtml'), sb)
   vm.runInContext(extractFn(APP, 'escAttr'), sb)   // v85：重置按钮 data-u/data-n 转义
   vm.runInContext(extractFn(APP, 'dashChStageWeight'), sb)
+  // v139：明细表改为「三段分组」→ renderDashChallengeBlock 依赖 v139 整块（顶层 const）
+  vm.runInContext(APP.slice(APP.indexOf('// ====== v139：三段分组口径'),
+    APP.indexOf('function dashChExportSheets(list) {')), sb)
   vm.runInContext(extractFn(APP, 'renderDashChallengeBlock'), sb)
   // v88：营次筛选依赖（dashRoundView/dashRoundCurId/dashRoundList）——从 app.js 提取真实实现，
   // 沙箱无云端营次 → dashRoundList 返回空数组、dashRoundCurId 兜底 'r1'，等价单期（第一期）口径
@@ -147,14 +150,16 @@ function fullChy(cleared) {
   {
     const r = rowOf(html, 'alice')
     assert('未重置学员：Day1/Day7 成绩可见（40 / 90）', r.includes('>40<') && r.includes('>90<'), r.slice(0, 400))
-    assert('未重置学员：9/9 环节 + 7 天打卡 ✅', r.includes('9/9') && countOf(r, '✅') === 7 && countOf(r, '◐') === 0, r.slice(0, 400))
+    assert('未重置学员：7 天 D1–D7 全记为 1（当日全部阶段完成）',
+      countOf(r, '>1</span>') === 7 && countOf(r, '>-1</span>') === 0, r.slice(0, 400))
   }
   {
     const r = rowOf(html, 'bob')
     assert('已重置学员：两列成绩显示「—」（不再显示旧分数）', countOf(r, '>—</span>') === 2, r.slice(0, 400))
     assert('已重置学员：不会出现考试分数 40 / 90', !r.includes('>40<') && !r.includes('>90<'))
-    assert('已重置学员：进度仍为 9/9 环节（存根算完成）', r.includes('9/9'), r.slice(0, 300))
-    assert('已重置学员：7 天打卡全部保持 ✅（练习进度不倒退）', countOf(r, '✅') === 7 && countOf(r, '◐') === 0, r.slice(-240))
+    // v139：原「9/9 环节」进度列并入三段分组形态 → 改断 D1–D7 全为 1（存根算完成，练习进度不倒退）
+    assert('已重置学员：7 天 D1–D7 全为 1（存根算完成，进度不倒退）',
+      countOf(r, '>1</span>') === 7 && countOf(r, '>-1</span>') === 0, r.slice(-240))
   }
   {
     // 积分：练习部分（160 对×100 − 700s = 15300）保留；考试部分（Day1 500 + Day7 期末 5000）被扣除
@@ -217,7 +222,7 @@ function fullChy(cleared) {
     assert('重考后 Day7 成绩列恢复（80 分）', r.includes('>80<'), r.slice(0, 400))
     assert('Day1 仍为「—」（未重考）', countOf(r, '>—</span>') === 1, r.slice(0, 400))
     assert('重考的期末成绩按 3 倍权重计入积分（15300+4800−250 = 19850）', html2.includes('>19850<'), '')
-    assert('Day7 打卡仍 ✅（重考不重复计数）', countOf(r, '✅') === 7, r.slice(-240))
+    assert('Day7 打卡仍为 1（重考不重复计数，v139 两态形态）', countOf(r, '>1</span>') === 7, r.slice(-240))
   }
 
   // ---------- ④ 口径与接线 ----------

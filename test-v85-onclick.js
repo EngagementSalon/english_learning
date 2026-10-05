@@ -90,6 +90,9 @@ function renderBoard() {
   vm.runInContext(extractFn(appSrc, 'escHtml'), sb)
   vm.runInContext(extractFn(appSrc, 'escAttr'), sb)
   vm.runInContext(extractFn(appSrc, 'dashChStageWeight'), sb)
+  // v139：明细表改为「三段分组」→ renderDashChallengeBlock 依赖 v139 整块（顶层 const）
+  vm.runInContext(appSrc.slice(appSrc.indexOf('// ====== v139：三段分组口径'),
+    appSrc.indexOf('function dashChExportSheets(list) {')), sb)
   vm.runInContext(extractFn(appSrc, 'renderDashChallengeBlock'), sb)
   // v88：营次筛选依赖（dashRoundView/dashRoundCurId/dashRoundList）——从 app.js 提取真实实现，
   // 沙箱无云端营次 → dashRoundList 返回空数组、dashRoundCurId 兜底 'r1'，等价单期（第一期）口径

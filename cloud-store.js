@@ -1317,7 +1317,7 @@ const CloudSync = {
         // v108：允许命中「已重置存根」（cleared），且覆写时**清除 cleared** ——
         //   手动覆盖补录的语义就是「以管理员录入为准」：学员被重置过、或成绩在早先事故中未同步时，
         //   补录必须真正计入完成情况与积分（看板 s7 与积分口径都跳过 cleared 记录，
-        //   保留 cleared 会让补录永远不作数）。学员端 challenge.js chAbsorbManualScores 同口径。
+        //   保留 cleared 会让补录永远不作数）。学员端 challenge.js chAbsorbCloudProgress 同口径。
         // 幂等：重复应用同一条 chyfix 结果相同（都是覆写同一目标）。只动 test，绝不碰 practice。
         // 找不到任何 test 记录 → 静默忽略，不凭空造记录（全新学员请用非覆盖补录，走 chy 事件）。
         {

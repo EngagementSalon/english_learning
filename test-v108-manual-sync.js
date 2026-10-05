@@ -5,7 +5,8 @@
 //      （看板 s7 与积分口径都是 `!x.cleared`）→ v108 改为可命中存根并清除 cleared
 //   ② 看板口径（maxDay/打卡/s7/积分/排名）从 base+events+本机队列 重放推导 → 本来就作数（回归锁死）
 //   ③ 学员端进度/打卡/报告 100% 读本地 challengeState，云端补录不可见 → v108 新增
-//      chAbsorbManualScores：积分榜拉取时把本人 manual 考试记录合并进本地进度（真实成绩优先）
+//      chAbsorbManualScores；v140 泛化为 chAbsorbCloudProgress：积分榜拉取时把本人当前营次的
+//      云端 chy 记录（练习+考试、补录或真实上报）恢复进本地进度（真实成绩优先，cleared 不恢复）
 // 沙箱坑备忘：challenge.js 整载须注入 TYPE_LABELS/LETTERS/quizTitleHtml/autoplayListen+escHtml；
 //   `const` 模块级绑定不挂 vm 全局；let challengeState 不可直接访问 → 走函数间接断言。
 const fs = require('fs')
@@ -230,12 +231,12 @@ console.log('=== 组 4：非覆盖补录（chy 事件）对被重置学员作数
   assert('存根与新记录并存（存根不删，积分只算新记录）', t7count === 2, String(t7count))
 }
 
-console.log('=== 组 5：chAbsorbManualScores（学员端本地进度吸收）===')
-// 调用方式：整载后 chAbsorbManualScores 是沙箱内真函数（function 声明挂全局）；
+console.log('=== 组 5：chAbsorbCloudProgress（学员端本地进度恢复，v140 泛化）===')
+// 调用方式：整载后 chAbsorbCloudProgress 是沙箱内真函数（function 声明挂全局）；
 // rows 从宿主挂到 sb.__rows 传入（提取函数体单独注入会因 challengeState 是模块级 let 而 ReferenceError）
 const absorbIn = (sb, rows, expr) => {
   sb.__rows = rows
-  return vm.runInContext('chAbsorbManualScores(window.__rows)' + (expr ? '; ' + expr : ''), sb)
+  return vm.runInContext('chAbsorbCloudProgress(window.__rows)' + (expr ? '; ' + expr : ''), sb)
 }
 {
   // 5a. 本地无记录 → 写入 done + manual
@@ -277,17 +278,21 @@ const absorbIn = (sb, rows, expr) => {
     assert('cleared 存根被 manual 补录恢复', vm.runInContext('chStageDone(7, 1) && chStageScore(7, 1) === 90', sb) === true)
     assert('恢复后不再是存根', vm.runInContext('chStageCleared(7, 1)', sb) === false)
   }
-  // 5d. 别的营次 / practice / 无 manual 的记录不吸收
+  // 5d. v140 契约反转：当前营次的 practice / 非 manual 真实记录也恢复（换设备进度恢复）；
+  //     别营次 / cleared 存根不恢复
   {
     const sb = makeChSandbox()
     vm.runInContext('challengeLoad()', sb)
     const rows = [{ username: 'u1', name: '张三', chy: [
       { day: 7, si: 1, kind: 'test', correct: 18, total: 20, at: 1790130000000, rd: 'r2', manual: true },   // 别的营次
-      { day: 5, si: 0, kind: 'practice', correct: 30, total: 30, at: 1790130000001, rd: '', manual: true }, // practice 无补录形态
-      { day: 1, si: 0, kind: 'test', correct: 20, total: 20, at: 1790130000002, rd: '' },                    // 无 manual（真实上报）
+      { day: 5, si: 0, kind: 'practice', correct: 30, total: 30, at: 1790130000001, rd: '', cleared: true }, // cleared 存根不恢复
+      { day: 1, si: 0, kind: 'test', correct: 20, total: 20, at: 1790130000002, rd: '' },                    // 真实上报 → 恢复
     ] }]
     absorbIn(sb, rows)
-    assert('别营次/practice/非 manual 一律不吸收', vm.runInContext('chStageDone(7, 1) || chStageDone(5, 0) || chStageDone(1, 0)', sb) === false)
+    assert('别营次/cleared 不恢复；当前营次真实记录恢复（v140 契约反转）',
+      vm.runInContext('chStageDone(7, 1) || chStageDone(5, 0) || !chStageDone(1, 0)', sb) === false)
+    assert('恢复记录打 restored 标记（非 manual）',
+      vm.runInContext('challengeState.days[1].stages[0].restored === true && !challengeState.days[1].stages[0].manual', sb) === true)
   }
   // 5e. chyfix 改分后学员端同步（本地已 manual → 云端覆盖）
   {
@@ -314,13 +319,13 @@ const absorbIn = (sb, rows, expr) => {
 
 console.log('=== 组 6：接线与源码护栏（函数存在 ≠ 功能存在）===')
 {
-  assert('challenge.js 定义了 chAbsorbManualScores', CH_SRC.includes('function chAbsorbManualScores'))
+  assert('challenge.js 定义了 chAbsorbCloudProgress（v140 泛化改名）', CH_SRC.includes('function chAbsorbCloudProgress'))
   assert('chLoadLeaderboard 里真实调用（接线）',
     /const rows = await CloudSync\.getDashboardData\(\)/.test(CH_SRC)
-    && /chAbsorbManualScores\(rows\)/.test(CH_SRC))
+    && /chAbsorbCloudProgress\(rows\)/.test(CH_SRC))
   assert('学员真实成绩优先（done 且非 manual 不覆盖）',
-    CH_SRC.includes('if (rec && rec.done && !rec.manual) return'))
-  assert('cleared 存根可被恢复（与 chyfix 同口径）', CH_SRC.includes('覆盖恢复成绩'))
+    CH_SRC.includes('if (!rec.manual) return'))
+  assert('cleared 存根可被恢复（与 chyfix 同口径）', CH_SRC.includes('覆盖恢复'))
   assert('仅非答题会话重渲染', CH_SRC.includes('if (!chs || chs.phase !== \'quiz\') renderChallenge()'))
   assert('cloud-store chyfix 定位不再跳过 cleared（v108）',
     /if \(!x \|\| x\.kind !== 'test'\) continue/.test(CLOUD_SRC)

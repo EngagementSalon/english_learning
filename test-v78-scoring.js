@@ -54,6 +54,9 @@ function makeSandbox() {
   vm.runInContext(extractFn(appSrc, 'escHtml'), sb)
   vm.runInContext(extractFn(appSrc, 'escAttr'), sb)   // v85：重置按钮 data-u/data-n 转义
   vm.runInContext(extractFn(appSrc, 'dashChStageWeight'), sb)
+  // v139：明细表改为「三段分组」→ renderDashChallengeBlock 依赖 v139 整块（顶层 const）
+  vm.runInContext(appSrc.slice(appSrc.indexOf('// ====== v139：三段分组口径'),
+    appSrc.indexOf('function dashChExportSheets(list) {')), sb)
   vm.runInContext(extractFn(appSrc, 'renderDashChallengeBlock'), sb)
   // v88：营次筛选依赖（dashRoundView/dashRoundCurId/dashRoundList）——从 app.js 提取真实实现，
   // 沙箱无云端营次 → dashRoundList 返回空数组、dashRoundCurId 兜底 'r1'，等价单期（第一期）口径
@@ -166,13 +169,14 @@ const rowsMix = [
   {
     const sb = makeSandbox()
     const html = renderDash(sb, rowsMix)
-    // 排名表 = 从「排名」表头到「挑战进度」表头之间（后者为进度明细表起始）
-    const rankTable = html.slice(html.indexOf('>排名<'), html.indexOf('挑战进度'))
+    // 排名表 = 从「排名」表头到「成绩明细」表头之间（v139 起明细表标题为「成绩明细」）
+    const rankTable = html.slice(html.indexOf('>排名<'), html.indexOf('成绩明细'))
     assert('排名表切片有效（含 stuA）', rankTable.includes('stuA'), rankTable.slice(0, 200).replace(/\s+/g, ' '))
     assert('看板积分榜不含管理员 boss', !rankTable.includes('boss'), '')
     assert('看板积分榜仍含学员 stuA / stuB', rankTable.includes('stuA') && rankTable.includes('stuB'))
     assert('🥇 为最高学员 stuA（管理员不占位）', rankTable.indexOf('🥇') >= 0 && rankTable.indexOf('stuA') < rankTable.indexOf('stuB'))
-    const otherTable = html.slice(html.indexOf('挑战进度'))
+    const otherTable = html.slice(html.indexOf('成绩明细'))
+    assert('切片锚点有效（成绩明细存在）', html.indexOf('成绩明细') >= 0, '')
     assert('进度明细表仍含管理员 boss（便于自查）', otherTable.includes('boss'), otherTable.slice(0, 200).replace(/\s+/g, ' '))
     assert('参与人数汇总仍为 3（含管理员）', html.includes('>3<'))
 

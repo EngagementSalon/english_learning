@@ -48,6 +48,10 @@ function makeSandbox() {
   const appSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8')
   vm.runInContext(extractFn(appSrc, 'escHtml'), sb)
   vm.runInContext(extractFn(appSrc, 'escAttr'), sb)
+  // v139：明细表改为「三段分组」→ renderDashChallengeBlock 依赖 v139 整块
+  //（DASH_CH_MIN_Q / dashChScoreBlocks 等同块顶层 const，只抽函数会 ReferenceError）
+  vm.runInContext(appSrc.slice(appSrc.indexOf('// ====== v139：三段分组口径'),
+    appSrc.indexOf('function dashChExportSheets(list) {')), sb)
   vm.runInContext(extractFn(appSrc, 'renderDashChallengeBlock'), sb)
   // v88：营次筛选依赖（dashRoundView/dashRoundCurId/dashRoundList）——从 app.js 提取真实实现，
   // 沙箱无云端营次 → dashRoundList 返回空数组、dashRoundCurId 兜底 'r1'，等价单期（第一期）口径
@@ -161,7 +165,12 @@ function makeSandbox() {
     assert('v78 积分榜含「管理员账号不参加排名」说明', html.includes('管理员账号不参加排名'))
     assert('用时格式化（620s→10:20 / 890s→14:50）', html.includes('10:20') && html.includes('14:50'))
     assert('学员 bob / carol 均在名单', html.includes('bob') && html.includes('carol'))
-    assert('进度文案（chDashProgress）渲染', html.includes('/9'))
+    // v139：进度列（最高天/完成阶段）已并入「三段分组 + D1–D7」形态 → 改断分组横幅与 D 标记
+    assert('v139 三段分组横幅渲染', html.includes('完全有效组(Fully Valid)')
+      && html.includes('单边缺失组(Partial Missing)') && html.includes('无效/未参与组(Invalid/Non-participant)'))
+    assert('v139 D 标记渲染（1 / -1 两态）', html.includes('>1</span>') && html.includes('>-1</span>'))
+    assert('v139 明细列标题（答题数/正确率/前测/后测/提分）',
+      ['答题数', '正确率', '前测', '后测', '提分'].every(h => html.includes('>' + h + '<')))
     assert('Day1 测试分 80 与 40 显示', html.includes('80') && html.includes('40'))
     assert('Day7 测试分 90 显示', html.includes('90'))
     assert('错题排行含题干 #8003（错 3 次排最前）', (() => {

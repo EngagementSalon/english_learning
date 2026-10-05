@@ -161,6 +161,21 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     dashChExportEmpty: '暂无可导出的成绩',
     dashChExportNoXlsx: '当前环境无法生成 Excel 文件',
     dashChExportFile: '七天挑战成绩',
+    // v139：成绩明细「三段分组」口径（对齐线下 Excel 报表《七天挑战成绩》）
+    // ⚠️ 中文值刻意保留参考文件的双语横幅写法（完全有效组(Fully Valid)），切到 EN 导出即与原文件逐字一致。
+    dashChGrpFull: '完全有效组(Fully Valid)',
+    dashChGrpPartial: '单边缺失组(Partial Missing)',
+    dashChGrpInvalid: '无效/未参与组(Invalid/Non-participant)',
+    // v139 复核：原文件拼写 'Avearge'（少一个 r）已确认为笔误，用户拍板改正 → 'Average'。
+    //    别在渲染代码里写死这个字面量（zh/en 两处都要是正确拼写）。
+    dashChAvgLabel: 'Average',
+    dashChGrpEmpty: '该组暂无学员',
+    dashChJoinCount: (n) => `${n} 人`,
+    dashChColDept: '部门', dashChColName: '姓名', dashChColUser: '用户名', dashChColQ: '答题数',
+    dashChColAcc: '正确率', dashChColPre: '前测', dashChColFinal: '后测', dashChColChange: '提分',
+    dashChGrpRuleHint: (n) => `分组规则：答题数少于 ${n} 题 = 无效/未参与组；否则前测与后测都有成绩 = 完全有效组，成绩不齐（含只重置过考试成绩）= 单边缺失组。`,
+    dashChDayMarkHint: 'D1–D7：1 = 当日全部阶段完成（琥珀色 1 = 只完成部分阶段）；−1 = 未完成全部阶段。导出 Excel 时只保留 1 / −1 两态。',
+    dashChDayPartialHint: '当日只完成了部分阶段',
     dashChManualBadgeHint: '该成绩由管理员手动补录，非学员本人考试产生',
     // v108：成绩同步状态（学员交卷结果页可见）+ 管理员核对成绩
     syncDone: '成绩已同步到系统',
@@ -1123,6 +1138,18 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     dashChExportEmpty: 'No scores to export yet',
     dashChExportNoXlsx: 'Excel generation unavailable in this environment',
     dashChExportFile: 'Challenge-scores',
+    // v139：成绩明细「三段分组」口径 —— 英文值刻意与参考文件逐字一致（切 EN 导出即原文件同款表头）
+    dashChGrpFull: 'Fully Valid',
+    dashChGrpPartial: 'Partial Missing',
+    dashChGrpInvalid: 'Invalid/Non-participant',
+    dashChAvgLabel: 'Average',
+    dashChGrpEmpty: 'No students in this group',
+    dashChJoinCount: (n) => `${n} students`,
+    dashChColDept: 'Department', dashChColName: 'Name', dashChColUser: 'Username', dashChColQ: 'Questions Answered',
+    dashChColAcc: 'Accuracy Rate', dashChColPre: 'Pre-test', dashChColFinal: 'Final Test', dashChColChange: 'Score Change',
+    dashChGrpRuleHint: (n) => `Grouping: fewer than ${n} questions answered = Invalid/Non-participant; otherwise pre-test and final test both present = Fully Valid, otherwise Partial Missing.`,
+    dashChDayMarkHint: 'D1–D7: 1 = all stages of that day completed (amber 1 = partially completed); −1 = not all stages completed. The Excel export keeps only 1 / −1.',
+    dashChDayPartialHint: 'Only part of that day was completed',
     dashChManualBadgeHint: 'This score was entered manually by an administrator, not produced by the student\'s own exam',
     // v108: score sync status (visible on the student's result page) + admin reconcile
     syncDone: 'Your score has been synced',

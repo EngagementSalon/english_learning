@@ -2724,6 +2724,146 @@ function xlsxSheetXml(rows) {
   }).join('')
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${body}</sheetData></worksheet>`
 }
+
+// ---------- v139：可选的「样式 / 合并单元格 / 列宽 / 公式」支持 ----------
+// 约束：老调用 xlsxSheetXml(rows) 与 impXlsxFromSheets([{name,rows}]) 的输出必须**逐字节不变**
+//（无样式单元格绝不写 s 属性——已有测试断言 `<c r="B2"><v>85</v></c>` 这一字面形态）。
+// 因此样式只在 sheet 声明了 merges/cols 或单元格写成对象时才启用，见 impXlsxFromSheets 的 rich 判定。
+// 样式按需收集（只写真正用到的组合），避免为几十种边框组合写死一张表。
+function xlsxStyleBook() {
+  const bk = {
+    fonts: ['<font><sz val="11"/><name val="Calibri"/></font>'],
+    fills: ['<fill><patternFill patternType="none"/></fill>',
+            '<fill><patternFill patternType="gray125"/></fill>'],
+    borders: ['<border><left/><right/><top/><bottom/><diagonal/></border>'],
+    numFmts: [],
+    xfs: ['<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'],
+    // 预置「默认」键 → 全部落到内置的 0 号，避免默认单元格又注册一份重复字体
+    _k: {
+      'f\u00a7\u00a70': 0,
+      'p\u00a7': 0,
+      'b\u00a7\u00a7\u00a7\u00a7': 0,
+      'n\u00a7': 0,
+      'x\u00a70\u00a70\u00a70\u00a70\u00a7\u00a7\u00a70': 0,
+    },
+  }
+  const key = (...a) => a.join('\u00a7')
+  // 内置数字格式（ECMA-376 保留 id），其余按 164 起自定义
+  const BUILTIN_FMT = { '0': 1, '0.00': 2, '#,##0': 3, '#,##0.00': 4, '0%': 9, '0.00%': 10, '0.0': null }
+  bk.fontId = (color, bold) => {
+    const k = key('f', color || '', bold ? 1 : 0)
+    if (bk._k[k] != null) return bk._k[k]
+    const id = bk.fonts.length
+    bk.fonts.push('<font>' + (bold ? '<b/>' : '') + '<sz val="11"/>'
+      + (color ? '<color rgb="FF' + String(color).toUpperCase() + '"/>' : '')
+      + '<name val="Calibri"/></font>')
+    bk._k[k] = id
+    return id
+  }
+  bk.fillId = color => {
+    const c = color ? String(color).toUpperCase() : ''
+    const k = key('p', c)
+    if (bk._k[k] != null) return bk._k[k]
+    const id = bk.fills.length   // 0/1 已被 none + gray125 占位
+    bk.fills.push('<fill><patternFill patternType="solid"><fgColor rgb="FF' + c + '"/><bgColor indexed="64"/></patternFill></fill>')
+    bk._k[k] = id
+    return id
+  }
+  bk.borderId = (l, r, t, b) => {
+    const k = key('b', l || '', r || '', t || '', b || '')
+    if (bk._k[k] != null) return bk._k[k]
+    const side = (tag, w) => (w ? '<' + tag + ' style="' + w + '"/>' : '<' + tag + '/>')
+    const id = bk.borders.length
+    bk.borders.push('<border>' + side('left', l) + side('right', r) + side('top', t) + side('bottom', b) + '<diagonal/></border>')
+    bk._k[k] = id
+    return id
+  }
+  bk.numFmtId = code => {
+    const c = code ? String(code) : ''
+    const k = key('n', c)
+    if (bk._k[k] != null) return bk._k[k]
+    const builtin = BUILTIN_FMT[c]
+    if (builtin) { bk._k[k] = builtin; return builtin }
+    const id = 164 + bk.numFmts.length
+    bk.numFmts.push({ id, code: c })
+    bk._k[k] = id
+    return id
+  }
+  // st = { color, bold, fill, fmt, align, valign, wrap, bl,br,bt,bb }（bl 等为边框线型 '' | 'thin' | 'medium'）
+  bk.xfId = st => {
+    const f = bk.fontId(st.color, st.bold)
+    const fl = bk.fillId(st.fill)
+    const bd = bk.borderId(st.bl, st.br, st.bt, st.bb)
+    const nf = bk.numFmtId(st.fmt)
+    const align = st.align || '', valign = st.valign || '', wrap = st.wrap ? 1 : 0
+    const k = key('x', f, fl, bd, nf, align, valign, wrap)
+    if (bk._k[k] != null) return bk._k[k]
+    const id = bk.xfs.length
+    const al = (align || valign || wrap)
+      ? '<alignment' + (align ? ' horizontal="' + align + '"' : '') + (valign ? ' vertical="' + valign + '"' : '')
+        + (wrap ? ' wrapText="1"' : '') + '/>'
+      : ''
+    bk.xfs.push('<xf numFmtId="' + nf + '" fontId="' + f + '" fillId="' + fl + '" borderId="' + bd + '" xfId="0"'
+      + ' applyFont="1" applyFill="1" applyBorder="1"' + (nf ? ' applyNumberFormat="1"' : '')
+      + (al ? ' applyAlignment="1">' + al + '</xf>' : '/>'))
+    bk._k[k] = id
+    return id
+  }
+  bk.xml = () => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+    + (bk.numFmts.length
+      ? '<numFmts count="' + bk.numFmts.length + '">'
+        + bk.numFmts.map(n => '<numFmt numFmtId="' + n.id + '" formatCode="' + xlsxXmlEscape(n.code) + '"/>').join('') + '</numFmts>'
+      : '')
+    + '<fonts count="' + bk.fonts.length + '">' + bk.fonts.join('') + '</fonts>'
+    + '<fills count="' + bk.fills.length + '">' + bk.fills.join('') + '</fills>'
+    + '<borders count="' + bk.borders.length + '">' + bk.borders.join('') + '</borders>'
+    + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+    + '<cellXfs count="' + bk.xfs.length + '">' + bk.xfs.join('') + '</cellXfs>'
+    + '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+    + '</styleSheet>'
+  return bk
+}
+// 单元格：原始值 | { v, f(公式文本), s(样式对象) }
+function xlsxCellXml(ref, cell, bk) {
+  let v = cell, f = '', st = null
+  if (cell && typeof cell === 'object' && !Array.isArray(cell)) { v = cell.v; f = cell.f || ''; st = cell.s || null }
+  const sid = (st && bk) ? bk.xfId(st) : 0
+  const sA = sid ? ' s="' + sid + '"' : ''
+  const num = (typeof v === 'number' && isFinite(v)) ? String(v) : null
+  if (f) return '<c r="' + ref + '"' + sA + '><f>' + xlsxXmlEscape(f) + '</f>' + (num != null ? '<v>' + num + '</v>' : '') + '</c>'
+  if (num != null) return '<c r="' + ref + '"' + sA + '><v>' + num + '</v></c>'
+  const s = v == null ? '' : String(v)
+  if (!s) return sA ? '<c r="' + ref + '"' + sA + '/>' : ''
+  return '<c r="' + ref + '"' + sA + ' t="inlineStr"><is><t xml:space="preserve">' + xlsxXmlEscape(s) + '</t></is></c>'
+}
+// 富版式 sheet：{ name, rows, cols?:[px...], merges?:['A1:N1'] }
+// px → Excel 列宽字符数（Calibri 11 的经验换算），下限 1 避免 0 宽
+function xlsxPxToWidth(px) {
+  const n = Number(px) || 0
+  return Math.max(1, Math.round(((n - 5) / 7) * 100) / 100)
+}
+function xlsxSheetXmlRich(sheet, bk) {
+  const rows = (sheet && sheet.rows) || []
+  const cols = (sheet && sheet.cols) || null
+  const merges = (sheet && sheet.merges) || null
+  const colsXml = (cols && cols.length)
+    ? '<cols>' + cols.map((px, i) => px
+      ? '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + xlsxPxToWidth(px) + '" customWidth="1"/>'
+      : '').join('') + '</cols>'
+    : ''
+  const body = rows.map((row, ri) => {
+    const cells = (row || []).map((v, ci) => xlsxCellXml(xlsxColRef(ci) + (ri + 1), v, bk)).join('')
+    return '<row r="' + (ri + 1) + '">' + cells + '</row>'
+  }).join('')
+  const mgXml = (merges && merges.length)
+    ? '<mergeCells count="' + merges.length + '">' + merges.map(r => '<mergeCell ref="' + r + '"/>').join('') + '</mergeCells>'
+    : ''
+  // OOXML 元素次序固定：cols 必须在 sheetData 之前，mergeCells 之后
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+    + colsXml + '<sheetData>' + body + '</sheetData>' + mgXml + '</worksheet>'
+}
 function xlsxCrc32(buf) {
   let t = xlsxCrc32._t
   if (!t) {

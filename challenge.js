@@ -965,16 +965,18 @@ function chLbFill(top) {
   const el = document.getElementById('chLbBody')
   if (el) el.innerHTML = chLbRowsHtml(top)
 }
-// ====== v108：云端手动补录的考试成绩 → 同步进本地进度 ======
-// 管理员看板手动录入的成绩（chy 事件 manual:true）是真实发生的成绩（多为同步事故的救济）。
-// 看板/积分榜从云端 chy 实时推导，天然作数；但学员端进度/打卡/报告 100% 读本地 challengeState
-// （localStorage），云端补录对学员完全不可见 —— 学员自己打开挑战页仍是「未完成」。
-// 这里在积分榜拉取（挑战页周期执行）时把**本人**的 manual 考试记录合并进本地进度：
+// ====== v140：云端挑战进度 → 恢复到本地（换设备/浏览器不再从 Day1 重来） ======
+// 由 v108 的 chAbsorbManualScores 泛化而来（用户拍板做「云端进度恢复」）：
+// 挑战进度的权威是本机 localStorage，云端 chy 只做看板聚合 —— 学员换设备后挑战页会从 Day1
+// 重新显示未完成（云端成绩仍在看板）。这里在积分榜拉取（挑战页周期执行）时，把**本人**
+// 当前营次的全部未重置 chy 记录（练习 + 考试、补录或真实上报）合并进本地进度：
 //   · 本地已有真实完成记录（done 且非 manual）→ 不覆盖（学员自己考出的成绩优先）
-//   · 本地已吸收过（manual）→ 用云端覆盖（管理员 chyfix 改分后学员端同步；at 相同时内容一致 = 幂等）
-//   · 本地是重置存根（cleared）→ 覆盖恢复成绩（与 chyfix v108「清除 cleared」同口径）
-//   · 只吸收当前营次的 test 记录；practice 无 manual 补录形态，防御性跳过
-function chAbsorbManualScores(rows) {
+//   · 本地已吸收过（manual）→ 云端 manual 再覆盖（管理员 chyfix 改分同步；内容一致 = 幂等）
+//   · 本地是重置存根（cleared）→ 被任何未 cleared 的云端记录覆盖恢复（重考成绩 / 补录）
+//   · 已重置存根（cleared）的云端记录不恢复（重置语义优先）；'all' 重置的记录云端已删，天然不恢复
+//   · 只吸收当前营次（rd 归一后比对）；恢复记录打 restored:true（补录仍打 manual:true）
+//   · 错题明细（wrong[]）云端无按阶段存储 → 恢复记录为空数组（错题本不跨设备，已知限制）
+function chAbsorbCloudProgress(rows) {
   const uid = challengeUid()
   let me = null
   ;(rows || []).forEach(r => { if (r && r.username === uid) me = r })
@@ -983,7 +985,7 @@ function chAbsorbManualScores(rows) {
   try { wantSlug = chRoundSlug(chCurrentRound()) } catch (e) { return false }
   let changed = false
   me.chy.forEach(x => {
-    if (!x || !x.manual || x.kind !== 'test' || x.cleared) return
+    if (!x || x.cleared) return
     if (chRoundSlug(String((x && x.rd) || '')) !== wantSlug) return
     const day = Number(x.day) || 0, si = Number(x.si) || 0
     if (!day || si < 0) return
@@ -991,11 +993,16 @@ function chAbsorbManualScores(rows) {
     const d = challengeState.days[day]
     if (!d.stages) d.stages = {}
     const rec = d.stages[si]
-    if (rec && rec.done && !rec.manual) return   // 学员真实成绩优先，永不覆盖
+    if (rec && rec.done) {
+      if (!rec.manual) return            // 学员真实成绩优先，永不覆盖
+      if (!x.manual) return              // 本地补录 vs 云端真实上报：保守保留本地
+      // 本地 manual + 云端 manual → 用云端覆盖（chyfix 改分后同步；内容一致 = 幂等）
+    }
+    // 本地无记录 / 半完成（进行中） / cleared 存根 → 写入恢复记录
     d.stages[si] = {
       done: true, at: Number(x.at) || Date.now(),
       correct: Number(x.correct) || 0, total: Number(x.total) || 0,
-      wrong: [], manual: true,
+      wrong: [], ...(x.manual ? { manual: true } : { restored: true }),
     }
     changed = true
   })
@@ -1019,8 +1026,8 @@ async function chLoadLeaderboard() {
     if (typeof CloudSync !== 'undefined' && CloudSync.getDashboardData) {
       const rows = await CloudSync.getDashboardData()
       top = chLbAggregate(rows, chCurrentRound())
-      // v108：手动补录的考试成绩同步进本地进度（完成情况/打卡/报告作数）
-      try { chAbsorbManualScores(rows) } catch (e) { /* 吸收失败不阻断积分榜 */ }
+      // v108：手动补录的考试成绩同步进本地进度；v140：泛化为全部云端进度恢复（换设备不再从 Day1 重来）
+      try { chAbsorbCloudProgress(rows) } catch (e) { /* 吸收失败不阻断积分榜 */ }
     }
   } catch (e) { /* 网络失败保留旧缓存或显示空态 */ }
   if (top) _chLbCache = { at: now, top }

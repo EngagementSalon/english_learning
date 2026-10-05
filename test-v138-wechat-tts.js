@@ -141,7 +141,10 @@ async function main() {
     typeof I.zh.ttsFail === 'string' && typeof I.en.ttsFail === 'string')
 
   const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf-8')
-  assert('index.html ?v=138 ×12', (html.match(/\?v=138/g) || []).length === 12)
+  // v139 起版本号弹性断言（每次 bump 顺延，只要求单一版本 ×12）
+  const vMatch = html.match(/\?v=(\d+)/)
+  const vN = vMatch ? Number(vMatch[1]) : 0
+  assert('index.html 单一版本号 ×12 且 ≥138', vN >= 138 && (html.match(new RegExp('\\?v=' + vN + '\\b', 'g')) || []).length === 12)
   assert('index.html 无 ?v=137 残留', html.indexOf('?v=137') < 0)
 
   // ---------- §B 行为：微信 UA + 4 源全挂 + 无系统语音 → 弹微信专属文案 ----------

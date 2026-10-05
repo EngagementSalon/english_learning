@@ -48,11 +48,23 @@ const ZH = {
   dashChThDay1: '摸底测', dashChThDay7: '期末测', dashChThScore: '积分', dashChThCorrect: '答对',
   dashChThUseSec: '用时(秒)', dashChThRank: '排名',
   dashChChkFull: '全', dashChChkHalf: '半', dashChManualBadge: '手动',
-  dashChSheetDetail: '成绩明细', dashChSheetRank: '积分榜'
+  dashChSheetDetail: '成绩明细', dashChSheetRank: '积分榜',
+  // v139：三段分组（明细表改成「分组横幅 + 列标题 + 数据 + Avearge 汇总」）
+  dashChGrpFull: '完全有效组(Fully Valid)', dashChGrpPartial: '单边缺失组(Partial Missing)',
+  dashChGrpInvalid: '无效/未参与组(Invalid/Non-participant)', dashChAvgLabel: 'Average',
+  dashChColDept: '部门', dashChColName: '姓名', dashChColUser: '用户名', dashChColQ: '答题数',
+  dashChColAcc: '正确率', dashChColPre: '前测', dashChColFinal: '后测', dashChColChange: '提分'
 }
 const t = k => (ZH[k] != null ? ZH[k] : k)
 const ctx = { t }
 vm.createContext(ctx)
+// v139：dashChExportSheets 依赖 v139 整块（DASH_CH_MIN_Q / dashChScoreBlocks 等同块顶层 const）
+// 以及 course-app 的 xlsxColRef（列号换算）—— 只抽单个函数会 ReferenceError
+const iV139 = appSrc.indexOf('// ====== v139：三段分组口径')
+const jV139 = appSrc.indexOf('function dashChExportSheets(list) {')
+vm.runInContext(appSrc.slice(iV139, jV139), ctx)
+const caSrc = fs.readFileSync(path.join(__dirname, 'course-app.js'), 'utf8')
+vm.runInContext(extractFn(caSrc, 'xlsxColRef'), ctx)
 vm.runInContext(extractFn(appSrc, 'dashChExportSheets'), ctx)
 const dashChExportSheets = ctx.dashChExportSheets
 assert(typeof dashChExportSheets === 'function', 'dashChExportSheets 可从 app.js 抽取')
@@ -65,17 +77,26 @@ const mk = (u, role, lbScore, lbT, lbC, extra) => Object.assign({
   lbC: lbC, lbT: lbT, lbScore: lbScore, chQ: {}
 }, extra || {})
 
-// 结构：双 sheet、明细行数、表头文案
+// 结构：双 sheet（v139 起明细表为「三段分组」，明细契约见 test-v139-dash-ch-scoreboard.js）
 {
   const list = [mk('a', 'student', 300, 100, 30), mk('b', 'student', 280, 120, 28)]
   const sheets = dashChExportSheets(list)
   assert(Array.isArray(sheets) && sheets.length === 2, '输出两个 sheet')
   assert(sheets[0].name === '成绩明细' && sheets[1].name === '积分榜', 'sheet 名 = 成绩明细/积分榜')
   const d = sheets[0].rows, r = sheets[1].rows
-  assert(d.length === 3 && r.length === 3, '明细/积分榜行数 = 表头 + 2 名学员')
-  assert(d[0][0] === '用户名' && d[0][7] === '摸底测' && d[0][8] === '期末测' && d[0][18] === 'D7', '明细表头列位（用户名…摸底测/期末测…D7）')
-  assert(d[1][6] === '85%', '正确率导出为百分比文本 85%')
-  assert(d[1][12] === '全' && d[1][18] === '全', '打卡全完成导出「全」')
+  // v139：3 组 ×（横幅 + 列标题）= 6 行骨架 + 2 条数据 + 1 行 Average 汇总 = 9
+  assert(d.length === 9, '明细行数 = 三段骨架 6 + 数据 2 + 汇总 1（实际 ' + d.length + '）')
+  assert(d[1][0].v === '部门' && d[1][3].v === '答题数' && d[1][5].v === '前测' && d[1][6].v === '后测' && d[1][7].v === '提分' && d[1][8].v === 'D1',
+    '明细列标题（部门/…/答题数/正确率/前测/后测/提分/D1）')
+  assert(d[2][3].v === 100 && d[2][4].v === 0.85 && d[2][5].v === 80 && d[2][6].v === 90 && d[2][7].v === 10,
+    '数据行 = 答题数 / 正确率小数 / 前测 / 后测 / 提分（后测−前测）')
+  assert(d[4][0].v === 'Average' && d[4][5].v === 80 && d[4][6].v === 90 && d[4][7].v === 10,
+    '完全有效组末尾输出 Average 汇总（前测均值 80 / 后测均值 90 / 提分均值 10）')
+  assert(r.length === 3, '积分榜行数 = 表头 + 2 名学员')
+  assert(sheets[0].merges.length >= 4 && Array.isArray(sheets[0].cols) && sheets[0].cols.length === 15,
+    'v139：明细 sheet 声明 merges 与 15 列列宽（走富版式）')
+  assert(d.filter(row => row[0] && typeof row[0].v === 'string' && /组\(/.test(row[0].v)).length === 3,
+    '三段分组横幅都输出')
 }
 // 排名口径：管理员不排名；同分用时短在前；同分同时用答对多在前
 {
@@ -91,21 +112,23 @@ const mk = (u, role, lbScore, lbT, lbC, extra) => Object.assign({
   assert(r[1][0] === 1 && r[1][1] === 'stu3' && r[2][1] === 'stu2' && r[3][1] === 'stu1', '排名次序 = stu3 > stu2 > stu1（同分比用时/答对）')
   assert(r.every(row => row[1] !== 'boss'), '管理员不出现在积分榜任何一行')
 }
-// 手动补录标记 + 缺考 '—' + 打卡混合态 + 短 checkin 防御
+// 缺考 '-' + 手动补录标红 + 打卡 1/-1（v139 两态）+ 短 checkin 防御
 {
   const list = [mk('m1', 'student', 0, 0, 0, { s7: 90, m7: true, s1: null, checkin: [2, 1, 0] })]
   const d = dashChExportSheets(list)[0].rows
-  assert(d[1][7] === '—', '摸底测缺考导出「—」')
-  assert(d[1][8] === '90(手动)', '期末测手动补录导出 90(手动)')
-  assert(d[1][12] === '全' && d[1][13] === '半' && d[1][14] === '—', '打卡 2/1/0 → 全/半/—')
-  assert(d[1][15] === '—' && d[1][18] === '—', 'checkin 不足 7 位时缺位导出「—」（防御）')
+  const row = d.filter(r => r[1] && r[1].v === 'N-m1')[0]
+  assert(!!row, '细分表能找到该学员行')
+  assert(row[5].v === '-', '摸底测缺考导出 "-"（半角连字符，不是 0 / 空）')
+  assert(row[6].v === 90 && row[6].s.color === 'FF0000', '期末测手动补录 → 数值 90 且标红（保留来源可追溯）')
+  assert(row[8].v === 1 && row[9].v === -1 && row[10].v === -1 && row[14].v === -1,
+    'v139：打卡 2/1/0 → D1=1、其余 -1（原表只有 1/-1 两态，没有「半」）')
 }
-// 空输入：只出表头，不抛异常
+// 空输入：仍输出三段骨架，不抛异常
 {
   const sheets = dashChExportSheets([])
-  assert(sheets[0].rows.length === 1 && sheets[1].rows.length === 1, '空输入只出表头行')
+  assert(sheets[0].rows.length === 6 && sheets[1].rows.length === 1, '空输入 = 明细三段骨架 6 行 + 积分榜仅表头')
   const sheets2 = dashChExportSheets(null)
-  assert(Array.isArray(sheets2) && sheets2[0].rows.length === 1, 'null 输入不抛异常（防御）')
+  assert(Array.isArray(sheets2) && sheets2[0].rows.length === 6, 'null 输入不抛异常（防御）')
 }
 
 // ---------- ③ 源码接线断言 ----------
