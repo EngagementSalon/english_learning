@@ -351,7 +351,7 @@ console.log('\n[7] 网页看板渲染')
   assert('部门列用 rowspan 纵向合并（同部门连续段）', /<td rowspan="\d+"/.test(html))
   assert('Average 汇总行渲染在完全有效组末尾', html.includes('Average'))
   assert('D 标记按 ✓/− 渲染（alice 全 ✓、cathy 全 −）', html.includes('>✓</span>') && html.includes('>−</span>'))
-  assert('分组规则与 D 图例提示渲染', html.includes('分组规则') && html.includes('✓ = 当日参与'))
+  assert('分组规则与 D 图例提示渲染', html.includes('分组规则') && html.includes('✓ = 当日全部阶段完成') && html.includes('◐ = 只完成部分阶段'))
   assert('★ 操作列保留（重置成绩 / 手动补录 两个按钮都在）',
     html.includes('dashResetChUser(this') && html.includes('dashManualScoreFromBtn(this)'))
   assert('★ 导出按钮仍在', html.includes('dashChExportScores()'))
