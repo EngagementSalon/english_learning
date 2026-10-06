@@ -220,6 +220,13 @@ const CourseStore = {
       if (!prev.overdue) delete entry.overdue                        // 作业保留历史最高分
     }
     a.results[op.u] = entry
+    // v147：离线补传也是「一次真实交卷」—— 必须同样消耗重置台账，
+    //   否则断网交卷即可绕过「重置后只能重考一次」的限制（补传恢复时无限刷分）。
+    //   放在函数末尾而非分支内：homework/exam/videoquiz/review 各路径都算一次有效作答。
+    if (op.atype === 'homework' || op.atype === 'exam') {
+      const rr = a.resultResets && a.resultResets[op.u]
+      if (rr && typeof rr === 'object' && !rr.consumed) rr.consumed = true
+    }
     return 'applied'
   },
 
@@ -340,6 +347,22 @@ const CourseStore = {
         if (c.createdBy === oldU) { c.createdBy = newU; touched = true }
         ;(c.assignments || []).forEach(a => {
           if (a.createdBy === oldU) { a.createdBy = newU; touched = true }
+          // v147：重置台账随成绩一起迁移（否则改名后旧台账变孤儿 → 该学员重考机会凭空恢复）
+          if (a.resultResets && a.resultResets[oldU]) {
+            if (!a.resultResets[newU]) a.resultResets[newU] = a.resultResets[oldU]
+            else {
+              const nr = a.resultResets[newU], or = a.resultResets[oldU]
+              nr.n = (Number(nr.n) || 0) + (Number(or.n) || 0)
+              nr.at = Math.max(Number(nr.at) || 0, Number(or.at) || 0)
+              const tl = (Array.isArray(nr.tries) ? nr.tries : []).concat(Array.isArray(or.tries) ? or.tries : [])
+              tl.sort((x, y) => (Number(x.resetAt) || 0) - (Number(y.resetAt) || 0))
+              nr.tries = tl.length > 10 ? tl.slice(tl.length - 10) : tl
+              // 只要有一边还留着未消耗的重考机会，合并后仍给一次
+              nr.consumed = !!(nr.consumed && or.consumed)
+            }
+            delete a.resultResets[oldU]
+            touched = true
+          }
           if (a.results && a.results[oldU]) {
             if (a.results[newU]) {
               // 新旧用户名都有成绩：保留较新的一次，尝试次数累加

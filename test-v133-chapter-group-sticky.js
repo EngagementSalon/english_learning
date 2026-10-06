@@ -26,6 +26,21 @@ function fnBody(src, name) {
   const m = rest.match(/\n(?:function |let |const |var |\/\/ ======)/);
   return m ? rest.slice(0, m.index) : rest.slice(0, 6000);
 }
+// v147：取完整函数声明（配平扫描），用于「沙箱执行」而非「断源码形态」。
+//   与上面 fnBody 的区别：fnBody 故意去掉 'function ' 前缀（方便断源码里写 name(args)），
+//   执行时必须带前缀；且 fnBody 靠「下一个顶层声明」截断，对含嵌套块的新函数不可靠。
+function grabFn(src, name) {
+  const re = new RegExp('(^|\\n)function ' + name + '\\s*\\(');
+  const m = re.exec(src);
+  if (!m) throw new Error('grabFn not found: ' + name);
+  const start = m.index + m[1].length;
+  let i = src.indexOf('{', start), d = 0;
+  for (; i < src.length; i++) {
+    if (src[i] === '{') d++;
+    else if (src[i] === '}') { d--; if (d === 0) break; }
+  }
+  return src.slice(start, i + 1);
+}
 
 const idx = read('index.html');
 const css = read('style.css');
@@ -81,7 +96,10 @@ console.log('--- ② 真实解析：把生成的 HTML 跑一遍，标签必须�
   const fi = cou.indexOf('function courseStudentPathHtml(');
   const rest = cou.slice(fi);
   const stop = rest.slice(1).search(/\n(?:function |let |const |var |\/\/ ======)/);
-  const src = stop < 0 ? rest : rest.slice(0, stop + 1);
+  // v147：渲染侧台账读取（courseResetRecSafe / courseRetryUsedSafe，自包含）随被测函数一起注入。
+  //   这两个函数是「切出 courseStudentPathHtml 之后」新增的依赖，按名字切片的沙箱不会自动带上。
+  const src = grabFn(cou, 'courseResetRecSafe') + '\n' + grabFn(cou, 'courseRetryUsedSafe') + '\n' +
+    (stop < 0 ? rest : rest.slice(0, stop + 1));
   const ctx = vm.createContext(sandbox);
   let html = '';
   try {

@@ -98,7 +98,10 @@ function mkSandbox(doc) {
   ;['courseUser', 'courseFind', 'courseFindAssign', 'courseIsOffline',
     'courseIsFinal', 'courseGateRequired', 'courseGateOpenedFor', 'courseOnceOnly', 'courseGateLocked',
     'courseGateElArgs', 'courseStart', 'courseGateRecheck',
-    'courseExamGateOpen', 'courseExamGateRevoke'].forEach(n => {
+    'courseExamGateOpen', 'courseExamGateRevoke',
+    // v147：courseStart 新增「重考机会已用完」拦截（courseRetryBlocked）→ 依赖链一并注入。
+    //   ★ 拦截侧刻意**不** fail-open（缺依赖要响亮地炸），故这里注入真实实现而非桩。
+    'courseResetRecOf', 'courseResetUnconsumed', 'courseRetryBlocked'].forEach(n => {
     vm.runInContext(extractFn(APP, n), sb)
   })
   return { sb, calls }

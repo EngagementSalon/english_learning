@@ -939,6 +939,8 @@ select { min-width: 120px; }
 .course-status.review { color:#9a3412; background:#ffedd5; border:1px solid #fdba74; }  /* v53 待回顾错题 */
 .course-status.done { color:#065f46; background:#d1fae5; }
 .course-status.expired { color:#6b7280; background:#f3f4f6; }
+.course-status.reset { color:#1e40af; background:#dbeafe; border:1px solid #93c5fd; }  /* v147 已重置·待重考 */
+.course-status.stale { color:#92400e; background:#fef3c7; border:1px solid #fcd34d; }  /* v147 题数已变更（改题致成绩失真） */
 .course-draft-tag { display:inline-block; font-size:11px; font-weight:700; padding:1px 8px; border-radius:999px; background:#fef3c7; color:#92400e; margin-right:4px; vertical-align:1px; }
 tr.row-draft td { background:#fefce8; }
 .ratio-field { display:inline-flex; align-items:center; gap:6px; font-size:13px; color:#374151; background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:4px 8px; }
@@ -1201,6 +1203,8 @@ tr.course-drop-below > td { box-shadow:inset 0 -3px 0 0 #2f6fed; }
 .cp-flag { flex:0 0 auto; align-self:center; margin-left:4px; font-size:11px; font-weight:600; line-height:1; color:#6b7280; background:#f3f4f6; border:1px solid #e5e7eb; border-radius:999px; padding:4px 10px; white-space:nowrap; }
 .cp-flag.doing { color:var(--brand-soft-text); background:var(--brand-soft); border-color:var(--brand-soft-border); }
 .cp-flag.ok { color:#065f46; background:#dcfce7; border-color:#a7d8bf; }
+.cp-flag.flag-reset { color:#1e40af; background:#dbeafe; border-color:#93c5fd; }  /* v147 重置后待重考 */
+.cp-flag.flag-stale { color:#92400e; background:#fef3c7; border-color:#fcd34d; }  /* v147 重考机会已用完 */
 @media (max-width:640px) {
   .cp-node { padding:9px 10px; gap:8px; }
   .cp-flag { padding:3px 8px; font-size:10px; }

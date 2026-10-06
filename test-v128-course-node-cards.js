@@ -70,6 +70,8 @@ function mkSandbox() {
   vm.createContext(sb)
   vm.runInContext(extractFn(APP, 'courseTaskKindLabel'), sb)
   vm.runInContext(extractFn(APP, 'courseTaskMetaText'), sb)
+  vm.runInContext(extractFn(APP, 'courseResetRecSafe'), sb)      // v147：渲染侧台账读取（自包含）
+  vm.runInContext(extractFn(APP, 'courseRetryUsedSafe'), sb)     // v147：同上
   vm.runInContext(extractFn(APP, 'courseStudentPathHtml'), sb)
   return sb
 }

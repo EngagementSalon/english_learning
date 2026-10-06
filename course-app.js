@@ -352,13 +352,20 @@ function courseStudentPathHtml(myClasses, me) {
       // （已完成 / 待完成 / 未开始），对齐 NovoEd 参考版式。外层 cp-node 类名模板保持 v123 原样不破坏。
       const flagCls = d ? ' ok' : (isNext ? ' doing' : '')
       const flagTxt = d ? t('courseDoneTag') : (isNext ? t('coursePending') : t('courseNodeTodo'))
+      // v147：重置后待重考 → 角标换成「待重考」（蓝色），与「未开始」区分开。
+      //   名额已用完（courseRetryBlocked）→ 显示「重考机会已用完」，让学员知道该找管理员，
+      //   而不是一遍遍点进去看同一句 alert。
+      const retryRec = courseResetRecSafe(a, me)
+      const retryUsed = courseRetryUsedSafe(a, me, (a.results || {})[me])
+      const retryCls = (!d && retryRec) ? (retryUsed ? ' flag-stale' : ' flag-reset') : ''
+      const retryTxt = (!d && retryRec) ? (retryUsed ? `⚠ ${t('courseRetryUsedShort')}` : `↺ ${t('courseResetPendingTag')}`) : ''
       rows += `<div class="cp-node${d ? ' done' : ''}${isNext ? ' next' : ''}" onclick="courseStart('${escAttr(c.id)}','${escAttr(a.id)}')" title="${escAttr(a.title)}">
           <span class="cp-dot">${dotTxt}</span>
           <span class="cp-info">
             <span class="cp-lbl">${courseTaskIcon(a)} ${escHtml(a.title)}</span>
             <span class="cp-meta">${escHtml(courseTaskMetaText(a))}</span>
           </span>
-          <span class="cp-flag${flagCls}">${escHtml(flagTxt)}</span>
+          ${retryTxt ? `<span class="cp-flag${retryCls}">${escHtml(retryTxt)}</span>` : `<span class="cp-flag${flagCls}">${escHtml(flagTxt)}</span>`}
         </div>`
     }
     // v133：收尾层数与开块逻辑严格配平 —— 真章节块开的是两层（.cp-chapter 容器 + .cp-chapter-body），
@@ -522,6 +529,11 @@ function courseStart(cid, aid, _recheck) {
   // 限考一次：最终考试沿用「已作答不可再进」；普通测评文案不同
   if (courseIsFinal(a) && res) { alert(t('courseExamDoneAlert')); return }
   if (a.type === 'exam' && res) { alert(t('courseExamDoneAlert')); return }
+  // v147：重置后只允许重考一次 —— 台账里的重置已被上一轮交卷消耗掉，且当前又没有成绩
+  //   → 视为「已用掉重考机会」，不再开放作答。
+  //   ★ 必须排在下面 courseGateLocked 之前：否则会被闸门拦下并提示「等待老师放行」，
+  //     而真相是「重考机会已用完」，两句话对不上的话管理员会一直去点放行（无效操作）。
+  if (courseRetryBlocked(a, me, res)) { alert(t('courseRetryUsed')); return }
   // v115 期末考试放行闸门 / v120 线下课最终考试放行闸门：
   // 闸门开启（最终考试恒开）时，学员须被管理员逐人放行后才能作答。
   // 走到此处 res 必为空（有成绩的已在上方被「仅可作答一次」/回顾分支接走）。
@@ -733,6 +745,87 @@ function courseOnceOnly(a) { return courseIsFinal(a) || (!!a && a.type === 'exam
 // 闸门开启后但尚未放行
 function courseGateLocked(a, u, res) {
   return courseGateRequired(a) && !res && !courseGateOpenedFor(a, u)
+}
+
+// ================================================================
+// v147：重置成绩台账 + 「重置后只能重考一次」
+//
+// 背景（真实事故）：管理员点「重置」的语义是「作废这次成绩，让他再考一次」。
+// 但 v146 之前 courseResetResult 只做 delete a.results[u]，而 courseStart 判「能不能作答」
+// 只看 !res —— 重置既删了成绩、又保留了放行名单，于是学员立刻变回「未作答」态，
+// 想重置几次就重置几次，等于开了无限重考（且毫无痕迹）。
+//
+// 本版把「重置」从**删除动作**升级为**台账事件**：
+//   a.resultResets = { [username]: { n: 重置次数, tries: [被作废的成绩快照…] } }
+//   · n         → 看板显示「已重置 ×2」，重置不再静默消失（Bug2）
+//   · tries[]   → 被作废那次的 score/correct/total/attempts，供管理员追溯
+//   · consumed  → 本次重置是否已被「重新交卷」消耗掉（决定还能不能再考）
+//
+// ★★★ 判定口径（改前务必读完）：
+//   学员此刻能否作答 = 无成绩 且 未被闸门拦 且 ( 从未被重置 或 最近一次重置尚未被消耗 )
+//   重置在**重新交卷那一刻**才被消耗（courseSaveResult），不是在点重置那一刻 ——
+//   否则「重置完立刻锁死」就与用户明确要求的「重置后续能重考一次」直接矛盾。
+// ================================================================
+
+// 读取某学员的重置台账（幂等，不产生写操作）
+function courseResetRecOf(a, u) {
+  const m = (a && a.resultResets) || null
+  const rec = m && u != null ? m[u] : null
+  return rec && typeof rec === 'object' ? rec : null
+}
+
+// ---- v147：渲染链专用的**自包含**台账读取 ----
+// ⚠️ 为什么不复用 courseResetRecOf（v147 实撞，与 v134 同族）：
+//   渲染链（courseStudentPathHtml / courseAssignDetail / courseExportCell）会读重置台账，
+//   而历史套件（v115/v120/v123/v128/v129/v133/v134 共 7 个）的沙箱是**按名字逐个注入函数**的，
+//   新建函数不在其列表里 → 抽出的渲染函数在沙箱里一执行就 ReferenceError → 整页渲染抛错、断言全灭。
+//
+//   ★ 修法选型：把「渲染侧读取」做成**自包含**（不调用任何本文件其它新函数），
+//     而不是去 7 个套件里逐个补注 14 处（脆弱：以后再加函数还要改）。
+//     代价 = 台账结构判定逻辑出现两份，故用一条测试锁死两者口径一致（见 test-v147 组六）。
+//
+//   ★ 失效方向：读不到/取不出 → 视为「无重置记录」（= 旧行为：不锁学员、不误重考、不误标），
+//     绝不因为一个可选台账丢了就把人锁死。
+function courseResetRecSafe(a, u) {
+  try {
+    const m = (a && a.resultResets) || null
+    const rec = m && u != null ? m[u] : null
+    return rec && typeof rec === 'object' ? rec : null
+  } catch (e) { return null }
+}
+// 同上：学员端「重考机会已用完」判定（自包含，不调用 courseRetryBlocked）
+function courseRetryUsedSafe(a, u, res) {
+  try {
+    if (!a || res) return false
+    const rec = courseResetRecSafe(a, u)
+    if (!rec || !(rec.n > 0)) return false
+    return !!rec.consumed
+  } catch (e) { return false }
+}
+
+// 是否「重置后还能再考」（有重置台账且最近一次还没被交卷消耗）
+function courseResetUnconsumed(a, u) {
+  const rec = courseResetRecOf(a, u)
+  return !!(rec && rec.n > 0 && !rec.consumed)
+}
+
+// v147：重置后重考次数用尽 → 学员端不得再作答。
+// 只在「当前没有成绩」时成立：一旦重新交卷（台账被消耗 / 成绩重新存在）就自然解除。
+function courseRetryBlocked(a, u, res) {
+  if (!a || res) return false
+  const rec = courseResetRecOf(a, u)
+  if (!rec || !(rec.n > 0)) return false
+  return !!rec.consumed
+}
+
+// 构造一条「被作废成绩」的快照（管理员重置时写入台账 tries）
+function courseResetTryOf(prev, now) {
+  if (!prev) return null
+  return {
+    at: Number(prev.at) || now, score: Number(prev.score) || 0,
+    correct: Number(prev.correct) || 0, total: Number(prev.total) || 0,
+    attempts: Number(prev.attempts) || 1, resetAt: now,
+  }
 }
 
 // v53：答题类任务（作业/测评/视频课后小测）「错题待回顾」判定。
@@ -1783,6 +1876,10 @@ async function courseSaveResult(correct, total, usedSec) {
       a.results = a.results || {}
       const prev = a.results[me]
       a.results[me] = courseBuildResultEntry(a, prev, score, correct, total, usedSec, now, wrong)
+      // v147：本轮回填用的是管理员重置换来的那次机会 → 立刻标记已消耗。
+      //   消耗掉之后若再被重置，会重新给一次机会（正是「重置一次、能考一次」的口径）。
+      const rec = courseResetRecOf(a, me)
+      if (rec && !rec.consumed) rec.consumed = true
     })
     if (r === false) queued = true   // 重试用尽（持续被并发覆盖）
   } catch (e) {
@@ -2910,8 +3007,14 @@ function xlsxBuildZip(files) {
   return out
 }
 // 单元格取值：与看板矩阵一致的完成语义
-function courseExportCell(a, r) {
-  if (!r) return t('courseDashNotDone')
+function courseExportCell(a, r, u) {
+  // v147：无成绩但有重置台账 → 区分「已重置·待重考」（考过、被作废、名额还在）与「从未作答」。
+  //   导出的表是给管理层看的，两者混为一谈会让「按期完成率」的解读完全走偏。
+  if (!r) {
+    const recU = courseResetRecSafe(a, u)
+    if (recU && recU.n > 0) return recU.consumed ? t('courseRetryUsedShort') : t('courseResetPendingTag')
+    return t('courseDashNotDone')
+  }
   if (courseIsOffline(a)) return r.done ? t('courseDoneTag') : t('courseDashNotDone')
   if (a.type === 'video') {
     // v48：配小测且已答完 → 显示课后小测正确率（替代观看完成率）；否则显示观看进度
@@ -2938,7 +3041,7 @@ async function courseExportExcel() {
     members.forEach(u => {
       const info = infoMap[u] || {}
       const disp = (info.name ? String(info.name).trim() : '') || u
-      rows.push([disp].concat(assigns.map(a => courseExportCell(a, (a.results || {})[u]))))
+      rows.push([disp].concat(assigns.map(a => courseExportCell(a, (a.results || {})[u], u))))
     })
     // v50：底部追加一行全班错题率（与看板汇总行同口径；无作答任务 → —）
     rows.push([`✗ ${t('courseDashWrongRate')}`].concat(assigns.map(a => courseWrongRateText(a))))
@@ -3300,24 +3403,45 @@ async function courseAssignDetail(cid, aid) {
     const overTag = r && r.overdue ? ` <span class="course-status expired">${t('courseOverdue')}</span>` : ''
     // v56：作业/测评做过多遍 → 状态列下方列出每次真实成绩（第1次 → 最近）
     const histArr = r && !isVideo && Array.isArray(r.history) && r.history.length > 1 ? r.history : null
+    // v147：重置台账 —— 有记录就展示，并把被作废的历次成绩列出来（重置不再静默消失）
+    const resetRec = (!isVideo && courseResetRecSafe(a, u)) || null
+    const resetHtml = resetRec
+      ? `<div class="course-hist" title="${escAttr(t('courseResetHistTitle'))}">${t('courseResetTimesFmt', resetRec.n)}${(resetRec.tries || []).length ? '<span class="course-hist-sep"> · </span>' + resetRec.tries.map(h => `<span>${h.score}${LANG === 'en' ? '' : '分'}</span>`).join('<span class="course-hist-sep"> → </span>') : ''}</div>`
+      : ''
     const histHtml = histArr
       ? `<div class="course-hist" title="${escAttr(t('courseHistTitle'))}">${histArr.map((h, i) => `<span>${t('courseHistTryFmt', i + 1, h.score)}</span>`).join('<span class="course-hist-sep"> → </span>')}</div>`
       : ''
+    // v147：重置后还没回填 → 明确标「待重考」，而不是混在「未提交」里
+    // （「未提交」= 从没考过；「已重置·待重考」= 考过、成绩被作废、名额还留着 —— 两者处理方式完全不同）
+    const resetPending = !r && resetRec && !resetRec.consumed
     const statusHtml = r
       ? (isVideo
           ? `<span class="course-status done">✓ ${t('courseDoneTag')}${r.watchedPct != null ? ' · ' + Math.min(100, Math.round(r.watchedPct)) + '%' : ''}</span>${overTag}`
-          : `<span class="course-status done">✓ ${r.score}${LANG === 'en' ? '' : '分'}</span>${overTag}${histHtml}`)
-      : `<span class="course-status expired">${t('courseNotSubmitted')}</span>`
+          : `<span class="course-status done">✓ ${r.score}${LANG === 'en' ? '' : '分'}</span>${overTag}${histHtml}${resetHtml}`)
+      : resetPending
+        ? `<span class="course-status reset">↺ ${t('courseResetPendingTag')}</span>${resetHtml}`
+        : `<span class="course-status expired">${t('courseNotSubmitted')}</span>${resetHtml}`
+    // v147 Bug3：成绩记录的题数 ≠ 当前题数 → 这次成绩基于旧版题目，分数不可比。
+    //   只对成绩/题数类任务提示（视频无 questions，offline 不在此表）。
+    const qnMismatch = !!(r && !isVideo && r.total != null && r.total > 0 &&
+      Array.isArray(a.questions) && a.questions.length && Number(r.total) !== a.questions.length)
+    const staleTag = qnMismatch
+      ? ` <span class="course-status stale" title="${escAttr(t('courseStaleTitle', r.total, a.questions.length))}">⚠ ${t('courseStaleTag')}</span>`
+      : ''
     return `<tr>
       <td>${courseMemberCell(u, infoMap)}</td>
-      <td>${statusHtml}</td>
+      <td>${statusHtml}${staleTag}</td>
       <td style="text-align:center">${isVideo ? (r ? (r.watchedSec || 0) + 's' : '—') : (r ? (r.correct || 0) + '/' + (r.total || 0) : '—')}</td>
       ${isVideo ? `<td style="text-align:center">${r ? (r.difficulty ? '★'.repeat(Math.min(5,Math.max(1,r.difficulty))) : '—') : '—'}</td>` : ''}
       ${hasQuiz ? `<td style="text-align:center">${r && r.quizTotal != null ? r.quizCorrect + '/' + r.quizTotal : '—'}</td>` : ''}
       <td style="text-align:center">${r ? (r.attempts || 1) : '—'}</td>
       <td style="font-size:12px">${r ? courseFmtDate(r.at) : '—'}</td>
       ${gateExam ? `<td style="text-align:center">${gateCell(u, r)}</td>` : ''}
-      <td>${r ? `<button class="btn btn-ghost btn-sm" onclick="courseResetResult(${escAttr(JSON.stringify(cid))},${escAttr(JSON.stringify(aid))},${escAttr(JSON.stringify(u))})">${t('courseResetResult')}</button>` : ''}</td>
+      <td>${r
+        ? `<button class="btn btn-ghost btn-sm" onclick="courseResetResult(${escAttr(JSON.stringify(cid))},${escAttr(JSON.stringify(aid))},${escAttr(JSON.stringify(u))})">${t('courseResetResult')}</button>`
+        : (resetPending
+          ? `<button class="btn btn-ghost btn-sm" title="${escAttr(t('courseResetUndoHint'))}" data-c="${escAttr(cid)}" data-a="${escAttr(aid)}" data-u="${escAttr(u)}" onclick="courseResetUndo(this)">${t('courseResetUndo')}</button>`
+          : '')}</td>
     </tr>`
   }).join('')
 
@@ -3341,6 +3465,12 @@ async function courseAssignDetail(cid, aid) {
 
 function courseBackClass() { courseState.view = 'class'; courseRenderClass() }
 
+// v147：重置成绩 —— 从「裸删」升级为「写台账 + 删成绩」。
+//   ① 被作废的成绩快照进 a.resultResets[u].tries（管理员可追溯，Bug2）；
+//   ② n 累加 → 看板显示「已重置 ×n」；
+//   ③ consumed=false → 学员获得**一次**重考机会，交卷时由 courseSaveResult 消耗掉；
+//   ④ 放行名单（courseFinalOpened / examOpened）刻意保留 —— 重置的是成绩不是资格，
+//      否则管理员重置完还得再点一次放行，多一步且容易漏。
 async function courseResetResult(cid, aid, u) {
   if (!confirm(t('courseResetConfirm', u))) return
   try {
@@ -3348,6 +3478,23 @@ async function courseResetResult(cid, aid, u) {
       const c = CourseStore.findClass(doc, cid)
       const a = CourseStore.findAssign(c, aid)
       if (!a) return false
+      const prev = (a.results || {})[u] || null
+      // 无成绩可重置：不新增台账条目（否则连点几次就凭空多出几次「重置记录」）
+      if (!prev) return false
+      const now = Date.now()
+      a.resultResets = a.resultResets || {}
+      // 取台账口径与 courseResetRecOf 同源（脏数据判定只有一处），但这里**用真函数不做守卫** ——
+      // 写入动作缺依赖必须响亮地炸，静默降级会变成「重置无效」。
+      const rec = courseResetRecOf(a, u) || { n: 0, tries: [] }
+      rec.n = (Number(rec.n) || 0) + 1
+      rec.at = now
+      rec.by = courseUser()
+      rec.consumed = false            // 重置即授予一次重考机会
+      rec.tries = Array.isArray(rec.tries) ? rec.tries : []
+      const snap = courseResetTryOf(prev, now)
+      if (snap) rec.tries.push(snap)
+      if (rec.tries.length > 10) rec.tries = rec.tries.slice(rec.tries.length - 10)   // 防 1MB 容量膨胀
+      a.resultResets[u] = rec
       if (a.results) delete a.results[u]
     })
   } catch (e) { alert(t('courseWriteFail')); return }
@@ -3355,7 +3502,40 @@ async function courseResetResult(cid, aid, u) {
   courseAssignDetail(cid, aid)
 }
 
-// v115：期末考试逐人放行（examGate 开启时学员须被放行才能作答；幂等，重复点不重复写）
+// v147：撤销重置（误点救援）。语义 = 「收回那次重考机会，把被作废的成绩还回来」：
+//   · 还原最近一条 tries 快照为成绩（分数/明细/尝试次数都按原样恢复，不留半截状态）；
+//   · 台账 n 减 1；n 归零则整条记录删除（该学员回到「从未被重置」的干净态）。
+//   ★ 只在「已重置且还没重考」时可用：已经重新交卷的成绩不能被这次撤销覆盖回去，
+//     否则会成为「凭空抹掉一次真实作答」的后门（按钮在那种情形下根本不渲染）。
+async function courseResetUndo(el) {
+  const { cid, aid, u } = courseGateElArgs(el)
+  if (!cid || !aid || !u) return
+  if (!confirm(t('courseResetUndoConfirm', u))) return
+  try {
+    await CourseStore.mutate(doc => {
+      const c = CourseStore.findClass(doc, cid)
+      const a = CourseStore.findAssign(c, aid)
+      if (!a) return false
+      const rec = courseResetRecOf(a, u)
+      if (!rec || !(rec.n > 0) || rec.consumed) return false   // 已被重考消耗 → 不许撤销
+      const tries = Array.isArray(rec.tries) ? rec.tries : []
+      const last = tries.length ? tries[tries.length - 1] : null
+      if (last) {
+        a.results = a.results || {}
+        a.results[u] = {
+          at: last.at, score: last.score, correct: last.correct, total: last.total,
+          usedSec: 0, attempts: last.attempts != null ? last.attempts : 1,
+        }
+        rec.tries = tries.slice(0, -1)
+      }
+      rec.n = (Number(rec.n) || 0) - 1
+      if (rec.n <= 0) delete a.resultResets[u]
+      if (a.resultResets && !Object.keys(a.resultResets).length) delete a.resultResets
+    })
+  } catch (e) { alert(t('courseWriteFail')); return }
+  courseState.doc = await CourseStore.getDoc()
+  courseAssignDetail(cid, aid)
+}
 // v120：改为接收 DOM 元素（el.dataset 取参），避免用户名拼进内联 onclick 的引号陷阱
 function courseGateElArgs(el) {
   const d = (el && el.dataset) || {}
@@ -4572,6 +4752,24 @@ async function courseSaveAssignEdit() {
     }
   }).filter(q => q.question && q.options.length >= (q.type === 'judge' ? 2 : 1) && q.answer.length >= 1)
   if (!questions.length) { alert(t('courseEditNoQ')); return }
+  // v147 Bug3：改题影响预警。已有成绩的记录带着「当时考了几题」（r.total）与错题下标（r.qn），
+  //   题数一变，这些成绩就再也无法与当前题目对齐 —— 分数不可比、错题回顾直接失效
+  //   （courseReviewPending 遇 qn 不一致会静默按「视为完成」处理，管理员完全无感）。
+  //   这里在**保存前**把影响面摆出来，让管理员自己决定是「接受失真」还是「先重置那批成绩」。
+  {
+    const oldA = courseFindAssign(m.cid, m.aid)
+    const oldN = oldA && Array.isArray(oldA.questions) ? oldA.questions.length : 0
+    const newN = questions.length
+    const oldSet = JSON.stringify((oldA && oldA.questions || []).map(q => String(q.question || '').trim() + '|' + String(q.type || 'single')))
+    const newSet = JSON.stringify(questions.map(q => String(q.question || '').trim() + '|' + String(q.type || 'single')))
+    const affected = Object.keys((oldA && oldA.results) || {}).filter(u => {
+      const r = oldA.results[u]
+      return r && (Number(r.total) !== newN || (r.qn != null && Number(r.qn) !== newN))
+    }).length
+    if (affected > 0 && (oldN !== newN || oldSet !== newSet)) {
+      if (!confirm(t('courseEditStaleWarn', affected, oldN, newN))) return
+    }
+  }
   if (!confirm(t('courseEditConfirm'))) return
 
   try {
