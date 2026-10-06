@@ -323,7 +323,9 @@ console.log('\n[6] 真实渲染：混合开放/关闭章节的结构配平');
   const stop = rest.slice(1).search(/\n(?:function |let |const |var |\/\/ ======)/);
   // v147：渲染侧台账读取（courseResetRecSafe / courseRetryUsedSafe，自包含）随被测函数一起注入。
   //   它们是「切出 courseStudentPathHtml 之后」新增的依赖，按名切片的沙箱不会自动带上。
+  // v148：再加 courseGateWaitFor（同为渲染链新增依赖，同上）。
   const src = grabFn(CA, 'courseResetRecSafe') + '\n' + grabFn(CA, 'courseRetryUsedSafe') + '\n' +
+    grabFn(CA, 'courseGateWaitFor') + '\n' +
     (stop < 0 ? rest : rest.slice(0, stop + 1));
   const ctx = vm.createContext(sandbox);
   let html = '';

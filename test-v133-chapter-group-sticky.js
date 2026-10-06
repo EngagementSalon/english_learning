@@ -98,7 +98,9 @@ console.log('--- ② 真实解析：把生成的 HTML 跑一遍，标签必须�
   const stop = rest.slice(1).search(/\n(?:function |let |const |var |\/\/ ======)/);
   // v147：渲染侧台账读取（courseResetRecSafe / courseRetryUsedSafe，自包含）随被测函数一起注入。
   //   这两个函数是「切出 courseStudentPathHtml 之后」新增的依赖，按名字切片的沙箱不会自动带上。
+  // v148：再加 courseGateWaitFor（同为渲染链新增依赖，同上）。
   const src = grabFn(cou, 'courseResetRecSafe') + '\n' + grabFn(cou, 'courseRetryUsedSafe') + '\n' +
+    grabFn(cou, 'courseGateWaitFor') + '\n' +
     (stop < 0 ? rest : rest.slice(0, stop + 1));
   const ctx = vm.createContext(sandbox);
   let html = '';
@@ -206,9 +208,9 @@ assert(cou.includes('cp-side'), '4.2 保护断言有效性：course-app.js 别�
 // 4.3 之外再钉一条：左侧大纲列表区（cp-list 到 cp-side 之间）也不得出现 cp-side
 assert(/<div class="cp-list">\$\{rows\}<\/div>/.test(pathFn),
   '4.2a 左侧大纲仍是 <div class="cp-list">${rows}</div>（v53 切片左锚点未变）');
-// cp-node 类名模板保持 v123/v128 原样（既有套件钉住）
-assert(pathFn.includes("class=\"cp-node${d ? ' done' : ''}${isNext ? ' next' : ''}\""),
-  '4.3 cp-node 类名模板未改动');
+// cp-node 类名模板保留 done/next 条件类（v148 在尾部追加 ${gCls} = 等待放行态）
+assert(/class="cp-node\$\{d \? ' done' : ''\}\$\{isNext \? ' next' : ''\}\$\{gCls\}"/.test(pathFn),
+  '4.3 cp-node 类名模板保留 done/next 条件类（v148 追加 ${gCls}）');
 
 console.log('--- ⑤ CSS：分组容器 + 吸顶两档 + 散项排除 ---');
 assert(css.includes('.cp-chapter {'), '5.1 新增分组容器 .cp-chapter');

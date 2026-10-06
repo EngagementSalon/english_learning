@@ -182,8 +182,8 @@ assert('3.4 学员端章节头含名称与完成度（courseChapterDoneOf）',
   extractFn(CA, 'courseStudentPathHtml').includes("t('courseChapterDoneOf'"))
 assert('3.5 章节名走 escHtml（防注入）',
   /cp-chapter-name">📚 \$\{escHtml\(chName\)\}/.test(extractFn(CA, 'courseStudentPathHtml')))
-assert('3.6 ★ cp-node 类名模板保持 v123/v128 原样',
-  extractFn(CA, 'courseStudentPathHtml').includes(`class="cp-node\${d ? ' done' : ''}\${isNext ? ' next' : ''}"`))
+assert('3.6 ★ cp-node 类名模板保留 done/next 条件类（v148 追加 ${gCls} 等待放行态）',
+  /class="cp-node\$\{d \? ' done' : ''\}\$\{isNext \? ' next' : ''\}\$\{gCls\}"/.test(extractFn(CA, 'courseStudentPathHtml')))
 
 const stat = extractFn(CA, 'courseChapterStat')
 assert('3.7 courseChapterStat 按 chapter 精确匹配统计（trim 归一）',
@@ -211,6 +211,7 @@ function mkSandbox() {
   vm.runInContext(extractFn(CA, 'courseChapterStat'), sb)
   vm.runInContext(extractFn(CA, 'courseResetRecSafe'), sb)       // v147：渲染侧台账读取（自包含）
   vm.runInContext(extractFn(CA, 'courseRetryUsedSafe'), sb)      // v147：同上
+  vm.runInContext(extractFn(CA, 'courseGateWaitFor'), sb)        // v148：等待放行判定（渲染链新增调用）
   vm.runInContext(extractFn(CA, 'courseStudentPathHtml'), sb)
   return sb
 }

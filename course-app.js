@@ -266,10 +266,14 @@ function courseStudentPathHtml(myClasses, me) {
     // v134：「下一步」必须落在**当前可见**的作业上 —— 否则全关态会提示
     //   「下一步：B1」，而 B1 明明被锁着（学员看到就点，点了被 alert 拦，体验自相矛盾）。
     //   这里独立算一个「可见的下一步」：跳过所有关闭章节内的作业。
+    // v148：同理跳过「需放行但尚未放行」的作业 —— 否则未放行的最终考试会被推成
+    //   「下一步：终极大考 + 去完成」，学员点下去才弹「需管理员放行」，
+    //   主观上就是「不用放行也能参加」（用户实际报的就是这个观感）。
     let visNextIdx = -1
     for (let i = 0; i < total; i++) {
       if (courseTaskDone(assigns[i], (assigns[i].results || {})[me])) continue
       if (!courseChapterOpened(c, assigns[i].chapter)) continue
+      if (courseGateWaitFor(assigns[i], me, (assigns[i].results || {})[me])) continue
       visNextIdx = i
       break
     }
@@ -359,13 +363,22 @@ function courseStudentPathHtml(myClasses, me) {
       const retryUsed = courseRetryUsedSafe(a, me, (a.results || {})[me])
       const retryCls = (!d && retryRec) ? (retryUsed ? ' flag-stale' : ' flag-reset') : ''
       const retryTxt = (!d && retryRec) ? (retryUsed ? `⚠ ${t('courseRetryUsedShort')}` : `↺ ${t('courseResetPendingTag')}`) : ''
-      rows += `<div class="cp-node${d ? ' done' : ''}${isNext ? ' next' : ''}" onclick="courseStart('${escAttr(c.id)}','${escAttr(a.id)}')" title="${escAttr(a.title)}">
-          <span class="cp-dot">${dotTxt}</span>
+      // v148：需放行但尚未放行 → 显示「🔒 等待管理员放行」，并**去掉点击**。
+      //   优先级最高：它既不是「待完成」也不是「重考」（两者都要学员自己去点），
+      //   而这一步学员此刻做什么都没用 —— 只能等管理员。
+      const gWait = courseGateWaitFor(a, me, (a.results || {})[me])
+      const gDot = gWait ? '🔒' : dotTxt
+      const gCls = gWait ? ' gated' : ''
+      const gFlagCls = gWait ? ' flag-gate' : (retryTxt ? retryCls : flagCls)
+      const gFlagTxt = gWait ? t('courseFinalWaitTag') : (retryTxt || flagTxt)
+      const gOnclick = gWait ? '' : ` onclick="courseStart('${escAttr(c.id)}','${escAttr(a.id)}')"`
+      rows += `<div class="cp-node${d ? ' done' : ''}${isNext ? ' next' : ''}${gCls}"${gOnclick} title="${escAttr(a.title)}">
+          <span class="cp-dot">${gDot}</span>
           <span class="cp-info">
             <span class="cp-lbl">${courseTaskIcon(a)} ${escHtml(a.title)}</span>
-            <span class="cp-meta">${escHtml(courseTaskMetaText(a))}</span>
+            <span class="cp-meta">${escHtml(gWait ? t('courseFinalWaitHint') : courseTaskMetaText(a))}</span>
           </span>
-          ${retryTxt ? `<span class="cp-flag${retryCls}">${escHtml(retryTxt)}</span>` : `<span class="cp-flag${flagCls}">${escHtml(flagTxt)}</span>`}
+          <span class="cp-flag${gFlagCls}">${escHtml(gFlagTxt)}</span>
         </div>`
     }
     // v133：收尾层数与开块逻辑严格配平 —— 真章节块开的是两层（.cp-chapter 容器 + .cp-chapter-body），
@@ -385,14 +398,22 @@ function courseStudentPathHtml(myClasses, me) {
       </div>`
     let sideHtml
     if (visNextIdx === -1) {
-      // v134：无「可见的下一步」有两种成因，文案必须分开 ——
+      // v134：无「可见的下一步」有三种成因，文案必须分开 ——
       //   ① 全部做完了 → 🎉 恭喜
       //   ② 还有未完成的，但都在未开放章节里 → 「等待老师开放」，否则学员会以为自己做完了
+      //   ③ v148：只剩「需放行但尚未放行」的考试 → 「等待管理员放行」，
+      //      否则会走 ② 的文案说「等待开放章节」，与真相不符（章节明明是开的）。
       const allDone = nextIdx === -1
+      const gateWaiting = !allDone && assigns.some(a =>
+        !courseTaskDone(a, (a.results || {})[me]) &&
+        courseChapterOpened(c, a.chapter) &&
+        courseGateWaitFor(a, me, (a.results || {})[me]))
+      const tipTxt = allDone ? '🎉 ' + t('courseProgressAllDone')
+        : (gateWaiting ? '🔒 ' + t('courseFinalWaitHint') : '🔒 ' + t('courseChapterWaitOpen'))
       sideHtml = `<div class="cp-side">
           ${ringHtml}
           <div class="cp-side-count">${t('courseProgressOf', doneCount, total)}</div>
-          <div class="cp-tip${allDone ? ' ok' : ''}">${allDone ? '🎉 ' + t('courseProgressAllDone') : '🔒 ' + t('courseChapterWaitOpen')}</div>
+          <div class="cp-tip${allDone ? ' ok' : ''}">${tipTxt}</div>
         </div>`
     } else {
       const na = assigns[visNextIdx]
@@ -745,6 +766,22 @@ function courseOnceOnly(a) { return courseIsFinal(a) || (!!a && a.type === 'exam
 // 闸门开启后但尚未放行
 function courseGateLocked(a, u, res) {
   return courseGateRequired(a) && !res && !courseGateOpenedFor(a, u)
+}
+
+// v148：学员端「等待放行」判定（渲染专用，自包含失败方向 —— 读不到就当没闸门）。
+//   ⚠️ 与 courseGateLocked 的区别：这是**展示**口径，必须能在渲染链里安全调用。
+//   历史套件的沙箱按名字逐个注入函数，新建函数不在其列表里 → 故此处不调用
+//   courseGateRequired / courseGateOpenedFor 之外的任何东西，且整体 try/catch。
+//   失效方向：取不到 → 返回 false（= 不显示锁条、按旧样式渲染），绝不因判定异常
+//   把学员的整个学习进度页判成「全锁」。
+function courseGateWaitFor(a, u, res) {
+  try {
+    if (!a || res) return false                        // 有成绩 = 已考完，不是「等待放行」
+    const needGate = courseIsFinal(a) || (a.type === 'exam' && !!a.examGate)
+    if (!needGate) return false
+    const map = courseIsFinal(a) ? a.courseFinalOpened : a.examOpened
+    return !(map && map[u])
+  } catch (e) { return false }
 }
 
 // ================================================================

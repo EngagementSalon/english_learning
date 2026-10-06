@@ -38,16 +38,23 @@ function extractFn(src, name) {
 }
 
 // ---------- ① 源码级 ----------
+// ★ v148 契约更新：节点行新增「等待放行」态，角标容器改为动态类 ${gFlagCls}、
+//   文案改为 gFlagTxt（三层回落 gate → retry → flagTxt），cp-node 类名尾部追加 ${gCls}。
+//   本段的**原意**（角标容器存在 / 三态类名拼接 / 三态文案接线 / done/next 契约不破 / escHtml 转义）
+//   全部保留，只把「写死的变量名」换成新契约的对应物。
 const body = extractFn(APP, 'courseStudentPathHtml')
-assert('源码：节点行含 cp-flag 角标容器（class="cp-flag${flagCls}"）', body.includes('class="cp-flag${flagCls}"'))
-assert('源码：角标三态类名拼接（\' ok\' / \' doing\' / 空串）', body.includes("d ? ' ok' : (isNext ? ' doing' : '')"))
+assert('源码：节点行含 cp-flag 角标容器（v148 动态类 ${gFlagCls}）',
+  body.includes('class="cp-flag${gFlagCls}"') || body.includes('class="cp-flag${flagCls}"'))
+assert('源码：角标三态类名拼接（\' ok\' / \' doing\' / 空串）仍在（flagCls 回落链末端）',
+  body.includes("d ? ' ok' : (isNext ? ' doing' : '')"))
 assert('源码：角标文案接线（courseDoneTag / coursePending / courseNodeTodo 三个 t() 调用）',
   body.includes("t('courseDoneTag')") && body.includes("t('coursePending')") && body.includes("t('courseNodeTodo')"))
-assert('源码：外层 cp-node 类名模板保持 v123 原样（不破坏 test-v123 的 done/next 契约）',
-  body.includes('class="cp-node${d ? \' done\' : \'\'}${isNext ? \' next\' : \' \'}"') ||
-  body.includes(`class="cp-node\${d ? ' done' : ''}\${isNext ? ' next' : ''}"`),
+// ★ v123 的实质契约 = 「外层 cp-node 必带 done / next 两个条件类」。v148 在尾部加 ${gCls}，
+//   故改为断「含 done 与 next 两个条件片段」+「模板以 cp-node 开头」，不再钉整串字面量。
+assert('源码：外层 cp-node 类名模板保留 done/next 条件类（v123 契约核心，v148 追加 ${gCls}）',
+  /class="cp-node\$\{d \? ' done' : ''\}\$\{isNext \? ' next' : ''\}\$\{gCls\}"/.test(body),
   '')
-assert('源码：角标文案经 escHtml 转义输出', body.includes('${escHtml(flagTxt)}'))
+assert('源码：角标文案经 escHtml 转义输出', body.includes('${escHtml(gFlagTxt)}') || body.includes('${escHtml(flagTxt)}'))
 assert('源码：cp-dot / cp-info / cp-lbl / cp-meta 结构保留（v123 行内契约）',
   body.includes('class="cp-dot"') && body.includes('class="cp-info"') && body.includes('class="cp-lbl"') && body.includes('class="cp-meta"'))
 
@@ -72,6 +79,7 @@ function mkSandbox() {
   vm.runInContext(extractFn(APP, 'courseTaskMetaText'), sb)
   vm.runInContext(extractFn(APP, 'courseResetRecSafe'), sb)      // v147：渲染侧台账读取（自包含）
   vm.runInContext(extractFn(APP, 'courseRetryUsedSafe'), sb)     // v147：同上
+  vm.runInContext(extractFn(APP, 'courseGateWaitFor'), sb)       // v148：等待放行判定（渲染链新增调用）
   vm.runInContext(extractFn(APP, 'courseStudentPathHtml'), sb)
   return sb
 }

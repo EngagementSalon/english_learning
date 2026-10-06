@@ -1205,6 +1205,13 @@ tr.course-drop-below > td { box-shadow:inset 0 -3px 0 0 #2f6fed; }
 .cp-flag.ok { color:#065f46; background:#dcfce7; border-color:#a7d8bf; }
 .cp-flag.flag-reset { color:#1e40af; background:#dbeafe; border-color:#93c5fd; }  /* v147 重置后待重考 */
 .cp-flag.flag-stale { color:#92400e; background:#fef3c7; border-color:#fcd34d; }  /* v147 重考机会已用完 */
+.cp-flag.flag-gate { color:#6b7280; background:#f3f4f6; border-color:#d1d5db; }  /* v148 等待管理员放行 */
+/* v148 未放行：整行不可点 —— 视觉上「去可点化」（cursor/hover/透明度都要改，只改 cursor 不够） */
+.cp-node.gated { cursor:default; }
+.cp-node.gated .cp-lbl { color:#6b7280; }
+.cp-node.gated .cp-dot { background:#f3f4f6; border-color:#d1d5db; color:#6b7280; }
+.cp-node.gated:hover { border-color:#e5e7eb; box-shadow:0 1px 2px rgba(17,24,39,.04); }
+.cp-node.gated::before { background:#d1d5db; }
 @media (max-width:640px) {
   .cp-node { padding:9px 10px; gap:8px; }
   .cp-flag { padding:3px 8px; font-size:10px; }
