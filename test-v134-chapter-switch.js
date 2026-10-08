@@ -211,8 +211,12 @@ console.log('\n[3] 学员端：关闭章节整章收起 + 锁定章节条');
     '3.14 ▶ 角标只在「可见的下一步」上标（被锁的那一步不标）');
   assert(/const dotTxt = d \? '✓' : \(isNext \? '▶' : String\(i \+ 1\)\)/.test(pathFn),
     '3.14a 行序号仍用全量下标 i（开放后立刻回到正确的那一步）');
-  assert(/let visNextIdx = -1/.test(pathFn) && /if \(!courseChapterOpened\(c, assigns\[i\]\.chapter\)\) continue/.test(pathFn),
-    '3.14b 新增 visNextIdx：跳过关闭章节内的作业（防「下一步：被锁的作业」）');
+  // v150 契约反转：visNextIdx 的章节跳过条件多了「放行豁免」这一支 ——
+  //   已被逐人放行的最终考试即使所在章节关闭，也仍在「可见的下一步」候选里。
+  //   ★ 用户原话：「我的解锁键作为最高权限 无视是否完成所有章节」。
+  assert(/let visNextIdx = -1/.test(pathFn) &&
+    /if \(!courseChapterOpened\(c, assigns\[i\]\.chapter\) && !courseFinalReleasedBypass\(assigns\[i\], me\)\) continue/.test(pathFn),
+    '3.14b 新增 visNextIdx：跳过关闭章节内的作业，但已放行的最终考试豁免（v150）');
   assert(pathFn.includes("t('courseChapterWaitOpen')"),
     '3.14c 「还有作业在未开放章节」有独立文案（不让学员误以为全部做完）');
   assert(/const allDone = nextIdx === -1/.test(pathFn) && /allDone \? '🎉 ' \+ t\('courseProgressAllDone'\)/.test(pathFn),
@@ -235,9 +239,11 @@ console.log('\n[3] 学员端：关闭章节整章收起 + 锁定章节条');
 console.log('\n[4] courseStart 章节闸门');
 {
   const startFn = fnBody(CA, 'courseStart');
-  assert(startFn.includes('if (!courseChapterOpened(c, a.chapter))'),
+  // v150 契约反转：章节闸门条件带上了 `&& !alreadyReleased` 豁免支 ——
+  //   放行键 = 最高权限，已被逐人放行的最终考试无视章节锁（用户明确要求）。
+  assert(startFn.includes('if (!courseChapterOpened(c, a.chapter) && !alreadyReleased)'),
     '4.1 courseStart 有章节闸门（直达链接 / 旧缓存两条路子都能摸进来）');
-  const iGate = startFn.indexOf('if (!courseChapterOpened(c, a.chapter))');
+  const iGate = startFn.indexOf('if (!courseChapterOpened(c, a.chapter) && !alreadyReleased)');
   const iDraft = startFn.indexOf("a.status === 'draft'");
   const iOffline = startFn.indexOf('courseOfflineInfoModal(cid, aid)');
   const iVideo = startFn.indexOf('courseStartVideo(cid, aid)');
@@ -247,6 +253,12 @@ console.log('\n[4] courseStart 章节闸门');
   assert(iGate > iDraft, '4.3 闸门在草稿拦截之后（草稿提示优先）');
   assert(iGate < iOffline && iGate < iVideo && iGate < iReview && iGate < iExamGate,
     '4.4 闸门置于 线下课/视频/回顾/放行闸门 所有分支之前（章没开放就不该有任何反应）');
+  // v150：豁免支必须在闸门之前算出来，且只认 coursefinal + 已放行。
+  const iBypass = startFn.indexOf('const alreadyReleased =');
+  assert(iBypass > 0 && iBypass < iGate,
+    '4.4a 豁免判定 alreadyReleased 在章节闸门之前计算（v150）');
+  assert(/const alreadyReleased = courseIsFinal\(a\) && courseGateOpenedFor\(a, me0\)/.test(startFn),
+    '4.4b 豁免条件 = 最终考试 且 已被逐人放行（普通测评不豁免）');
   assert(startFn.includes("alert(t('courseChapterNotOpen'") , '4.5 拦截文案走 i18n 键 courseChapterNotOpen');
   assert(/String\(a\.chapter == null \? '' : a\.chapter\)\.trim\(\) \|\| t\('courseChapterNone'\)/.test(startFn),
     '4.6 未分章作业被拦时显示「未归入章节」而非空串');
@@ -324,8 +336,11 @@ console.log('\n[6] 真实渲染：混合开放/关闭章节的结构配平');
   // v147：渲染侧台账读取（courseResetRecSafe / courseRetryUsedSafe，自包含）随被测函数一起注入。
   //   它们是「切出 courseStudentPathHtml 之后」新增的依赖，按名切片的沙箱不会自动带上。
   // v148：再加 courseGateWaitFor（同为渲染链新增依赖，同上）。
+  // v150：再加 courseFinalReleasedBypass / courseChapterHasReleasedFinal
+  //   （放行键压过章节锁，渲染链新增依赖，同上）。
   const src = grabFn(CA, 'courseResetRecSafe') + '\n' + grabFn(CA, 'courseRetryUsedSafe') + '\n' +
     grabFn(CA, 'courseGateWaitFor') + '\n' +
+    grabFn(CA, 'courseFinalReleasedBypass') + '\n' + grabFn(CA, 'courseChapterHasReleasedFinal') + '\n' +
     (stop < 0 ? rest : rest.slice(0, stop + 1));
   const ctx = vm.createContext(sandbox);
   let html = '';

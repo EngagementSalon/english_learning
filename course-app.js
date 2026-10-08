@@ -272,7 +272,7 @@ function courseStudentPathHtml(myClasses, me) {
     let visNextIdx = -1
     for (let i = 0; i < total; i++) {
       if (courseTaskDone(assigns[i], (assigns[i].results || {})[me])) continue
-      if (!courseChapterOpened(c, assigns[i].chapter)) continue
+      if (!courseChapterOpened(c, assigns[i].chapter) && !courseFinalReleasedBypass(assigns[i], me)) continue
       if (courseGateWaitFor(assigns[i], me, (assigns[i].results || {})[me])) continue
       visNextIdx = i
       break
@@ -304,7 +304,12 @@ function courseStudentPathHtml(myClasses, me) {
       //      会拿到 undefined，而 `undefined === false` 为假 → 关闭章节的第 2 行起全部漏渲染
       //      （实测：关闭章节里有 2 个作业时只有第 1 个被收起，第 2 个照常显示）。
       const isNewChapter = chName !== lastChapter
-      if (isNewChapter) chOpenCur = courseChapterOpened(c, chName)
+      // v150：章节开放态 = 「整章开放」或「本章里有已被放行的最终考试」。
+      //   ★ 放行键是最高权限 → 放行后该章节条必须按「已开放」形态渲染（否则章节条写着
+      //     「🔒 未开放」而底下的考试行却能点，自相矛盾）。故这里把 chOpenCur 一并放宽。
+      //   ★ 注意仍按**章节**粒度算（chOpenCur 在章节内跨行沿用），不逐行抖动 ——
+      //     同一章内不同作业的可见性一致，不会出现「第1行显示、第2行被收起」的错位。
+      if (isNewChapter) chOpenCur = courseChapterOpened(c, chName) || courseChapterHasReleasedFinal(assigns, me, chName)
       if (isNewChapter) {
         // v133：分组容器（B+C 组合）。收尾时真章节要关两层（body + 容器），散项只关一层。
         if (lastChapter !== null) rows += lastPlain ? '</div>' : '</div></div>'
@@ -528,12 +533,26 @@ function courseStart(cid, aid, _recheck) {
   const a = courseFindAssign(cid, aid)
   if (!c || !a) return
   if (a.status === 'draft') { alert(t('courseDraftNotOpen')); return }   // 草稿（未发送）不可作答
+  const me0 = courseUser()
+  // v150：线下课最终考试的「放行键」= 最高权限，压过章节锁。
+  //   ★ 用户原话：「我的解锁键作为最高权限 无视是否完成所有章节」。
+  //   起因（2026-10-08 实撞）：管理员给 yang 放行了「B+F班的终极大考」，学员端仍点不开 ——
+  //     真凶不是放行闸门（放行记录一切正常），而是这场考试挂了 chapter:'Final Episode'，
+  //     该章节名是后来新建作业时才第一次出现 → 不在建班时的 chOpen 快照里 → 按 v134
+  //     「默认关闭」语义被判锁定。**放行键在章节闸门之前就被拦掉了，管理员无论怎么点都无效。**
+  //   ★ 为什么是「闸门之前」而不是「闸门里面加条件」：放行的语义就是「这个人现在可以考」，
+  //     它是管理员对个人的直接授权，比「整章开放」（面向全体的批量状态）更具体、更晚生效，
+  //     必须优先。放行 + 章节锁同时存在时，若听章节的，管理员就没有任何手段能救这一场。
+  //   ★ 只豁免 coursefinal：普通测评的章节锁是老师排课节奏的一部分，不该被放行键绕过。
+  //   ★ 「已放行但还没考」才豁免；已考完的人在上面就被 courseExamDoneAlert 接走了。
+  const alreadyReleased = courseIsFinal(a) && courseGateOpenedFor(a, me0)
   // v134：章节闸门。学员端大纲行被整章收起后本就点不到，但还有两条路子能摸进来：
   //   ① 作业的直达链接（老师直接把链接发到群里）；
   //   ② 学员本机页面还是「开放」的旧缓存，管理员刚关了章。
   //   故这里必须独立拦一道，且拦在「回顾/视频/线下课/放行闸门」所有分支之前 ——
   //   章节没开放，这一章里的任何入口都不该有反应。
-  if (!courseChapterOpened(c, a.chapter)) {
+  //   v150 例外：已被逐人放行的最终考试见上（放行键 = 最高权限）。
+  if (!courseChapterOpened(c, a.chapter) && !alreadyReleased) {
     alert(t('courseChapterNotOpen', String(a.chapter == null ? '' : a.chapter).trim() || t('courseChapterNone')))
     return
   }
@@ -781,6 +800,52 @@ function courseGateWaitFor(a, u, res) {
     if (!needGate) return false
     const map = courseIsFinal(a) ? a.courseFinalOpened : a.examOpened
     return !(map && map[u])
+  } catch (e) { return false }
+}
+
+// v150：放行键 = 最高权限 —— 已被逐人放行的线下课最终考试，无视章节锁。
+// ================================================================
+// 起因（2026-10-08 实撞）：管理员给 yang 放行了「B+F班的终极大考」，学员端仍点不开。
+//   真凶不是放行闸门（courseFinalOpened 记录一切正常），而是这场考试挂了
+//   chapter:'Final Episode'，而这个章节名是**后来新建作业时才第一次出现**的 →
+//   不在建班时 initChOpenForNewClass 写下的 chOpen 快照里 → 按 v134「默认关闭」语义
+//   被判锁定 → 放行键在章节闸门之前就被拦掉，管理员怎么点都无效。
+//
+// ★★★ 契约（改前读完）：**放行键压过章节锁**。
+//   理由：放行是管理员对「某一个具体的人」的直接授权，章节开放是面向全体的批量状态。
+//   前者更具体、更晚生效，且是管理员在考试现场唯一的救场手段 —— 若放行后仍可能被
+//   章节锁拦住，就等于管理员对这场考试完全失去了控制权（本次故障的本质）。
+//   用户原话：「我的解锁键作为最高权限 无视是否完成所有章节」。
+//
+// ★ 只豁免 coursefinal，不豁免普通 exam：普通测评的章节锁属于老师排课节奏的一部分，
+//   不该被放行键绕过（放行键的存在意义仅限于最终考试这一场景）。
+//
+// ★ 失效方向（与 courseGateWaitFor 同族）：**自包含 + try/catch + fail-open 失效**
+//   —— 取不到放行名单就当「没放行」。理由：这是个**放宽可见性**的判定，
+//   判错方向若相反（异常时返回 true）会让未放行的考试在关闭章节里露出可点入口，
+//   违背 v148 的可见性约定；返回 false 只是回到 v149 的行为（那一章仍锁着），
+//   管理员仍可用「开放章节」这条老路解决。**宁可保守，不可误开。**
+//
+// ★ 不调用本文件其它新函数（只依赖 a.courseFinalOpened 字段本身），
+//   以适配「历史套件按名字逐个注入函数」的沙箱 —— v147/v148 已两次踩这个坑。
+function courseFinalReleasedBypass(a, u) {
+  try {
+    if (!a || a.type !== 'coursefinal') return false
+    const map = a.courseFinalOpened
+    return !!(map && u != null && map[u])
+  } catch (e) { return false }
+}
+
+// 本章内是否存在「已被放行且尚未完成的最终考试」（渲染章节条用，同上口径）。
+//   ★ 只有未完成的才有意义 —— 考完的人不再需要这一章保持可见。
+function courseChapterHasReleasedFinal(assigns, u, chName) {
+  try {
+    if (!Array.isArray(assigns)) return false
+    const key = String(chName == null ? '' : chName).trim()
+    return assigns.some(a =>
+      String(a && a.chapter == null ? '' : a.chapter).trim() === key &&
+      courseFinalReleasedBypass(a, u) &&
+      !(a.results || {})[u])
   } catch (e) { return false }
 }
 
