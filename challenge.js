@@ -41,21 +41,24 @@ const CHALLENGE_DAYS = [
 // 挑战总题量（不含次日额外错题复习；进度条分母）
 const CHALLENGE_TOTAL = CHALLENGE_DAYS.reduce((s, d) => s + d.stages.reduce((x, y) => x + y.count, 0), 0)   // 210
 // 练习序列难度配比 [难度1, 难度2, 难度3]，与各天 practice 阶段一一对应（10/30/30/30/30/30/10，共 170 题）。
-// 第一期合计 82/82/6，均在题库容量 374/235/24 内；Day1 均值 1.0 → Day7 均值 2.2，难度逐日递增。
+// v149 重调：原配比按「题库有完整的 1/2/3 三档」设计（第一期合计 82/82/6），
+//   一旦中间档题量为 0，桶2 的 82 个坑位全部轮空 → 序列缩到 88 → Day5 起空题（线上故障根因）。
+//   新配比把梯度写成「低档逐日递减、高档逐日递增」的形态，并降低对中间档的依赖：
+//   第一期合计 91/0/79（中间档份额交给运行时自适应分摊），Day1 均值 1.00 → Day7 均值 2.80，严格单调递增。
+//   ⚠️ 中间档仍可被使用：若题库存在 L2/L3 题，归桶后它们落入桶 2，会按 low:high 比例参与分配。
 const CHALLENGE_DIFF_PLAN = [
-  [10, 0, 0], [24, 6, 0], [19, 11, 0], [14, 16, 0], [9, 20, 1], [5, 23, 2], [1, 6, 3],
+  [10, 0, 0], [26, 0, 4], [21, 0, 9], [16, 0, 14], [11, 0, 19], [6, 0, 24], [1, 0, 9],
 ]
-// v111：第二期及以后的练习配比 —— 第一期是「摸底巩固」，第二期起是「进阶复训」，
-// 难度2/3 占比显著提高（逐日均值 1.30 → 2.30，对比第一期 1.00 → 2.20），且保持逐日递增。
-// 合计 37/127/6 = 170，仍在本部门题库容量 374/235/24 内。
-// 注意：Day1 只留 3 道难度1（30%），学员开营第一天就要直面难度2；Day6 起不再出难度1。
+// v111：第二期及以后的练习配比 —— 第一期是「摸底巩固」，第二期起是「进阶复训」，难度显著提高。
+// v149 重调：合计 33/25/112，Day1 均值 2.00 → Day7 均值 3.00，严格单调递增，
+//   且逐日均值均不低于第一期同日（1.00→2.80），符合「进阶复训」口径。
 const CHALLENGE_DIFF_PLAN_HARD = [
-  [7, 3, 0], [14, 16, 0], [9, 21, 0], [5, 25, 0], [2, 27, 1], [0, 28, 2], [0, 7, 3],
+  [5, 0, 5], [13, 3, 14], [8, 4, 18], [4, 5, 21], [2, 6, 22], [1, 7, 22], [0, 0, 10],
 ]
 // 水平测试分层随机配比：难度1×10 + 难度2×7 + 难度3×3 = 20 题（保证测试覆盖全部难度）
 const CHALLENGE_TEST_PLAN = [10, 7, 3]
 // v111：第二期及以后的考试配比 —— 难度1 减半、难度2/3 加倍（均值 1.65 → 2.35）。
-// 合计 20 题不变（考试题量恒定，只调难度结构），仍在本部门题库容量内。
+// 合计 20 题不变（考试题量恒定，只调难度结构）。
 const CHALLENGE_TEST_PLAN_HARD = [5, 10, 5]
 
 // v89：当前学员所属分部门（'dining/bar' 等 slug）；管理员/其他部门返回 ''（=不限部门，看全库）
@@ -96,11 +99,102 @@ function chBankCount() { return chBankQuestions().length }
 // v89：本部门题库是否够跑完七天（Day7 需 170 练习 + 20 测试；不足时入口页提示管理员补题）
 const CHALLENGE_MIN_BANK = 190
 function chBankShort() { const n = chBankCount(); return n > 0 && n < CHALLENGE_MIN_BANK }
+// v149：题库「结构性」缺口检测 —— 总题数够（>CHALLENGE_MIN_BANK）但某一难度档过少时，
+//   旧口径完全静默（正是 v149 线上故障：295 题总量「够用」，但难度2 档为 0 → 序列缩水 → Day5+ 空题）。
+//   返回缺口档位文案片段（如 '难度2'）与建议补题数；无缺口返回 ''。
+//   阈值口径：练习序列各档需求（第一期 82/82/6、进阶期 37/127/6）取较大者，留 10% 余量。
+function chBankDiffGap() {
+  try {
+    const st = chBankDiffStats()
+    if (!st.total) return ''
+    const need = { 1: 82, 2: 127, 3: 6 }
+    // 只报「明显不足」的档：低于需求的一半才算结构性缺口（避免边界抖动刷提示）
+    const low = []
+    ;[1, 2, 3].forEach(d => { if (st[d] < Math.floor(need[d] / 2)) low.push(d + '') })
+    return low.length ? low.join(' / ') : ''
+  } catch (e) { return '' }
+}
 // v89：题目 id 集合（本地进度里的 qid 需按当前部门题库过滤，避免跨部门串题）
 function chBankIdSet() {
   const set = new Set()
   chBankQuestions().forEach(q => set.add(String(q.id)))
   return set
+}
+
+// ====== v149：难度归桶 + 难度容量自适应 ======
+// 背景（v149 修的线上故障）：题库实际标了 1~4 四个难度（管理员上传界面就有 L4），
+//   而抽取只分 1/2/3 三个桶，且用 Math.min(3, …) 把 L4 一律压进桶3 →
+//   「中间档」桶 2 恒空 → 配比里难度2 的坑位全部轮空 → 序列从 170 缩到 88 →
+//   Day3 起切片越过数组末尾 → 空题 → chStartStage 里 `if (!qs.length) return` 静默无反应。
+// 修法：① 按「题库实际有的难度档数」把难度线性映射到 1/2/3 三档（而非一律压到 3）；
+//       ② 抽题按桶容量自适应回填（某桶不足时从相邻桶就近补），保证序列恒为设计长度。
+
+// 难度取值 → 桶（1/2/3）。题库若存在 >3 的难度（如 L4），按「题库实际最大值」线性缩放，
+//   使最低档落 1、最高档落 3，中间档不会因上限截断而空缺。
+//   例：题库只有 1 和 4 → 1→1、4→3，桶 2 仍空（真实只有两极题）；
+//       题库有 1/2/3/4 → 1→1、2→2、3→2、4→3（4 档压成 3 档，各档都有人）。
+function chDiffBucketOf(diff, maxDiff) {
+  const d = Number(diff) || 1
+  const mx = Number(maxDiff) > 0 ? Number(maxDiff) : 3
+  if (mx <= 3) return Math.min(3, Math.max(1, Math.round(d)))
+  // 线性映射到 1..3：最低 → 1，最高 → 3
+  const t = (d - 1) / (mx - 1)          // 0..1
+  return Math.min(3, Math.max(1, 1 + Math.round(t * 2)))
+}
+// 题库里出现过的最大难度（用于归桶缩放）；缺失/异常 → 3（等价旧行为）
+function chBankMaxDiff(list) {
+  try {
+    const arr = Array.isArray(list) ? list : []
+    let mx = 1
+    arr.forEach(q => { const d = Number(q && q.difficulty) || 1; if (d > mx) mx = d })
+    return mx > 0 ? mx : 3
+  } catch (e) { return 3 }
+}
+// 自适应取题：按 need 逐档取，某档不足时从「相邻档」借补，保证序列长度 = Σneed（题池够的前提下）。
+//   need   = [n1, n2, n3] 各档期望题数
+//   buckets= { 1:[…], 2:[…], 3:[…] } 各档已洗牌的题池
+//   ⚠️ 游标记在 buckets.__cur 上（**跨调用累加**）—— challengePool 会逐天连续调用本函数，
+//      若每次从 0 开始取，第二天会把第一天的题再取一遍（重复题）。首次调用时惰性初始化。
+//   口径：① 先按档取满自己的配额；
+//        ② 某档题池取尽 → 借档。★ 借档方向必须「宁可借更难，不可借更易」：
+//           借更难的档会让当天更贴合「逐日变难」的设计意图，借更易的档则会把梯度拉平甚至回头
+//           （v149 线上题库桶3 只有 24 题，原「距离优先」在 Day5 起改借桶2 → 均值从 1.83 掉到 1.63）。
+//           故评分改为「优先同侧更难档，其次同侧更易档，距离越近越优先，距离相同时余量越多越优先」。
+//        ③ 题池总量不足时按实际能取到的数量返回（不报错，由上层给提示）。
+function chDrawWithBackfill(need, buckets) {
+  if (!buckets.__cur) buckets.__cur = { 1: 0, 2: 0, 3: 0 }
+  const cur = buckets.__cur
+  const order = []
+  const total = [1, 2, 3].reduce((s, d) => s + Math.max(0, Number(need[d - 1]) || 0), 0)
+  const cap = d => (Array.isArray(buckets[d]) ? buckets[d].length : 0)
+  ;[1, 2, 3].forEach(d => {
+    const want = Math.max(0, Number(need[d - 1]) || 0)
+    for (let k = 0; k < want; k++) {
+      if (cur[d] < cap(d)) { order.push(buckets[d][cur[d]++]); continue }
+      // 本档取尽 → 在其它档里挑。★ 第一优先级 = 方向（更难优先），第二 = 距离近，第三 = 余量多
+      //   dirBonus：alt > d（更难）记 1；alt < d（更易）记 0 → 更难档恒优先于更易档
+      let best = null, bestScore = -1
+      ;[1, 2, 3].forEach(alt => {
+        if (alt === d) return
+        const remain = cap(alt) - cur[alt]
+        if (remain <= 0) return
+        const dirBonus = alt > d ? 1 : 0
+        const score = dirBonus * 1000 + remain / (1 + Math.abs(alt - d))
+        if (score > bestScore) { bestScore = score; best = alt }
+      })
+      if (best == null) continue
+      order.push(buckets[best][cur[best]++])
+    }
+  })
+  return { list: order, total }
+}
+// 各档题量统计（题库结构告警用）：返回 { 1:n, 2:n, 3:n, max }
+function chBankDiffStats() {
+  const buckets = { 1: 0, 2: 0, 3: 0 }
+  const list = chBankQuestions()
+  const mx = chBankMaxDiff(list)
+  list.forEach(q => { buckets[chDiffBucketOf(q && q.difficulty, mx)]++ })
+  return { 1: buckets[1], 2: buckets[2], 3: buckets[3], max: mx, total: list.length }
 }
 
 // ====== v111：按营次区分难度档（第二期及以后「略难」）======
@@ -321,10 +415,11 @@ function challengePool() {
     const k = String(q.id)
     if (!seen.has(k)) { seen.add(k); uniq.push(q) }
   }
+  // v149：难度归桶按「题库实际最大难度」缩放，避免 L4 题一律被 Math.min(3,…) 压进桶3 而掏空桶2
+  const maxDiff = chBankMaxDiff(uniq)
   const buckets = { 1: [], 2: [], 3: [] }
   for (const q of uniq) {
-    const d = Math.min(3, Math.max(1, Number(q.difficulty) || 1))
-    buckets[d].push(q)
+    buckets[chDiffBucketOf(q && q.difficulty, maxDiff)].push(q)
   }
   ;[1, 2, 3].forEach(d => {
     const rng = challengeRng(chUserSeed() + d * 7919)
@@ -334,16 +429,59 @@ function challengePool() {
     }
   })
   const out = []
-  const cur = { 1: 0, 2: 0, 3: 0 }
   // v111：配比按营次取（第二期及以后用 CHALLENGE_DIFF_PLAN_HARD，难度2/3 占比更高）
   const plan = (typeof chDiffPlan === 'function') ? chDiffPlan() : CHALLENGE_DIFF_PLAN
-  for (const p of plan) {
-    ;[[p[0], 1], [p[1], 2], [p[2], 3]].forEach(([n, d]) => {
-      for (let k = 0; k < n; k++) {
-        const q = buckets[d][cur[d]++]
-        if (q) out.push(q)
+  // v149：先「全局配额求解」，再逐天取题 —— 两步缺一不可。
+  //   为什么不能只靠 chDrawWithBackfill 的运行时借档：它是**逐天顺序执行**的，
+  //   稀缺档（如桶3 只有 24 题）会被前几天先吃掉，后面几天只能借到更易的档 →
+  //   日均难度中途回落（线上题库实测 1.83 → 1.63）。正确做法是先算出「每天实际用哪档几题」，
+  //   让稀缺的高档优先留给后面的天，保证梯度单调。
+  const needMatrix = chPlanAllocate(plan, buckets)
+  for (const need of needMatrix) {
+    const drew = chDrawWithBackfill(need, buckets)
+    drew.list.forEach(q => out.push(q))
+  }
+  return out
+}
+
+// v149：全局配额求解 —— 把 plan（逐天各档需求）与实际桶容量对齐，返回逐天的「实际取题构成」。
+//   目标（按优先级）：
+//     ① 每天题量恒等于 plan 当天总量（题池总量够时）→ 保证切片不越界、不出现空题；
+//     ② 尽量满足 plan 的逐档需求；
+//     ③ 缺口**优先从更高档补**（绝不从更低档补），这样「逐日变难」的梯度不会被拉平/回头；
+//     ④ 高档容量不足时，把稀缺名额**优先留给后面的天**（后面的天本就该更难）。
+//   算法：先把「高档需求」按天从后往前分配（稀缺资源优先给后排天），再逐档处理剩余缺口。
+//   返回 number[][]，长度与 plan 一致，每项 = [n1, n2, n3]。
+function chPlanAllocate(plan, buckets) {
+  const cap = d => (Array.isArray(buckets[d]) ? buckets[d].length : 0)
+  const avail = { 1: cap(1), 2: cap(2), 3: cap(3) }
+  const days = plan.map(p => [Math.max(0, Number(p[0]) || 0), Math.max(0, Number(p[1]) || 0), Math.max(0, Number(p[2]) || 0)])
+  const out = days.map(() => [0, 0, 0])
+  // 第 1 轮：逐档（从高到低）满足需求，**同档内从后往前**分配 —— 稀缺的高档名额优先给后面的天
+  for (let d = 3; d >= 1; d--) {
+    for (let i = days.length - 1; i >= 0; i--) {
+      const want = days[i][d - 1]
+      const take = Math.min(want, avail[d])
+      out[i][d - 1] += take
+      avail[d] -= take
+    }
+  }
+  // 第 2 轮：若有档位没满足（该档容量耗尽），缺口从**更高档**借；更高档也没有 → 从更低档补（保底，不空题）
+  for (let i = 0; i < days.length; i++) {
+    for (let d = 1; d <= 3; d++) {
+      let miss = days[i][d - 1] - out[i][d - 1]
+      if (miss <= 0) continue
+      // 先向上借（更难）
+      for (let up = d + 1; up <= 3 && miss > 0; up++) {
+        const take = Math.min(miss, avail[up])
+        if (take > 0) { out[i][up - 1] += take; avail[up] -= take; miss -= take }
       }
-    })
+      // 再向下借（更易，仅作保底）
+      for (let dn = d - 1; dn >= 1 && miss > 0; dn--) {
+        const take = Math.min(miss, avail[dn])
+        if (take > 0) { out[i][dn - 1] += take; avail[dn] -= take; miss -= take }
+      }
+    }
   }
   return out
 }
@@ -365,29 +503,38 @@ function challengeStageInfo(day, si) {
 }
 // 分层随机抽题核心（v80 重构）：从给定题源按分层配比随机抽 total 题
 //（v111：配比按营次取 —— 第一期 难度1×10 + 难度2×7 + 难度3×3；
-//  第二期及以后 难度1×5 + 难度2×10 + 难度3×5，明显更偏难）。id 去重，库存不足时自动少抽，选项重洗。
+//  第二期及以后 难度1×5 + 难度2×10 + 难度3×5，明显更偏难）。id 去重，选项重洗。
+// v149：① 归桶按题源实际最大难度缩放（不再是 Math.min(3,…)，避免 L4 题掏空中间档）；
+//       ② 某档不足时经 chDrawWithBackfill 从相邻档就近补，保证取满 total（题源总量够的前提下）。
 function challengeStratifiedDraw(source, total) {
   const seen = new Set()
-  const buckets = { 1: [], 2: [], 3: [] }
+  const uniq = []
   for (const q of source) {
     const k = String(q.id)
-    if (!seen.has(k)) {
-      seen.add(k)
-      const d = Math.min(3, Math.max(1, Number(q.difficulty) || 1))
-      buckets[d].push(q)
-    }
+    if (!seen.has(k)) { seen.add(k); uniq.push(q) }
   }
-  const out = []
-  const plan = (typeof chTestPlan === 'function') ? chTestPlan() : CHALLENGE_TEST_PLAN
-  ;[1, 2, 3].forEach((d, i) => {
-    const b = buckets[d].slice()
+  const maxDiff = chBankMaxDiff(uniq)
+  const buckets = { 1: [], 2: [], 3: [] }
+  for (const q of uniq) {
+    buckets[chDiffBucketOf(q && q.difficulty, maxDiff)].push(q)
+  }
+  ;[1, 2, 3].forEach(d => {
+    const b = buckets[d]
     for (let k = b.length - 1; k > 0; k--) {
       const j = Math.floor(Math.random() * (k + 1))
       const tmp = b[k]; b[k] = b[j]; b[j] = tmp
     }
-    for (let k = 0; k < plan[i] && out.length < total && k < b.length; k++) out.push(b[k])
   })
-  return out.map(shuffleOptions)
+  const plan = (typeof chTestPlan === 'function') ? chTestPlan() : CHALLENGE_TEST_PLAN
+  // 按 total 收敛各档配额（配比之和可能 > total 时，逐档削到 total 为止）
+  const need = [plan[0], plan[1], plan[2]]
+  let sum = need.reduce((a, b) => a + b, 0)
+  for (let i = 2; i >= 0 && sum > total; i--) {
+    const cut = Math.min(need[i], sum - total)
+    need[i] -= cut; sum -= cut
+  }
+  const drew = chDrawWithBackfill(need, buckets)
+  return drew.list.slice(0, total).map(shuffleOptions)
 }
 // 全库随机抽题（v80 前 test 唯一题源；现保留给 Day1 摸底——尚无已刷题时回退使用）
 // v89：题源收窄为本部门题库
@@ -835,7 +982,11 @@ function chStartStage(day, si) {
   }
   if (challengeKindOf(day, si) === 'test' && chStageDone(day, si)) return // 水平测试仅一次
   const qs = challengeStageQuestions(day, si)
-  if (!qs.length) return
+  // v149：抽不到题时给出明确提示，不再静默 return（旧行为 = 学员点「开始」毫无反应，无从判断）
+  if (!qs.length) {
+    alert(t('chEmptyAlert'))
+    return
+  }
   const m = challengeStageInfo(day, si)
   chs = {
     day, si, kind: challengeKindOf(day, si),
@@ -1236,6 +1387,7 @@ function renderChallenge() {
       <p class="form-hint" style="margin-bottom:8px">${t('chIntro')}</p>
       <p style="font-size:12px;color:#9ca3af;margin-bottom:12px">${t('chPoolInfo', bankN)}</p>
       ${chBankShort() ? `<div class="feedback" style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:12px;margin-bottom:10px">⚠️ ${t('chBankShortWarn', bankN, CHALLENGE_MIN_BANK)}</div>` : ''}
+      ${chBankDiffGap() ? `<div class="feedback" style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:12px;margin-bottom:10px">⚠️ ${t('chBankDiffWarn', chBankDiffGap())}</div>` : ''}
       ${Store.isAdmin() ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
         <button class="btn btn-primary btn-sm" onclick="openImportModal(12,'${escAttr(chDeptKey() || 'all')}')">📤 ${t('chUploadBtn')}</button>
         <span class="form-hint" style="margin:0">${t('chUploadHint')}</span>

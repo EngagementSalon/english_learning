@@ -100,13 +100,28 @@ const SPANS = [[0, 10], [10, 40], [40, 70], [70, 100], [100, 130], [130, 160], [
     assert('Day7 均值 ≥ 2.1', avgs[6] >= 2.1, `got ${avgs[6].toFixed(2)}`)
   }
   {
-    let ok = true, detail = ''
+    // [v149 反转] 旧契约：每日实际抽到的难度分布必须**逐字等于** CHALLENGE_DIFF_PLAN。
+    //   v149 起 CHALLENGE_DIFF_PLAN 只是「意图」（intent），实际构成经 chPlanAllocate
+    //   按题库真实桶容量对齐后产出 —— 稀缺高档会优先留给后面的天，缺口向上借（绝不向下借）。
+    //   故本断言改为断「新契约的不变量」，逐字比对已不再成立。
+    //   ⚠️ 配比必须从**沙箱内源码**读（CH_PLAN 是本文件里的旧快照，会随版本失真）。
+    const PLAN = JSON.parse(vm.runInContext('JSON.stringify(CHALLENGE_DIFF_PLAN)', sbA))
+    let lenOk = true, detail = ''
+    SPANS.forEach(([a, b], i) => {
+      const qs = vm.runInContext(`challengePool().slice(${a},${b})`, sbA)
+      const total = PLAN[i][0] + PLAN[i][1] + PLAN[i][2]
+      if (qs.length !== total) { lenOk = false; detail += ` day${i + 1}:len${qs.length}!=${total}` }
+    })
+    assert('[v149 反转] 每日练习题量恒等于配比当天总量（不缩水）', lenOk, detail)
+
+    // 缺口方向：低档不得为高档补位（否则梯度会被拉低）
+    let noDownBorrow = true, dirDetail = ''
     SPANS.forEach(([a, b], i) => {
       const qs = vm.runInContext(`challengePool().slice(${a},${b})`, sbA)
       const dist = [1, 2, 3].map(d => qs.filter(q => (Number(q.difficulty) || 1) === d).length)
-      if (JSON.stringify(dist) !== JSON.stringify(CH_PLAN[i])) { ok = false; detail += ` day${i + 1}:${dist}` }
+      if (dist[0] > PLAN[i][0]) { noDownBorrow = false; dirDetail += ` day${i + 1}:d1=${dist[0]}>${PLAN[i][0]}` }
     })
-    assert('每日难度配比 = CHALLENGE_DIFF_PLAN（7 天全对）', ok, detail)
+    assert('[v149 反转] 低档不为高档补位（缺口一律向上借，梯度不被拉低）', noDownBorrow, dirDetail)
   }
   assert('Day1 练习无难度 3 题', vm.runInContext('challengePool().slice(0,10).every(q => Number(q.difficulty) < 3)', sbA))
   assert('Day7 练习含难度 3 题', vm.runInContext('challengePool().slice(160,170).some(q => Number(q.difficulty) === 3)', sbA))

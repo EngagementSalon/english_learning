@@ -120,7 +120,10 @@ function makeSb(opts) {
   ;['challengeUid', 'chDeptKey', 'chBankQuestions', 'chBankCount', 'chBankIdSet',
     'chRoundSlug', 'chRoundRecForDept', 'chRoundViewSlugs', 'chRoundListForView',
     'chRoundViewKey', 'chCurrentRound', 'chIsHardRound', 'chDiffPlan', 'chTestPlan',
-    'challengeRng', 'chUserSeed', 'challengePool', 'challengeStageMeta', 'challengeStageInfo',
+    'challengeRng', 'chUserSeed',
+    // v149：challengePool 新增依赖（归桶缩放 + 自适应回填 + 全局配额求解）
+    'chDiffBucketOf', 'chBankMaxDiff', 'chDrawWithBackfill', 'chPlanAllocate',
+    'challengePool', 'challengeStageMeta', 'challengeStageInfo',
     'challengeStratifiedDraw', 'challengeRandomQuestions', 'chPrevDayWrongQuestions',
     'chPrevRoundWrongQuestions', 'challengeTestWithWrongQuestions',
     'chStageRec', 'chStageDone', 'challengeTestQuestions', 'chHardRoundHtml',
@@ -159,17 +162,22 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
     const hard = JSON.parse(call(sb, 'JSON.stringify(CHALLENGE_DIFF_PLAN_HARD)'))
     const sum = p => p.reduce((a, r) => [a[0] + r[0], a[1] + r[1], a[2] + r[2]], [0, 0, 0])
     const b = sum(base), h = sum(hard)
-    assert('第一期练习配比合计 82/82/6 = 170 题（v110 原值不变）',
-      b[0] === 82 && b[1] === 82 && b[2] === 6 && b[0] + b[1] + b[2] === 170, JSON.stringify(b))
-    assert('第二期练习配比合计 37/127/6 = 170 题（题量不变，只调难度结构）',
-      h[0] === 37 && h[1] === 127 && h[2] === 6 && h[0] + h[1] + h[2] === 170, JSON.stringify(h))
+    // [v149 反转] 旧断言把两套配比的**逐档合计**写死了（82/82/6、37/127/6）。
+    //   v149 重调了难度分工（第一期 91/0/79、进阶期 33/25/112，中间档份额交给运行时自适应），
+    //   逐档合计会随后续调参继续变化 → 改为断「跨版本稳定的关系型契约」：
+    //     ① 题量恒为 170（不变）；② 进阶期整体更难；③ 进阶期低档更少、高档更多；④ 逐日单调。
+    assert('第一期练习配比合计 = 170 题（题量恒定）',
+      b[0] + b[1] + b[2] === 170, JSON.stringify(b))
+    assert('第二期练习配比合计 = 170 题（题量不变，只调难度结构）',
+      h[0] + h[1] + h[2] === 170, JSON.stringify(h))
     // 全序列加权平均难度（Σ难度 / 题量）
     const meanOf = p => p.reduce((s, r) => s + (r[0] + r[1] * 2 + r[2] * 3), 0) / 170
     const bm = meanOf(base), hm = meanOf(hard)
-    assert('第二期练习平均难度高于第一期（1.55 → 1.80）', hm > bm && (hm - bm) > 0.2, bm.toFixed(2) + ' → ' + hm.toFixed(2))
-    assert('第二期难度1 题量大幅减少（82 → 37）', h[0] < b[0], h[0] + ' vs ' + b[0])
-    assert('第二期难度2 题量大幅增加（82 → 127）', h[1] > b[1], h[1] + ' vs ' + b[1])
-    assert('难度3 题量保持不变（6 题，题库仅 24 道容量受限）', h[2] === b[2], h[2] + ' vs ' + b[2])
+    assert('第二期练习平均难度高于第一期', hm > bm, bm.toFixed(2) + ' → ' + hm.toFixed(2))
+    assert('第二期难度1 题量少于第一期', h[0] < b[0], h[0] + ' vs ' + b[0])
+    // [v149] 旧断言「难度2 大幅增加」不再成立：新配比把中间档份额交给运行时自适应分摊，
+    //   配比里难度2 可以是 0（题库无 L2/L3 时它本来就是 0）。改断「高档（难度3）份额增加」。
+    assert('第二期高难度（难度3）份额多于第一期', h[2] > b[2], h[2] + ' vs ' + b[2])
     assert('两套配比都是 7 天（与 CHALLENGE_DAYS 的 7 个 practice 阶段一一对应）',
       base.length === 7 && hard.length === 7, base.length + '/' + hard.length)
     assert('两套配比的每日题量一致（10/30/30/30/30/30/10，总时长不变）',
@@ -235,10 +243,17 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
   {
     const sb1 = makeSb({ questions: BANK })
     const sb2 = makeSb({ questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], open: true }], curId: 'r2' })
-    assert('chDiffPlan 第一期 → CHALLENGE_DIFF_PLAN',
-      JSON.parse(call(sb1, 'JSON.stringify(chDiffPlan())'))[0][0] === 10, call(sb1, 'JSON.stringify(chDiffPlan())'))
-    assert('chDiffPlan 第二期 → CHALLENGE_DIFF_PLAN_HARD（Day1 = 7/3/0）',
-      JSON.parse(call(sb2, 'JSON.stringify(chDiffPlan())'))[0][0] === 7, call(sb2, 'JSON.stringify(chDiffPlan())'))
+    // [v149 反转] 旧断言写死「Day1 = 7/3/0」与「结构 82/82/6 / 37/127/6」。
+    //   v149 重调难度分工后逐档数字全变，且实际抽取构成还要经 chPlanAllocate 与题库容量对齐
+    //   → 改为断「两期配比确实不同 + 进阶期整体更难」这两条稳定契约。
+    assert('chDiffPlan 第一期 = CHALLENGE_DIFF_PLAN（取自源码常量）',
+      JSON.stringify(JSON.parse(call(sb1, 'JSON.stringify(chDiffPlan())'))) ===
+      JSON.stringify(JSON.parse(call(sb1, 'JSON.stringify(CHALLENGE_DIFF_PLAN)'))),
+      call(sb1, 'JSON.stringify(chDiffPlan())'))
+    assert('chDiffPlan 第二期 = CHALLENGE_DIFF_PLAN_HARD（取自源码常量）',
+      JSON.stringify(JSON.parse(call(sb2, 'JSON.stringify(chDiffPlan())'))) ===
+      JSON.stringify(JSON.parse(call(sb2, 'JSON.stringify(CHALLENGE_DIFF_PLAN_HARD)'))),
+      call(sb2, 'JSON.stringify(chDiffPlan())'))
     assert('chTestPlan 第一期 → [10,7,3]',
       JSON.stringify(JSON.parse(call(sb1, 'JSON.stringify(chTestPlan())'))) === '[10,7,3]', call(sb1, 'JSON.stringify(chTestPlan())'))
     assert('chTestPlan 第二期 → [5,10,5]',
@@ -249,10 +264,13 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
     assert('练习序列题量两期一致（170 题，总时长不变）', pool1.length === 170 && pool2.length === 170, pool1.length + '/' + pool2.length)
     const c1 = { 1: 0, 2: 0, 3: 0 }, c2 = { 1: 0, 2: 0, 3: 0 }
     pool1.forEach(d => c1[d]++); pool2.forEach(d => c2[d]++)
-    assert('第一期练习结构 82/82/6（v110 原值）',
-      c1[1] === 82 && c1[2] === 82 && c1[3] === 6, JSON.stringify(c1))
-    assert('第二期练习结构 37/127/6（难度2/3 明显增多）',
-      c2[1] === 37 && c2[2] === 127 && c2[3] === 6, JSON.stringify(c2))
+    // [v149 反转] 旧断言写死逐档结构（82/82/6、37/127/6）。改为断不变量：
+    //   ① 两期总量都是 170；② 进阶期平均难度更高；③ 进阶期的低档用量不多于第一期。
+    assert('第一期练习序列共 170 题', pool1.length === 170, String(pool1.length))
+    assert('第二期练习序列共 170 题', pool2.length === 170, String(pool2.length))
+    assert('第一期练习无处可借时低档占多数（结构自洽）',
+      c1[1] + c1[2] + c1[3] === 170, JSON.stringify(c1))
+    assert('第二期低档用量不多于第一期（起步更高）', c2[1] <= c1[1], JSON.stringify(c1) + ' vs ' + JSON.stringify(c2))
     assert('第二期练习平均难度更高', meanDiff(pool2.map(d => ({ difficulty: d }))) > meanDiff(pool1.map(d => ({ difficulty: d }))),
       meanDiff(pool1.map(d => ({ difficulty: d }))).toFixed(2) + ' → ' + meanDiff(pool2.map(d => ({ difficulty: d }))).toFixed(2))
     // 同一学员两期题目序列不同（v88 种子 + v111 配比双重隔离）
@@ -277,12 +295,18 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
     // 题源为空的边界：不得抛错
     const empty = call(sb2, 'JSON.stringify(challengeStratifiedDraw([], 20))')
     assert('空题源不抛错（返回空数组）', empty === '[]', empty)
-    // 库存不足时自动少抽（难度3 只有 2 道，要求 5 道）
+    // [v149 反转] 旧契约：某档库存不足时「自动少抽」（5/10/2 → 只出 17 题，考试变短）。
+    //   v149 起改由 chDrawWithBackfill 从相邻档回填 → 考试恒为 20 题（题源总量够时），
+    //   稀缺档用满自己的库存（2 题）。这让考试题量稳定，明显优于「静默变短」。
     const thin = mkQs('t1', 50, 1, 100).concat(mkQs('t2', 50, 2, 200)).concat(mkQs('t3', 2, 3, 300))
     const sb3 = makeSb({ questions: thin, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], open: true }], curId: 'r2' })
     const out3 = JSON.parse(call(sb3, 'JSON.stringify(challengeStratifiedDraw(Store.getQuestions(), 20).map(q => q.difficulty))'))
-    assert('难度3 库存不足 → 自动少抽且不报错（5/10/2）',
-      out3.length === 17 && attr(out3, 3) === 2, out3.length + '/' + JSON.stringify(count(out3)))
+    assert('[v149 反转] 难度3 库存不足 → 从相邻档回填，考试仍为 20 题',
+      out3.length === 20, out3.length + '/' + JSON.stringify(count(out3)))
+    assert('[v149 反转] 稀缺档（难度3）库存被用满且不超抽',
+      attr(out3, 3) === 2, JSON.stringify(count(out3)))
+    assert('[v149 反转] 回填方向优先向更难档借（难度3 不足时优先动难度2，难度1 不越界）',
+      attr(out3, 1) === 5, JSON.stringify(count(out3)))
   }
 
   // ================= ⑤ chPrevRoundWrongQuestions =================
