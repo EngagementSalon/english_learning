@@ -274,7 +274,23 @@ function quizTitleHtml(q) {
 }
 // listen 题进入时自动朗读一次（仅本地语音可用时自动播，答题中才朗读，回顾/已提交不自动朗读）
 function autoplayListen(q) {
-  if (q && q.type === 'listen' && listenVoiceMode() === 'local') setTimeout(() => speakEnglish(q.question), 350)
+  if (!q) return
+  if (q.type === 'listen') {
+    if (listenVoiceMode() === 'local') setTimeout(() => speakEnglish(q.question), 350)
+    return
+  }
+  // v155：voicematch 作答时不再给选项文字，学员必须立刻知道「这里有声音」→ 自动试播第一个选项。
+  // 与 listen 同口径：仅本地语音可用时自动播（安卓/无声机型走 online 时不自动播，
+  // 避免页面一进来就发一串注定失败的网络请求；这些设备由「听不见？显示文字」开关兜底）。
+  // 绝不朗读题干 —— 题干正是要学员听出来的那一项，读了就等于给答案。
+  if (q.type === 'voicematch') {
+    if (vmRevealOn(q)) return                      // 已展开文字（说明学员已放弃听音）不再自动播
+    if (listenVoiceMode() !== 'local') return
+    const idxs = visibleOptionIndexes(q.options)
+    if (!idxs.length) return
+    const first = String(q.options[idxs[0]] == null ? '' : q.options[idxs[0]]).trim()
+    if (first) setTimeout(() => speakEnglish(first), 350)
+  }
 }
 
 // ====== v87：题型自洽兜底 ======
@@ -307,15 +323,43 @@ function safeQType(q) {
 }
 
 // voicematch（看字选音）作答中是否隐藏选项文字：
-// 真·辨音题 = 题干是英文文字、且某个选项文字与题干一致（选出与题干读音相同的那一项）→ 隐藏文字，否则看字就能选。
-// 反之（题干是中文提问，或没有任何选项文字与题干相同）说明这道题实质是「看题干选词」的普通选择题被录成了 voicematch，
-// 必须显示选项文字，否则学生看不到任何可选内容 —— 线上反馈「有些题目选不了」的主要成因。
+// v155 起：**只要题干非空，作答时一律隐藏选项文字** —— 语音题的作答方式只有一种：听音选相符项。
+// 沿革：v87 曾把「中文题干」判为「看题选词」而显示文字（当时是为了救「有些题目选不了」），
+// 结果「看字选音」在中文题干题上退化成「看字选字」——学员截图反馈「语音题后面还有文字，语音题的意义何在」。
+// 现改为一律隐藏，并配套「听不见？显示文字」求助开关（vmRevealOn / vmToggleReveal），
+// 既保住语音题的本义，又不重演 v87「听不到就彻底没法做」的老问题。
+// 唯一例外：题干为空 = 脏数据（没有题目任务），显示文字让学员至少有东西可点。
 function vmHideOptionText(q) {
   const stem = String((q && q.question) || '').trim()
   if (!stem) return false
-  if (/[\u4e00-\u9fff]/.test(stem)) return false      // 中文题干 = 看题选词，必须显示选项
-  const opts = Array.isArray(q && q.options) ? q.options : []
-  return opts.some(o => String(o == null ? '' : o).trim().toLowerCase() === stem.toLowerCase())
+  return true
+}
+
+// ====== v155：「听不见？显示文字」求助开关 ======
+// 语义：只对**当前这一道题**生效（按题目键记忆），换题自动回到隐藏态 ——
+// 否则学员点过一次后，后面所有语音题都白给了。
+let vmRevealStem = ''
+function vmQKey(q) {
+  const id = q && q.id
+  if (id !== undefined && id !== null && String(id) !== '') return String(id)
+  return String((q && q.question) || '')
+}
+function vmRevealOn(q) { return !!vmRevealStem && vmRevealStem === vmQKey(q) }
+// 本行/本题此刻是否真的要隐藏文字（数据形态 && 未被求助开关打开）
+function vmHideNow(q) { return vmHideOptionText(q) && !vmRevealOn(q) }
+// 点「听不见？显示文字 / 收起文字」：翻转本开关并就地重渲染当前题。
+// 重渲染函数名由渲染方通过 data-r 传入（练习/考试/定级/挑战/线下课各不同），
+// 沿用本项目内联 onclick 定式：不传值，data-* + onclick="fn(this)"。
+function vmToggleReveal(btn) {
+  const key = (btn && btn.dataset && btn.dataset.k) || ''
+  if (!key) return
+  vmRevealStem = (vmRevealStem === key) ? '' : key
+  const name = (btn && btn.dataset && btn.dataset.r) || ''
+  if (!name) return
+  try {
+    const fn = (typeof globalThis !== 'undefined') ? globalThis[name] : undefined
+    if (typeof fn === 'function') fn()
+  } catch (e) { /* ignore */ }
 }
 
 // voicematch（看字选音）选项行
@@ -335,17 +379,28 @@ function vmOptRowHtml(q, ans, i, mode, pickFn) {
     : `<button class="vm-choose" type="button" onclick="event.stopPropagation();${pickFn}(${i})">${escHtml(t('vmChoose'))}</button>`
   let inner
   if (mode === 'review') inner = `${play}${online}<span class="vm-opt-text">${escHtml(opt)}</span>`
-  else if (vmHideOptionText(q)) inner = `${play}${online}${choose}`
+  else if (vmHideNow(q)) inner = `${play}${online}${choose}`
   else inner = `${play}${online}<span class="vm-opt-text">${escHtml(opt)}</span>${choose}`
   return `<div class="${cls}" ${onClick ? `onclick="${onClick}"` : ''}>
     <div class="option-badge">${badge}</div>
     <div class="option-text vm-opt">${inner}</div>
   </div>`
 }
-// voicematch 选项整段 HTML（作答提示按「是否隐藏文字」两态给不同话术）
-function vmOptionsHtml(q, ans, mode, pickFn) {
-  const hint = mode === 'review' ? ''
-    : `<p class="form-hint vm-hint">${t(vmHideOptionText(q) ? 'vmHint' : 'vmHintText')}</p>`
+// voicematch 选项整段 HTML
+// v155：作答提示按「此刻是否隐藏文字」两态话术；隐藏态的题额外给一个「听不见？显示文字」求助开关
+//（TTS 完全播不出时学员仍能自救 —— v87「选不了」教训的正式兜底）。
+// rerender = 本页「重渲染当前题」的函数名（字符串），供求助开关就地切换后刷新。
+function vmOptionsHtml(q, ans, mode, pickFn, rerender) {
+  let hint = ''
+  if (mode !== 'review') {
+    const hide = vmHideNow(q)
+    let link = ''
+    if (vmHideOptionText(q)) {
+      const key = vmQKey(q)
+      link = ` <button class="vm-reveal" type="button" data-k="${escAttr(key)}" data-r="${escAttr(String(rerender || ''))}" onclick="event.stopPropagation();vmToggleReveal(this)">${escHtml(t(hide ? 'vmShowText' : 'vmHideText'))}</button>`
+    }
+    hint = `<p class="form-hint vm-hint">${escHtml(t(hide ? 'vmHint' : 'vmHintText'))}${link}</p>`
+  }
   return hint + (q.options || []).map((_, i) => vmOptRowHtml(q, ans, i, mode, pickFn)).join('')
 }
 
@@ -890,7 +945,7 @@ function renderPlacementQuestion() {
   // 题池已由 buildPlacementQuestions 过滤掉畸形题（safeQType !== q.type），这里只会是规范选择题型
   const qt = safeQType(q)
   const optionsHtml = qt === 'voicematch'
-    ? vmOptionsHtml(q, ans, 'live', 'placementPick')
+    ? vmOptionsHtml(q, ans, 'live', 'placementPick', 'renderPlacementQuestion')
     : visibleOptionIndexes(q.options).map(i => {
         const opt = q.options[i]
         const cls = 'option-item' + (ans === i ? ' selected' : '')
@@ -1434,7 +1489,7 @@ function renderPracticeQuestion() {
 
   let optionsHtml = ''
   if (qt === 'voicematch') {
-    optionsHtml = vmOptionsHtml(q, ans, submitted ? 'review' : 'live', 'selectOption')
+    optionsHtml = vmOptionsHtml(q, ans, submitted ? 'review' : 'live', 'selectOption', 'renderPracticeQuestion')
   } else if (qt === 'single' || qt === 'judge' || qt === 'pronounce' || qt === 'listen') {
     // v107：只渲染有效选项（同步删除尾部空槽），判分下标仍用原始 i
     optionsHtml = visibleOptionIndexes(q.options).map(i => {
@@ -1732,7 +1787,7 @@ function renderExamQuestion() {
 
   let optionsHtml = ''
   if (qt === 'voicematch') {
-    optionsHtml = vmOptionsHtml(q, ans, 'live', 'examSelect')
+    optionsHtml = vmOptionsHtml(q, ans, 'live', 'examSelect', 'renderExamQuestion')
   } else if (qt === 'single' || qt === 'judge' || qt === 'pronounce' || qt === 'listen') {
     // v107：只渲染有效选项（同步删除尾部空槽）
     optionsHtml = visibleOptionIndexes(q.options).map(i => {

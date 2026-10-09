@@ -159,12 +159,20 @@ ok(csSrc.indexOf('options: _optCompact(x.o || [], x.a || [], x.t || \'single\'),
 
 console.log('=== 六、渲染层接线（三个页面八个分支）===')
 // app.js：练习 single 分支 + 练习 multiple 分支 + 考试 single + 考试 multiple + 水平测试 = 5 处渲染
-//         + safeQType 内 1 处计数 = 6 次出现（safeQType 那次不是渲染分支，按行号排除）
+//         + safeQType 内 1 处计数（非渲染分支） + v155 autoplayListen 内 1 处取首选项（非渲染分支）
+//         = 7 次出现，其中渲染分支恒为 5。
+// ★ v155：autoplayListen 新增了 voicematch 自动试播首个选项，需要取有效选项下标 ——
+//   这是一处**非渲染**消费者，所以「渲染分支数」不变、总出现次数 6 → 7。
 const appVisLines = []
 appSrc.split('\n').forEach((l, i) => { if (l.indexOf('visibleOptionIndexes(q.options)') >= 0) appVisLines.push(i + 1) })
-const appRenderBranches = appVisLines.filter(n => !/const n = visibleOptionIndexes/.test(appSrc.split('\n')[n - 1]))
+const appNonRender = n => /const n = visibleOptionIndexes/.test(appSrc.split('\n')[n - 1])
+  || /const idxs = visibleOptionIndexes/.test(appSrc.split('\n')[n - 1])   // v155 autoplayListen
+const appRenderBranches = appVisLines.filter(n => !appNonRender(n))
 eq(appRenderBranches.length, 5, 'app.js 有 5 处渲染分支接入（练习×2 + 考试×2 + 水平测试×1）')
-eq(appVisLines.length, 6, 'app.js visibleOptionIndexes 共 6 次出现（含 safeQType 的 1 次计数）')
+eq(appVisLines.length, 7, 'app.js visibleOptionIndexes 共 7 次出现（含 safeQType 1 + v155 autoplay 1 两处非渲染计数）')
+// v155：autoplayListen 必须真的有这处取用（否则自动试播拿不到可播文本）
+ok(appVisLines.some(n => /const idxs = visibleOptionIndexes/.test(appSrc.split('\n')[n - 1])),
+  'v155 autoplayListen 用 visibleOptionIndexes 取首个可播选项')
 const chSrc = read('challenge.js')
 const chVis = []
 chSrc.split('\n').forEach((l, i) => { if (l.indexOf('visibleOptionIndexes(q.options)') >= 0) chVis.push(i + 1) })

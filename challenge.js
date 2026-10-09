@@ -1740,7 +1740,7 @@ function renderChallengeQuiz() {
 function chOptionsHtml(q, submitted, ans, pickFn) {
   const qt = safeQType(q)
   if (qt === 'voicematch') {
-    return vmOptionsHtml(q, ans, submitted ? 'review' : 'live', pickFn)
+    return vmOptionsHtml(q, ans, submitted ? 'review' : 'live', pickFn, 'renderChallengeQuiz')
   }
   if (qt === 'fill' || qt === 'translate') {
     const val = (ans === undefined || ans === null || ans === -1) ? '' : String(ans)

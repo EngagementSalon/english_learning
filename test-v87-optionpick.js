@@ -146,15 +146,20 @@ const MALFORMED = {
     return q.type === 'single' && q.options.length === 1
   })())
 
-  console.log('\n[2] vmHideOptionText：什么时候必须显示选项文字')
-  assert('题干英文且等于某选项文字 → 隐藏（真辨音题）', run(`vmHideOptionText(${JSON.stringify(VM_PRON)})`) === true)
-  assert('中文题干 → 显示（看题选词题）', run(`vmHideOptionText(${JSON.stringify(VM_MEANING)})`) === false)
-  assert('英文题干但无选项与之相同 → 显示', run('vmHideOptionText({question:"alpha",options:["beta","gamma"]})') === false)
-  assert('空题干 → 显示', run('vmHideOptionText({question:"",options:["a","b"]})') === false)
-  assert('大小写/空格不敏感', run('vmHideOptionText({question:" Housekeeping ",options:["housekeeping","x"]})') === true)
-  assert('种子库 12 道 voicematch 全部保持隐藏（真辨音题不被削弱）',
+  console.log('\n[2] vmHideOptionText：作答时是否隐藏选项文字（v155 新契约）')
+  // v155：语音题的作答方式只有「听音选相符项」一种 → 作答期一律隐藏选项文字（含中文题干）。
+  // 旧契约（v87）把中文题干判为「看题选词」而显示文字，导致语音题退化成普通选择题，已被推翻。
+  assert('题干英文且等于某选项文字 → 隐藏（经典辨音题）', run(`vmHideOptionText(${JSON.stringify(VM_PRON)})`) === true)
+  assert('中文题干 → 也隐藏（v155：纯听音，不再退化成看字选字）', run(`vmHideOptionText(${JSON.stringify(VM_MEANING)})`) === true)
+  assert('英文题干但无选项与之相同 → 隐藏（v155：只要有题干就是语音题）', run('vmHideOptionText({question:"alpha",options:["beta","gamma"]})') === true)
+  assert('空题干 → 显示（脏数据没有题目任务，给文字至少能点）', run('vmHideOptionText({question:"",options:["a","b"]})') === false)
+  assert('大小写/空格不敏感（有题干即隐藏）', run('vmHideOptionText({question:" Housekeeping ",options:["housekeeping","x"]})') === true)
+  assert('种子库全部 voicematch 作答时隐藏（真辨音题不被削弱）',
     run('BANK.questions.filter(q=>q.type==="voicematch").every(q=>vmHideOptionText(q))') === true,
     run('JSON.stringify(BANK.questions.filter(q=>q.type==="voicematch"&&!vmHideOptionText(q)).map(q=>q.question))'))
+  // v155 三态：数据形态（vmHideOptionText） / 求助开关（vmRevealOn） / 实际渲染（vmHideNow）
+  assert('v155：初始未点求助 → vmHideNow 与数据形态一致', run(`vmHideNow(${JSON.stringify(VM_MEANING)})`) === true)
+  assert('v155：求助开关初始关闭', run(`vmRevealOn(${JSON.stringify(VM_MEANING)})`) === false)
 
   console.log('\n[3] voicematch 作答行渲染（朗读归 🔊，选择归「选择此项」）')
   {
@@ -162,20 +167,42 @@ const MALFORMED = {
     assert('真辨音题：不泄露选项文字', !pron.includes('vm-opt-text'), pron.slice(0, 200))
     assert('真辨音题：保留 🔊/🔉/🌐 播放按钮',
       (pron.match(/vm-play/g) || []).length === 4 && (pron.match(/vm-online/g) || []).length === 8)
-    assert('真辨音题：提示语仍是「题干为英文文字」', pron.includes('题干为英文文字'), '')
+    assert('真辨音题：提示语说「选项只播声音」', pron.includes('选项只播声音'), '')
     assert('每个选项都有「选择此项」按钮', (pron.match(/vm-choose/g) || []).length === 4)
     assert('「选择此项」绑定对应 pickFn 索引且不冒泡',
       pron.includes('event.stopPropagation();selectOption(0)') && pron.includes('event.stopPropagation();selectOption(3)'))
     assert('整行仍可直接点击选择', pron.includes('onclick="selectOption(0)"'))
     const meaning = run(`vmOptionsHtml(${JSON.stringify(VM_MEANING)}, -1, 'live', 'selectOption')`)
-    assert('中文题干 voicematch：选项文字全部显示（核心修复）',
-      (meaning.match(/vm-opt-text/g) || []).length === 4 && meaning.includes('journey') && meaning.includes('choosing'),
+    // ★ 注意：选项文本必然出现在 🔊 按钮的 data-w 里（要朗读它）——判「是否泄露文字」必须先剥掉 data-w，
+    //   否则会把朗读属性误判成可见文字。
+    const visibleOnly = h => String(h).replace(/data-w="[^"]*"/g, '')
+    assert('中文题干 voicematch：v155 起同样不显示选项文字（核心变更）',
+      (meaning.match(/vm-opt-text/g) || []).length === 0
+      && !visibleOnly(meaning).includes('journey') && !visibleOnly(meaning).includes('choosing'),
       meaning.slice(0, 300))
-    assert('中文题干 voicematch：提示语换成「看题选词」话术', meaning.includes('选出与题干相符的一项') && !meaning.includes('题干为英文文字'))
+    assert('中文题干 voicematch：提示语同样是「选项只播声音」', meaning.includes('选项只播声音') && !meaning.includes('vmHintText'))
     assert('中文题干 voicematch：同样有「选择此项」', (meaning.match(/vm-choose/g) || []).length === 4)
+    // v155：求助开关 —— 隐藏态给「听不见？显示文字」，点开后就地重渲染
+    assert('作答态渲染「听不见？显示文字」求助开关', meaning.includes('vm-reveal') && meaning.includes('听不见？显示文字'))
+    assert('求助开关带题目键（data-k）', meaning.includes('data-k="9002"'))
+    assert('未传重渲染函数名时 data-r 为空（不崩、不误调）', meaning.includes('data-r=""'))
+    assert('求助开关不参与选项计数（无 vm-play/vm-online 污染）',
+      (meaning.match(/vm-play/g) || []).length === 4 && (meaning.match(/vm-online/g) || []).length === 8)
+    // 点开求助开关 → 文字出现、链接变「收起文字」
+    run(`vmToggleReveal({dataset:{k:'9002', r:''}})`)
+    const revealed = run(`vmOptionsHtml(${JSON.stringify(VM_MEANING)}, -1, 'live', 'selectOption')`)
+    assert('点开求助后：选项文字全部显示',
+      (revealed.match(/vm-opt-text/g) || []).length === 4 && revealed.includes('journey') && revealed.includes('choosing'),
+      revealed.slice(0, 300))
+    assert('点开求助后：链接变「收起文字」且提示语改为「已显示选项文字」',
+      revealed.includes('收起文字') && revealed.includes('已显示选项文字'))
+    assert('换一道题自动回到隐藏态（开关不跨题）',
+      run(`vmRevealOn(${JSON.stringify(VM_PRON)})`) === false && run(`vmHideNow(${JSON.stringify(VM_PRON)})`) === true)
+    run(`vmToggleReveal({dataset:{k:'9002', r:''}})`)   // 收起，避免污染后续断言
+    assert('再点一次收起文字', run(`vmRevealOn(${JSON.stringify(VM_MEANING)})`) === false)
     const rev = run(`vmOptionsHtml(${JSON.stringify(VM_PRON)}, 1, 'review', null)`)
-    assert('回顾模式：显示文字、无「选择此项」、无行级 onclick',
-      rev.includes('vm-opt-text') && !rev.includes('vm-choose') && !rev.includes('selectOption('))
+    assert('回顾模式：显示文字、无「选择此项」、无行级 onclick、无求助开关',
+      rev.includes('vm-opt-text') && !rev.includes('vm-choose') && !rev.includes('selectOption(') && !rev.includes('vm-reveal'), rev.slice(0, 200))
   }
 
   console.log('\n[4] 练习页：选项 A（索引 0）必须能高亮')
@@ -246,7 +273,10 @@ const MALFORMED = {
     run('chTextInput("specialize")')
     assert('挑战页填空输入写入 chs.answers', run('chs.answers[0]') === 'specialize')
     const chVm = run(`chOptionsHtml(${JSON.stringify(VM_MEANING)}, false, -1, 'chPick')`)
-    assert('挑战页中文题干 voicematch → 显示选项文字', (chVm.match(/vm-opt-text/g) || []).length === 4)
+    assert('挑战页中文题干 voicematch → v155 起不显示选项文字（与练习页同口径）',
+      (chVm.match(/vm-opt-text/g) || []).length === 0 && chVm.includes('vm-reveal'))
+    assert('挑战页求助开关回指挑战页渲染函数',
+      chVm.includes("data-r=\"renderChallengeQuiz\""), chVm.slice(0, 300))
     // 线下课页
     const cHtml = run(`(function(){ courseQuiz = { type:'homework', questions: [${JSON.stringify(MALFORMED)}], answers: [-1], index: 0, submitted: false, reviewing: false }; courseRenderTake(); return document.getElementById('page-course').innerHTML })()`)
     assert('线下课页畸形题 → 文本输入框', cHtml.includes('input-answer'), cHtml.slice(0, 200))

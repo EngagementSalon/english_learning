@@ -1680,7 +1680,7 @@ function courseRenderTake() {
   let optionsHtml = ''
   if (qt === 'voicematch') {
     const dis = locked ? '' : 'coursePick'
-    optionsHtml = vmOptionsHtml(q, ans, showFeedback ? 'review' : 'live', dis)
+    optionsHtml = vmOptionsHtml(q, ans, showFeedback ? 'review' : 'live', dis, 'courseRenderTake')
   } else if (qt === 'single' || qt === 'judge' || qt === 'pronounce' || qt === 'listen') {
     // v107：只渲染有效选项（丢掉尾部空槽）
     optionsHtml = visibleOptionIndexes(q.options).map(i => {
