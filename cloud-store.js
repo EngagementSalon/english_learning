@@ -116,7 +116,7 @@ function _roundsNorm(doc) {
     if (!r || typeof r !== 'object') return
     const id = String(r.id || '').trim()
     if (!id) return
-    out.push({
+    const rec = {
       id,
       name: String(r.name || ('第 ' + (i + 1) + ' 期')),
       // v89：适用部门（空数组 = 全部部门；元素为分部门 slug 如 'dining/bar'）
@@ -128,9 +128,32 @@ function _roundsNorm(doc) {
       startAt: Number(r.startAt) || 0,
       endAt: Number(r.endAt) || 0,
       at: Number(r.at) || 0,
-    })
+    }
+    // ★★ v152 关键：seq **只在原记录确实带正整数 seq 时才加上**。
+    //   绝不能无条件写 `seq: 0` —— _roundSeqOf 是靠「seq 字段缺失」来识别
+    //   「存量期、改按同组数组顺序现算」的。一旦给存量期补上 0，
+    //   现算兜底全部失效，所有部门组的期号都会塌成「第 1 期」。
+    //   读取侧若需要 0 语义，自行用 `Number(r.seq) || 0` 处理即可。
+    if (Number(r.seq) > 0) rec.seq = Math.floor(Number(r.seq))
+    out.push(rec)
   })
   return out
+}
+// v152：取某营次的「本部门组期号」。有显式 seq 用它；存量数据（无 seq）按数组顺序现算兜底
+//   —— 现算只依赖「同组营次的相对先后」，不依赖营次名称，故历史数据也能得到稳定答案。
+function _roundSeqOf(arr, id) {
+  const list = arr || []
+  const rec = list.find(r => r.id === String(id || ''))
+  if (!rec) return 0
+  if (Number(rec.seq) > 0) return Math.floor(Number(rec.seq))
+  const key = _roundDeptGroupKey(rec)
+  let n = 0
+  for (const r of list) {
+    if (_roundDeptGroupKey(r) !== key) continue
+    n++
+    if (r.id === rec.id) return n
+  }
+  return 0
 }
 // 当前营次：doc.chRoundCur 命中则用它，否则取最后一个（最新一期）。
 function _roundCurrent(doc) {
@@ -218,16 +241,62 @@ function _roundSlugKey(id) {
   return s
 }
 // 营次 id 生成：'rN' 递增（N 取已有序号最大值 +1，避免删除后重号）
-function _roundNextId(arr) {  let mx = 0
+// ⚠️ id 是**全局**序号、且是数据键（记录 rd / 重置标记 / 存档键全靠它），**绝不按部门分组**——
+//   分组会让「同部门第 N 期」的 id 依赖创建顺序，改名/换部门后 id 语义漂移、历史数据失联。
+//   用户可见的「第几期」由 seq 字段承担（见下），id 只管唯一。
+function _roundNextId(arr) {
+  let mx = 0
   ;(arr || []).forEach(r => {
     const m = /^r(\d+)$/.exec(String((r && r.id) || ''))
     if (m) mx = Math.max(mx, Number(m[1]))
   })
   return 'r' + (mx + 1)
 }
-// 新营次默认名称：序号按数组长度 +1（显示用，可被管理员覆盖）
-function _roundDefaultName(arr) {
-  return '第 ' + ((arr || []).length + 1) + ' 期'
+// ---- v152：营次「按部门独立编号」----
+// 背景（用户 2026-10-09 指出）：原实现 _roundDefaultName 按**全数组长度 +1** 命名，导致
+//   「标帜第一期(r1) / 艳中第一期(r2) / 标帜第二期(r3)」这种跨部门交错、期号无意义的局面；
+//   某个部门想拿到「自己的第二期」得等全局排到很后面。现改为**按部门分组计数**。
+// ★ 存储设计：把期号**显式存进字段 `seq`**，不在渲染时现算。理由：
+//   ① `depts` 事后可被 setChallengeRound 改 → 现算会让「同部门第几期」随编辑漂移；
+//   ② 显式字段可在迁移时一次性回填，且不依赖营次名称（名称是可变显示字段，见 _roundSlugKey）。
+// 部门组键：depts 为空（全部部门适用）→ '__all__'；否则取**排序后拼接**（多部门共用的期互相计号）。
+const ROUND_DEPT_ALL_KEY = '__all__'
+function _roundDeptGroupKey(r) {
+  const list = (r && Array.isArray(r.depts)) ? r.depts.filter(x => typeof x === 'string' && x).slice().sort() : []
+  return list.length ? list.join('+') : ROUND_DEPT_ALL_KEY
+}
+// 计算某部门组的下一个期号。
+// ★ 关键：同组里**存量数据没有 seq**（归一为 0）→ 不能只读 seq 字段，否则会把它们当空气、
+//   算出「第 1 期」而把新期编到已有的第 2 期头上。这里对每个同组项都用 _roundSeqOf 口径
+//   （显式 seq 优先，缺省按数组顺序现算），取组内最大值 + 1。
+function _roundNextSeq(arr, depts) {
+  const key = _roundDeptGroupKey({ depts: depts })
+  let mx = 0
+  ;(arr || []).forEach(r => {
+    if (_roundDeptGroupKey(r) !== key) return
+    const n = Number(r && r.seq) > 0 ? Math.floor(Number(r.seq)) : _roundSeqOf(arr, r.id)
+    if (isFinite(n) && n > mx) mx = n
+  })
+  return mx + 1
+}
+// 部门组的中文前缀（用于默认名）。分部门 slug → 中文名由调用方注入的取名函数承担；
+// 这里只做「大部门 / 全部」的兜底，避免 cloud-store 依赖 i18n。
+function _roundDeptPrefix(depts, labelOf) {
+  const list = (Array.isArray(depts) ? depts : []).filter(x => typeof x === 'string' && x)
+  if (!list.length) return ''
+  if (typeof labelOf === 'function') {
+    const names = list.map(k => labelOf(k)).filter(Boolean)
+    if (names.length) return names.join('、')
+  }
+  return list.join('、')
+}
+// 新营次默认名称：v152 起**按部门组编号**（显示用，可被管理员覆盖）。
+// labelOf 可选：把 slug 转中文（如 'dining/ird' → '客房送餐部'）。缺省则用 slug 原文。
+// 命名风格对齐线上存量营次（形如「标帜餐厅七天挑战第二期」，期号不加空格）。
+function _roundDefaultName(arr, depts, labelOf) {
+  const seq = _roundNextSeq(arr, depts)
+  const prefix = _roundDeptPrefix(depts, labelOf)
+  return prefix ? (prefix + '七天挑战第' + seq + '期') : ('第 ' + seq + ' 期')
 }
 // ---- v89 营次 × 部门 ----
 // 营次适用部门匹配：r.depts 为空 → 全部部门适用（兼容 v88 存量营次）；
@@ -901,8 +970,10 @@ const CloudSync = {
     } catch (e) { /* ignore */ }
     this._chRoundSeen = _roundsSeenIds()
   },
-  // 新建营次。opts = { name, open, examOpen, startAt, endAt, examStartAt, examEndAt, makeCurrent }
+  // 新建营次。opts = { name, open, examOpen, startAt, endAt, examStartAt, examEndAt, depts, makeCurrent }
   // 新营次默认「未开放」（除非显式 open:true）——避免误点把全班推进新一期。
+  // v152：① 期号 seq 按**部门组**编号（同一批 depts 自成一列期号）；
+  //       ② makeCurrent === false 时**不切换当前营次**（解决「只想建期却顺手把全平台当前期切走」）。
   async addChallengeRound(opts) {
     const o = opts || {}
     let newId = ''
@@ -917,10 +988,13 @@ const CloudSync = {
       const startAt = Number(o.startAt) || 0
       const endAt = Number(o.endAt) || 0
       const manual = o.open === true
+      const depts = Array.isArray(o.depts) ? o.depts.filter(x => typeof x === 'string' && x) : []
       rounds.push({
         id: newId,
-        name: String(o.name || '').trim() || _roundDefaultName(rounds),
-        depts: Array.isArray(o.depts) ? o.depts.filter(x => typeof x === 'string' && x) : [],
+        name: String(o.name || '').trim() || _roundDefaultName(rounds, depts, o.labelOf),
+        depts,
+        // v152：按部门组的期号（显式存，避免 depts 事后被改导致期号漂移）
+        seq: _roundNextSeq(rounds, depts),
         open: manual,
         examOpen: o.examOpen === true,
         examStartAt: Number(o.examStartAt) || 0,
@@ -928,7 +1002,14 @@ const CloudSync = {
         startAt, endAt,
         at: manual ? Date.now() : 0,
       })
-      doc.chRoundCur = newId   // 新建即设为当前营次（学员端切换依据）
+      // ★★ v152 关键：存量营次**原样保留，绝不补写 seq**。
+      //   上面 push 的新期带 seq；存量期在本数组里已是 _roundsNorm 的产物 ——
+      //   而 _roundsNorm 只对「原本就有正整数 seq」的记录保留该字段，
+      //   存量期（从未有 seq）不会被补成 0。二者配合才能让 _roundSeqOf 的
+      //   「缺 seq → 按同组数组顺序现算」兜底继续生效。
+      //   若任一处给存量期写上 seq: 0，新期期号会全部塌成「第 1 期」。
+      // v152：makeCurrent 缺省仍为 true（保持 v88 契约）；显式传 false 则只建不切
+      if (o.makeCurrent !== false) doc.chRoundCur = newId
       return { id: newId }
     }, check => {
       const arr = _roundsNorm(check)
@@ -978,6 +1059,23 @@ const CloudSync = {
     if (!existed) return { ok: false, reason: 'noround' }
     if (res.ok) this._roundSeenAdd(rid)
     return res.ok ? { ok: true, id: rid } : res
+  },
+  // v152：公开「某营次在**本部门组**内的期号」——后台新建提示（dashRoundDefaultNameHint）
+  //   必须与此口径一致，否则存量期（无 seq）会被当成 0 → 提示恒为「第 1 期」。
+  //   list 传 _chRounds 或任意 { id, depts, seq } 数组；缺省用当前已拉取的营次。
+  roundSeqOf(id, list) {
+    const arr = Array.isArray(list) ? list : (Array.isArray(this._chRounds) ? this._chRounds : [])
+    return _roundSeqOf(arr, id)
+  },
+  // v152：给定一批部门，算「下一个期号」（同组已有最大期号 + 1）。后台提示复用。
+  roundNextSeq(depts, list) {
+    const arr = Array.isArray(list) ? list : (Array.isArray(this._chRounds) ? this._chRounds : [])
+    return _roundNextSeq(arr, depts)
+  },
+  // v152：按部门组生成默认营次名（与写入路径同一个函数，保证提示与落库完全一致）
+  roundDefaultName(depts, labelOf, list) {
+    const arr = Array.isArray(list) ? list : (Array.isArray(this._chRounds) ? this._chRounds : [])
+    return _roundDefaultName(arr, depts, labelOf)
   },
   // 删除营次。顺带清掉该营次的考试重置标记（doc.chRoundLevels[营次]）。
   // 不清理学员浏览器里该期的本地存档（换机器不可控），但当前营次被删时会回落到最新一期。

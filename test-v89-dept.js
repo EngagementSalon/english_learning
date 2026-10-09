@@ -638,7 +638,12 @@ function makeDeptSandbox() {
     assert('dashRoundDeptText：多个部门并列显示', /酒吧团队/.test(dt) && /客房送餐/.test(call(sb, 'dashRoundDeptText({ depts: ["dining/bar","dining/ird"] })')))
     assert('营次面板表头含「适用部门」列', /roundDeptLabel/.test(APP) && new RegExp("t\\('roundDeptLabel'\\)").test(APP))
     assert('新建营次表单含部门多选（dashRoundDept 复选框）', /class="dashRoundDept"/.test(APP))
-    assert('dashCreateRound 把勾选部门传给云端', /addChallengeRound\(\{ name, startAt, endAt, depts \}\)/.test(APP))
+    // v152：调用形态扩展为 { name, startAt, endAt, depts, makeCurrent, labelOf }
+    //   （makeCurrent = 是否顺手切当前期；labelOf = slug→中文，用于按部门组生成默认名）
+    assert('dashCreateRound 把勾选部门传给云端', /addChallengeRound\(\{[\s\S]{0,160}?depts[\s\S]{0,160}?\}\)/.test(APP))
+    assert('v152：dashCreateRound 传 makeCurrent（可选不切当前期）', /makeCurrent/.test(APP))
+    assert('v152：dashCreateRound 传 labelOf（按部门组生成默认名）', /labelOf:/.test(APP))
+    assert('v152：新建表单含「是否设为当前营次」勾选项', /id="dashRoundMakeCur"/.test(APP))
   }
 
   // ================= ⑪ i18n =================

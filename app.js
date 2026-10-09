@@ -3989,8 +3989,16 @@ function dashRoundsPanelHtml() {
     const st = dashRoundOpenState(r, now)
     const isCur = r.id === curId
     const viewed = dashRoundView === r.id
+    // v152：显示「本部门组内的期号」徽章 —— 让管理员一眼看出「标帜第 2 期 / 客房送餐第 1 期」
+    //   是各成一列的，而不是被全局序号搅在一起的。
+    const dseq = (typeof CloudSync !== 'undefined' && typeof CloudSync.roundSeqOf === 'function')
+      ? CloudSync.roundSeqOf(r.id)
+      : (Number(r.seq) || 0)
+    const seqTag = dseq > 0
+      ? ` <span title="${escAttr(t('dashRoundSeqTitle'))}" style="font-size:11px;font-weight:800;color:#7c3aed;background:#f3e8ff;border-radius:10px;padding:2px 8px">#${dseq}</span>`
+      : ''
     return `<tr${viewed ? ' style="background:#eff6ff"' : ''}>
-      <td style="white-space:nowrap">${escHtml(r.name)}${isCur ? ` <span style="font-size:11px;font-weight:800;color:#2563eb;background:#dbeafe;border-radius:10px;padding:2px 8px">${t('dashRoundCurrent')}</span>` : ''}</td>
+      <td style="white-space:nowrap">${escHtml(r.name)}${seqTag}${isCur ? ` <span style="font-size:11px;font-weight:800;color:#2563eb;background:#dbeafe;border-radius:10px;padding:2px 8px">${t('dashRoundCurrent')}</span>` : ''}</td>
       <td style="white-space:nowrap">${dashRoundStateTag(st)}</td>
       <td>${dashRoundDeptText(r)}</td>
       <td style="white-space:nowrap;font-size:12px;color:#6b7280">${dashRoundWindowText(r)}</td>
@@ -4029,6 +4037,10 @@ function dashRoundsPanelHtml() {
           <div>${dashDeptOptionsHtml([])}</div>
           <p class="form-hint" style="margin:0">${t('dashRoundDeptHint')}</p>
         </div>
+        <label style="display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="dashRoundMakeCur" checked />
+          <span>${t('dashRoundMakeCurLabel')}</span>
+        </label>
         <div style="display:flex;gap:8px">
           <button class="btn btn-primary btn-sm" id="dashRoundCreateBtn" onclick="dashCreateRound()">${t('dashRoundCreate')}</button>
           <button class="btn btn-ghost btn-sm" onclick="dashToggleRoundForm()">${t('dashRoundCancel')}</button>
@@ -4073,18 +4085,25 @@ async function dashCreateRound() {
   const nameEl = document.getElementById('dashRoundName')
   const startEl = document.getElementById('dashRoundStart')
   const endEl = document.getElementById('dashRoundEnd')
+  const curEl = document.getElementById('dashRoundMakeCur')
   const name = (nameEl && nameEl.value || '').trim()
   const startAt = dashParseLocalDT(startEl && startEl.value)
   const endAt = dashParseLocalDT(endEl && endEl.value)
   // v89：适用部门（不勾 = 全部部门）
   const depts = dashPickedDepts()
+  // v152：显式选择是否顺手切换当前营次（不勾 = 只建期，当前期保持不动）
+  const makeCurrent = !(curEl && curEl.checked === false)
   if (startAt && endAt && endAt <= startAt) { alert(t('dashRoundCreateFail')); return }
   const btn = document.getElementById('dashRoundCreateBtn')
   if (btn) btn.disabled = true
   try {
-    const res = await CloudSync.addChallengeRound({ name, startAt, endAt, depts })
+    // v152：labelOf 把 slug 转中文 → 默认名形如「客房送餐部七天挑战第一期」
+    const res = await CloudSync.addChallengeRound({
+      name, startAt, endAt, depts, makeCurrent,
+      labelOf: (k) => (typeof adminTabLabel === 'function' ? adminTabLabel(k) : k),
+    })
     if (res && res.ok) {
-      alert(t('dashRoundCreated', name || ('第 ' + ((dashRoundList().length) + 1) + ' 期')))
+      alert(t('dashRoundCreated', name || dashRoundDefaultNameHint(depts)))
       dashRoundView = res.id
       renderDashboard()
     } else {
@@ -4095,6 +4114,33 @@ async function dashCreateRound() {
     alert(t('dashRoundCreateFail'))
     if (btn) btn.disabled = false
   }
+}
+// v152：新建成功但用户没填名字时，给个与云端同口径的默认名提示（按**部门组**编号）
+function dashRoundDefaultNameHint(depts) {
+  const labelOf = (k) => (typeof adminTabLabel === 'function' ? adminTabLabel(k) : k)
+  // ★ 必须直接复用云端同一个函数：存量营次没有 seq 字段，
+  //   若在这里自己按 `Number(r.seq) || 0` 取最大值，会漏算存量期 → 提示恒为「第 1 期」。
+  try {
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.roundDefaultName === 'function') {
+      return CloudSync.roundDefaultName(depts, labelOf)
+    }
+  } catch (e) { /* 回落下面的本地兜底 */ }
+  const list = (dashRoundList() || [])
+  const key = (Array.isArray(depts) && depts.length) ? depts.slice().sort().join('+') : '__all__'
+  const same = list.filter(r => {
+    const d = (Array.isArray(r.depts) ? r.depts.filter(Boolean).slice().sort().join('+') : '') || '__all__'
+    return d === key
+  })
+  let seq = same.length
+  try {
+    if (typeof CloudSync !== 'undefined' && typeof CloudSync.roundNextSeq === 'function') {
+      seq = CloudSync.roundNextSeq(depts)
+    }
+  } catch (e) { /* 用 same.length 兜底 */ }
+  const prefix = (Array.isArray(depts) && depts.length)
+    ? depts.map(labelOf).join('、') + '七天挑战第'
+    : '第 '
+  return prefix + seq + (Array.isArray(depts) && depts.length ? '期' : ' 期')
 }
 async function dashSetRoundCur(el) {
   const rid = (el && el.dataset && el.dataset.rid) || ''

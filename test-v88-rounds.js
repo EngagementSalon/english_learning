@@ -219,7 +219,13 @@ const call = (sb, expr) => vm.runInContext(expr, sb)
     const r2 = JSON.parse(await call(sb, `(async () => JSON.stringify(await CloudSync.addChallengeRound({ startAt: 1700000000000, endAt: 1700100000000 })))()`))
     assert('id 递增（已有 r1/r2 → 新建 r3）', r2.ok === true && r2.id === 'r3', JSON.stringify(r2))
     const rec3 = live.chRounds.find(x => x.id === 'r3')
-    assert('默认名称「第 3 期」（按已有期数 +1）', rec3 && rec3.name === '第 3 期', JSON.stringify(rec3))
+    // v152：默认名改为**按部门组**编号。此处三期（legacy r1 / r2 / r3）都是 depts:[]（全部部门组）
+    //   → r3 是该组第 **3** 期。数值与旧契约（按全数组长度 +1）恰好相同，
+    //   但**口径已变**：旧的是「全数组第 N 期」，新的是「本部门组第 N 期」。
+    //   ⚠️ 本组三期同组，故此处无法区分新旧口径 —— 区分能力由 test-v152-round-seq.js 承担
+    //   （那里 sig / yan / ird 三组交织，旧口径必然算出错误的跨组期号）。
+    assert('默认名称「第 3 期」（本部门组内已有 2 期 +1，v152 起按部门组编号）', rec3 && rec3.name === '第 3 期', JSON.stringify(rec3))
+    assert('v152：seq 落库（全部部门组第 3 期）', rec3 && rec3.seq === 3, JSON.stringify(rec3))
     assert('排期 startAt/endAt 写入', !!rec3 && rec3.startAt === 1700000000000 && rec3.endAt === 1700100000000, JSON.stringify(rec3))
 
     // setChallengeRound：按字段 patch
