@@ -332,6 +332,25 @@ function chRoundListForView() {
     return out
   } catch (e) { return [] }
 }
+// ====== v153：营次列表卡专用取数（汇总视角只显示「登录账号自己部门」的营次）======
+// 用户口径（v153）：「本部门不是应该也只显示自己部门了么」—— v110 的「大部门/全库汇总所有下属营次」
+//   总览卡在 v152 按部门独立编号后反而误导（标题写「本部门」、列的却是别队的期）。
+//   · 分部门视角（'dining/sig' 等）→ 视角本身已是单一部门 → 维持原口径（chRoundListForView）
+//   · 汇总视角（'' 全库 / 'dining' 等大部门 / 'all' 通用）→ 回落**登录账号自己部门**（sessionDeptSlug()）
+//     · 未设部门（典型：管理员账号 dept 为空）→ 空 → 整卡不渲染；要看全队请切「题目部门」到具体分队
+//   ⚠️ 只供「列表卡」使用，绝不动 chRoundListForView 本体 —— 它还被 chCurrentRound 回落、
+//      chRoundViewKey（重载判据）、chRoundMetaText / chHardRoundHtml 回落消费，改了会连坐主链路。
+function chRoundCardList() {
+  try {
+    const k = (typeof chDeptKey === 'function') ? chDeptKey() : ''
+    if (k && k !== 'all' && k.indexOf('/') >= 0) return chRoundListForView()
+    const mine = (typeof sessionDeptSlug === 'function') ? sessionDeptSlug() : ''
+    if (!mine) return []
+    const list = (typeof chRoundListForView === 'function') ? chRoundListForView() : []
+    if (typeof roundDeptMatch !== 'function') return []
+    return list.filter(r => r && r.id && roundDeptMatch(r, mine))
+  } catch (e) { return [] }
+}
 // 视角营次集合的稳定标识：并入「已装载营次」判定 → 大部门视角下营次增减能触发重载/重渲染
 function chRoundViewKey() {
   try {
@@ -1418,15 +1437,16 @@ function chRoundMetaText() {
   } catch (err) { /* ignore */ }
   return ''
 }
-// ====== v110：视角营次列表卡（一级部门视角汇总展示其下各分部门的挑战）======
-// 用户口径：「饮食部点开来应该能看到所有饮食部下属部门的挑战」。
-//   · 单营次视角（分部门/全库）→ 不渲染本卡（避免与上方营次标识条重复）
-//   · 多营次视角（大部门，其下多个分部门各有营次）→ 卡片列出每一期：部门标签 + 期名 + 开放态 + 起止
-// 说明：列表内营次仅供查看（当前存档/进度/上报仍按本视角主营次 chCurrentRound()），
-//   管理员要看某队挑战的进度，用练习页「题目部门」切片切到该分队即可（v97 联动）。
+// ====== v110：视角营次列表卡 → v153 收紧：只显示「单一部门」的历期 ======
+// v110 原口径：「饮食部点开来应该能看到所有饮食部下属部门的挑战」（大部门/全库汇总所有下属营次）。
+// v153 用户口径推翻总览：「本部门不是应该也只显示自己部门了么」—— 汇总视角下列别队的期反而误导
+//   （标题写「本部门」、列的却是标帜/艳中的期）。取数改走 chRoundCardList()：
+//   · 分部门视角 → 该分部门的历期；汇总视角（''/大部门/'all'）→ 登录账号自己部门的历期；
+//     未设部门 / 不足 2 期 → 整卡不渲染（避免与上方营次标识条重复）。
+// 说明：列表内营次仅供查看（当前存档/进度/上报仍按本视角主营次 chCurrentRound()）。
 function chRoundListHtml() {
   try {
-    const list = chRoundListForView()
+    const list = chRoundCardList()
     if (list.length < 2) return ''
     const rows = list.map(r => {
       const st = (typeof roundOpenState === 'function') ? roundOpenState(r, Date.now()) : { state: 'closed' }

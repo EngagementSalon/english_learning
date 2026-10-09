@@ -250,19 +250,22 @@ const i18nSrc = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8')
   // v110 语义演进：一级部门视角改为「汇总展示其下所有分部门的挑战」
   //   · 饮食部（其下 sig 有 r1、yan 有 r2）→ 正常卡 + 列出两期（不再是 noRound 卡）
   //   · 通用（无任何分部门）→ 无营次可汇总 → 仍为 noRound 卡
+  // v153 口径收紧（用户拍板）：「本部门不是应该也只显示自己部门了么」—— 预览块取数同走
+  //   chRoundCardList：汇总视角只显示登录账号自己部门的营次；管理员账号未设部门 → 预览块消失。
+  //   门禁语义不变（饮食部仍不算 noRound，chNoRoundForDept 未动）。
   run(`setPracticeDept('all')`)
   assert('管理员切通用 → noRound 卡（无下属分部门可汇总）',
     run('challengeEntryHtml()').includes(run("t('chDeptNoRound')")))
 
   run(`setPracticeDept('dining')`)
   const admDining = run('challengeEntryHtml()')
-  assert('管理员切「饮食部」一级 → 正常卡（v110：汇总其下各分队挑战）',
+  assert('管理员切「饮食部」一级 → 正常卡（门禁口径未动）',
     !admDining.includes(run("t('chDeptNoRound')")) && admDining.includes("navigate('challenge')"),
     admDining.slice(0, 200))
-  assert('饮食部一级视角列出下属各期（标帜 r1 + 艳中 r2）',
-    admDining.includes(R1_NAME) && admDining.includes(R2_NAME))
-  assert('饮食部一级视角列出分队标签（标帜餐厅/艳中餐厅）',
-    admDining.includes('标帜餐厅') && admDining.includes('艳中餐厅'))
+  // ⚠️ 入口卡标题仍显示「视角代表营次名」（列表最新一期，v110 机制未动）——
+  //   预览块消失与否用卡标题/提示文案做指纹，别拿期名做指纹（期名会误伤代表营次名）。
+  assert('v153：饮食部一级视角不再内嵌下属两期预览（总览卡废除）',
+    !admDining.includes(run("t('chRoundListTitle', 2)")) && !admDining.includes(run("t('chRoundListHint')")))
 
   run('practiceDept = ""')
   const admAll = run('challengeEntryHtml()')

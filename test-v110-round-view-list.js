@@ -6,11 +6,14 @@
 // v110 修法：新增「视角营次列表」chRoundListForView()（大部门展开其下全部子部门 slug 逐个匹配），
 //   并让入口门禁（chNoRoundForDept）/营次名（chRoundName）/装载判定（chEnsureRound）/积分榜
 //   （chLbAggregate）/重渲染 shape 全部改走该列表。
+// v153 口径收紧（用户拍板）：「本部门不是应该也只显示自己部门了么」—— 列表卡取数改走 chRoundCardList()，
+//   汇总视角（全库/大部门/'all'）只显示登录账号自己部门的营次；chRoundListForView 本体不变，
+//   仍被 chNoRoundForDept / chRoundName / chCurrentRound / chEnsureRound / chLbAggregate 消费（本套件继续覆盖）。
 // 覆盖：
 //   1. chRoundViewSlugs 三分支（空=全库 / 'all'=无分队 / 大部门=展开子部门 / 分部门=自身）
 //   2. chRoundListForView：饮食部汇总两期、分部门单期、房务部空、全库全部
 //   3. chNoRoundForDept 语义演进（饮食部有营次 → false；房务部/通用 → true）
-//   4. 挑战页 chRoundListHtml：多期渲染 / 单期不渲染 / 含部门标签与期名
+//   4. 挑战页 chRoundListHtml：v153 收紧后汇总视角不渲染总览卡 / 分部门多期渲染且只含本部门 / 单期不渲染
 //   5. chRoundName / chCurrentRound / chRoundViewKey（大部门取最新一期作代表 + 集合标识）
 //   6. chEnsureRound 纳入视角营次集合（大部门下营次增减触发重载）
 //   7. chLbAggregate 大部门视角汇总下属营次成绩；显式传 round 时行为不变
@@ -99,6 +102,7 @@ const grabFn = (src, name) => {
 
 const R1 = '标帜餐厅七天挑战第一期'
 const R2 = '艳中餐厅七天挑战第一期'
+const SIG2 = '标帜餐厅七天挑战第二期'
 const mkRounds = (extra) => {
   const base = [
     { id: 'r1', name: R1, depts: ['dining/sig'], open: true, examOpen: true },
@@ -225,33 +229,54 @@ const i18nSrc = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8')
   assert('新集合后再调 → 幂等', run('chEnsureRound()') === false)
   setRounds()
 
-  // ============ 五、挑战页营次列表卡 ============
-  console.log('\n=== 五、chRoundListHtml（挑战页列表卡）===')
+  // ============ 五、挑战页营次列表卡（v153 收紧口径）============
+  console.log('\n=== 五、chRoundListHtml（挑战页列表卡，v153：汇总视角只显示自己部门）===')
+  // v153：汇总视角（大部门/全库）只显示「登录账号自己部门」的营次；
+  //   管理员账号未设部门（典型）→ 空 → 整卡不渲染 —— v110 的「汇总所有下属营次」总览卡废除。
   setView('dining')
+  assert('v153：饮食部汇总视角（未设自己部门）→ 不渲染总览卡', run('chRoundListHtml()') === '')
+  setView('')
+  assert('v153：全库视角（未设自己部门）→ 不渲染总览卡', run('chRoundListHtml()') === '')
+  // 分部门视角 = 视角即单一部门：给标帜补第二期 → 卡渲染且只含标帜历期
+  setRounds([{ id: 'r3', name: SIG2, depts: ['dining/sig'], open: true }])
+  setView('dining/sig')
   const hList = run('chRoundListHtml()')
-  assert('饮食部（两期）→ 渲染列表卡', hList.length > 0 && hList.includes(R1) && hList.includes(R2))
-  assert('列表卡含部门标签（标帜餐厅/艳中餐厅）', hList.includes('标帜餐厅') && hList.includes('艳中餐厅'))
-  assert('列表卡含标题键（本部门下设 N 期）', hList.includes(run('t("chRoundListTitle", 2)').replace(/2/g, '2')))
+  assert('标帜（两期）→ 渲染列表卡', hList.length > 0 && hList.includes(R1) && hList.includes(SIG2),
+    'len=' + hList.length)
+  assert('列表卡不含别队营次（艳中）', !hList.includes(R2))
+  assert('列表卡含标题键（本部门下设 N 期）', hList.includes(run('t("chRoundListTitle", 2)')))
+  setRounds()   // 复位
   setView('dining/sig')
   assert('标帜（单期）→ 不渲染列表卡（避免与营次条重复）', run('chRoundListHtml()') === '')
-  setView('')
-  assert('全库视角（两期）→ 渲染列表卡', run('chRoundListHtml()').includes(R1))
 
   console.log('\n=== 五b、renderChallenge 接线 ===')
+  // 分部门两期 → 列表卡照常渲染进挑战页
+  setRounds([{ id: 'r3', name: SIG2, depts: ['dining/sig'], open: true }])
+  setView('dining/sig')
+  getEl('page-challenge').innerHTML = ''
+  run('renderChallenge()')
+  const pageSig = getEl('page-challenge').innerHTML
+  assert('★ 标帜挑战页渲染本部门两期列表', pageSig.includes(R1) && pageSig.includes(SIG2))
+  assert('标帜挑战页不显示「暂无挑战」', !pageSig.includes(run('t("chDeptNoRound")')))
+  // 汇总视角（管理员未设部门）→ 总览卡不再渲染（v153），但门禁语义不变（仍不算「暂无」）
   setView('dining')
   getEl('page-challenge').innerHTML = ''
   run('renderChallenge()')
   const pageDining = getEl('page-challenge').innerHTML
-  assert('★ 饮食部挑战页渲染两期列表', pageDining.includes(R1) && pageDining.includes(R2))
-  assert('饮食部挑战页不显示「暂无挑战」', !pageDining.includes(run('t("chDeptNoRound")')))
+  // ⚠️ 只断「卡」消失，别拿期名做指纹：汇总视角下「进阶复训」卡仍会显示视角代表营次名
+  //   （列表最新一期，v110/v111 既有机制、不在本版范围）—— 探针实证：SIG2 出现在进阶复训卡。
+  assert('★ 饮食部汇总视角不再渲染下属总览卡（v153）',
+    !pageDining.includes(run('t("chRoundListTitle", 3)')) && !pageDining.includes(run('t("chRoundListHint")')))
+  assert('饮食部挑战页仍不算「暂无挑战」（门禁口径未动）', !pageDining.includes(run('t("chDeptNoRound")')))
   setView('dining/bar')
   getEl('page-challenge').innerHTML = ''
   run('renderChallenge()')
   const pageBar = getEl('page-challenge').innerHTML
   assert('酒吧团队挑战页 → 仍为「暂无挑战」说明页', pageBar.includes(run('t("chDeptNoRound")')))
-  assert('酒吧团队说明页不渲染别队营次名', !pageBar.includes(R1) && !pageBar.includes(R2))
+  assert('酒吧团队说明页不渲染别队营次名', !pageBar.includes(R1) && !pageBar.includes(SIG2))
   assert('列表卡接线在挑战页模板中',
     /el\.innerHTML = `[\s\S]{0,200}?\$\{chRoundListHtml\(\)\}/.test(chSrc))
+  setRounds()   // 复位
 
   // ============ 六、积分榜口径 ============
   console.log('\n=== 六、chLbAggregate（大部门汇总下属营次成绩）===')
@@ -299,8 +324,16 @@ const i18nSrc = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8')
   const entryDining = run('challengeEntryHtml()')
   assert('★ 饮食部入口卡：正常卡（可点击）', entryDining.includes("navigate('challenge')")
     && !entryDining.includes(run('t("chDeptNoRound")')))
-  assert('★ 饮食部入口卡内嵌下属两期预览', entryDining.includes(R1) && entryDining.includes(R2))
-  assert('入口卡预览含分队标签', entryDining.includes('标帜餐厅') && entryDining.includes('艳中餐厅'))
+  // ⚠️ 入口卡标题含「视角代表营次名」（列表最新一期，v110 机制未动）—— 预览块消失用卡标题/提示做指纹
+  assert('v153：入口卡不再内嵌别队两期预览',
+    !entryDining.includes(run('t("chRoundListTitle", 2)')) && !entryDining.includes(run('t("chRoundListHint")')))
+  // 分部门两期 → 入口卡内嵌本部门历期预览
+  setRounds([{ id: 'r3', name: SIG2, depts: ['dining/sig'], open: true }])
+  setView('dining/sig')
+  const entrySig2 = run('challengeEntryHtml()')
+  assert('★ 标帜入口卡内嵌本部门两期预览', entrySig2.includes(R1) && entrySig2.includes(SIG2))
+  assert('入口卡预览不含别队营次（艳中）', !entrySig2.includes(R2))
+  setRounds()   // 复位
   setView('dining/sig')
   const entrySig = run('challengeEntryHtml()')
   assert('标帜入口卡不含预览块（单期）', !entrySig.includes(run('t("chRoundListTitle", 2)').split('{')[0] || '本部门下设'))
@@ -313,6 +346,22 @@ const i18nSrc = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8')
   assert('challenge.js 有 chRoundListForView/chRoundViewSlugs/chRoundListHtml',
     /function chRoundListForView\(\)/.test(chSrc) && /function chRoundViewSlugs\(\)/.test(chSrc)
       && /function chRoundListHtml\(\)/.test(chSrc))
+  // v153 护栏：列表卡取数改走 chRoundCardList，且全程 typeof 守卫
+  assert('challenge.js 有 chRoundCardList（v153）', /function chRoundCardList\(\)/.test(chSrc))
+  assert('挑战页列表卡取数已改走 chRoundCardList',
+    /function chRoundListHtml\(\)[\s\S]{0,300}?chRoundCardList\(\)/.test(chSrc))
+  assert('入口卡预览优先 chRoundCardList（缺失时回落旧口径）',
+    /function challengeEntryRoundPreviewHtml\(\)[\s\S]{0,400}?typeof chRoundCardList === 'function'/.test(appSrc)
+      && /function challengeEntryRoundPreviewHtml\(\)[\s\S]{0,600}?typeof chRoundListForView === 'function'/.test(appSrc))
+  assert('chRoundCardList 全程 typeof 守卫（chDeptKey/sessionDeptSlug/chRoundListForView/roundDeptMatch）',
+    /function chRoundCardList\(\)[\s\S]{0,900}?typeof chDeptKey === 'function'/.test(chSrc)
+      && /function chRoundCardList\(\)[\s\S]{0,900}?typeof sessionDeptSlug === 'function'/.test(chSrc)
+      && /function chRoundCardList\(\)[\s\S]{0,900}?typeof chRoundListForView === 'function'/.test(chSrc)
+      && /function chRoundCardList\(\)[\s\S]{0,900}?typeof roundDeptMatch/.test(chSrc))
+  assert('v153 提示文案已更新（zh/en 成对，不再引导切题目部门）',
+    i18nSrc.includes('本部门各期独立开营、题目不同')
+      && /Each round of this department runs independently/.test(i18nSrc)
+      && !i18nSrc.includes('本部门各分队各自开营'))
   assert('chNoRoundForDept 改用 chRoundListForView',
     /function chNoRoundForDept\(\)[\s\S]{0,600}?chRoundListForView\(\)/.test(chSrc))
   assert('chEnsureRound 纳入 _chRoundViewLoaded',

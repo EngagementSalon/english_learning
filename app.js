@@ -1298,11 +1298,15 @@ function challengeEntryHtml() {
     </div>`
 }
 
-// v110：一级部门视角下，入口卡内嵌「下属各部门挑战」预览（两期以上才渲染，与挑战页 chRoundListHtml 同源口径）。
-// 让用户在练习页就能看到「饮食部下有标帜第一期、艳中第一期」而无需进挑战页。
+// v110：入口卡内嵌「本部门历期」预览（两期以上才渲染，与挑战页 chRoundListHtml 同源口径）。
+// v153 收紧：汇总视角不再列别队营次 —— 取数与挑战页同走 chRoundCardList（汇总视角只显示登录账号自己部门）。
+// 让学员在练习页就能看到「本部门已开了哪几期」而无需进挑战页。
 function challengeEntryRoundPreviewHtml() {
   try {
-    const list = (typeof chRoundListForView === 'function') ? chRoundListForView() : []
+    // v153：优先走与挑战页同源的 chRoundCardList；旧沙箱/部分加载只注入了 chRoundListForView 时回落旧口径
+    const list = (typeof chRoundCardList === 'function')
+      ? chRoundCardList()
+      : ((typeof chRoundListForView === 'function') ? chRoundListForView() : [])
     if (list.length < 2) return ''
     const rows = list.map(r => {
       const st = (typeof roundOpenState === 'function') ? roundOpenState(r, Date.now()) : { state: 'closed' }
