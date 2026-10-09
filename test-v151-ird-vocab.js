@@ -81,6 +81,9 @@ const CH_DIFF_PLAN_SRC = extractArr(CH_SRC, 'CHALLENGE_DIFF_PLAN')
 const CH_FNS_FOR_POOL = [
   'chDeptKey', 'chBankQuestions', 'chBankMaxDiff', 'chDiffBucketOf',
   'chBankDiffStats', 'chBankDiffGap',
+  // v154：challengePool / chBankDiffStats / chBankCount 改走营次口径 → 注入新依赖
+  //   （本沙箱无 CloudSync 营次数据 → chRoundBankQuestions 回落视角口径，题源不变）
+  'chRoundRecForCurrent', 'chRoundBankQuestions',
   'challengeRng', 'chUserSeed', 'chPlanAllocate', 'chDrawWithBackfill', 'challengePool',
 ]
 

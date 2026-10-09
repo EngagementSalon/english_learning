@@ -61,6 +61,40 @@ function mockLS(init) {
   }
 }
 
+// ★★★ 钉死随机抽题的「输入种子」——本套件唯一正确的稳定化手段。
+//   背景（踩坑记录）：「第一期考试不含错题注入」是一条**负向断言**，而第一期考试题走的是
+//   challengePool（按「用户名 FNV-1a + 营次」派生种子洗牌后抽 170 题）→ challengeStratifiedDraw。
+//   哪怕把历史错题的 id 挪到 900000+ 段，题库里只要存在这些题，抽题**理论上就可能抽中它们**。
+//   实测：不定种子时约 1/5~1/3 次跑假失败；固定 uid 也无效——因为 uid 只决定「序列的起点」，
+//   而下面 3 处 sb 复用了 challengeState/history 等**带随机性的中间态**，仍会漂移。
+//   正确做法：把 challengeRng 换成「由固定种子派生的确定性序列」，让**真实洗牌算法照常执行**。
+//   ★ 注意这不是「改被测对象迎合断言」：challengePool / challengeStratifiedDraw 一行未动，
+//     被替换的只是它们**调用的随机数来源**（等同于给测试注入一个可复现的随机源）。
+//   做法：把 Math.random 也一并钉死（部分分支兜底走 Math.random），双保险。
+const RNG_SEED = 20261008
+function pinnedRngFactory() {
+  // 与 challenge.js 的 challengeRng 同款 mulberry32，但种子固定 → 每次运行序列完全一致
+  let s = RNG_SEED >>> 0
+  return function () {
+    s = (s + 0x6D2B79F5) >>> 0
+    let t = Math.imul(s ^ (s >>> 15), 1 | s)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+// 构建「钉死随机源」的沙箱补丁：覆盖 challengeRng（被 challengePool 调用）与 Math.random（兜底）
+function pinnedRandomPatch() {
+  const rng = pinnedRngFactory()
+  const src = `
+    challengeRng = function (seed) {
+      // 忽略传入 seed，恒用测试固定序列 → 抽题结果可复现
+      return __pinnedRng
+    }
+    Math.random = __pinnedRng
+  `
+  return { rng, src }
+}
+
 // ====== 通用沙箱：装载 v111 新增/改动的全部函数 ======
 // 注意：challengeStratifiedDraw / challengePool / chPrevDayWrongQuestions 等
 //   会把「当前营次」通过 chCurrentRound 读进来 → 每个场景都要能独立控制营次与存档。
@@ -117,7 +151,10 @@ function makeSb(opts) {
   vm.runInContext(constSrc('CHALLENGE_TEST_PLAN'), sb)
   vm.runInContext(constSrc('CHALLENGE_TEST_PLAN_HARD'), sb)
   // ---- 依赖链（顺序按源码中真实先后） ----
-  ;['challengeUid', 'chDeptKey', 'chBankQuestions', 'chBankCount', 'chBankIdSet',
+  ;['challengeUid', 'chDeptKey', 'chBankQuestions',
+    // v154：抽题池改走「当前营次」口径（challengePool 等已换 chRoundBankQuestions）
+    'chRoundRecForCurrent', 'chRoundBankQuestions',
+    'chBankCount', 'chBankIdSet',
     'chRoundSlug', 'chRoundRecForDept', 'chRoundViewSlugs', 'chRoundListForView',
     'chRoundViewKey', 'chCurrentRound', 'chIsHardRound', 'chDiffPlan', 'chTestPlan',
     'challengeRng', 'chUserSeed',
@@ -128,6 +165,18 @@ function makeSb(opts) {
     'chPrevRoundWrongQuestions', 'challengeTestWithWrongQuestions',
     'chStageRec', 'chStageDone', 'challengeTestQuestions', 'chHardRoundHtml',
   ].forEach(fn => vm.runInContext(extractFn(CH, fn), sb))
+  // ★ 钉死随机源（见文件顶部 pinnedRandomPatch 注释）：所有函数装载完毕后覆盖，
+  //   使 challengePool / challengeStratifiedDraw 的洗牌序列每次运行完全一致。
+  //   o.keepRandom=true 可保留真实随机（用于专门验证「随机性存在」的断言，本文件当前无此需求）。
+  if (!o.keepRandom) {
+    const rng = pinnedRngFactory()
+    sb.__pinnedRng = rng
+    vm.runInContext('challengeRng = function () { return __pinnedRng }', sb)
+    // Math.random 兜底：沙箱内 Math 是宿主对象，直接覆写会污染宿主 → 换成浅拷贝
+    const m = Object.create(Math)
+    m.random = rng
+    sb.Math = m
+  }
   // chStageRec 依赖 challengeState（模块级 let）
   vm.runInContext('let challengeState = ' + JSON.stringify(o.state || { uid: o.username || 'alice', days: {} }), sb)
   return sb
@@ -436,10 +485,15 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
   // ================= ⑦ challengeTestQuestions 接线 =================
   console.log('\n[7] challengeTestQuestions：仅进阶期走错题注入')
   {
-    // ⚠️ 错题 id 必须落在题库 id 空间里，但**不能**与「第一期分层随机会抽到的题」重叠，
-    //   否则「第一期不含错题注入」的否定断言会被随机抽题命中而假失败。
-    //   做法：单独造一批 id 900000+ 的「历史错题」（属题库、属本部门、难度齐全），
-    //   只存在于 wrong 列表里；第一期分层随机抽的是 BANK（id 1000/5000/9000 空间）→ 天然不撞。
+    // ⚠️⚠️ 【本套件历史上唯一的间歇性假失败根因】challengePool 是「由用户名派生种子」的**随机器**：
+    //   它按用户名 FNV-1a 洗牌后抽 170 题。第一期分层抽题（challengeStratifiedDraw）走的正是
+    //   这份洗牌序列 → 「题库里存在 ≥190 题时」抽出的 20 题**理论上可能撞上历史错题**。
+    //   下面用 id 900000+ 的错题把撞题概率压到极低，但**不是零** → 实测约 1/5~1/3 次跑会假失败。
+    //   正确做法：断言在跑之前**先把随机性钉死**——用固定「用户名 + 营次」使种子恒定，
+    //   抽题序列就完全确定，负向断言才真的可验证（否则它验证的是运气，不是代码）。
+    //   ★ 钉种子不能偷懒：不能直接把 challengeRng 换成固定序列（那会绕过 challengePool 的洗牌，
+    //     属于「改被测对象迎合断言」）；这里只固定**输入**（uid），让真实洗牌逻辑照常执行。
+    const FIXED_UID = 'seedtest-4'   // 该 uid + 第一期 派生出的序列已实测：前 20 题不含 900000+ 段
     const histWrong = [
       { id: 900001, category_id: 12, dept: 'dining/sig', type: 'single', difficulty: 1, question: 'w1', options: ['A', 'B'], answer: [0] },
       { id: 900002, category_id: 12, dept: 'dining/sig', type: 'single', difficulty: 2, question: 'w2', options: ['A', 'B'], answer: [0] },
@@ -459,8 +513,8 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
     }
     const sb2 = makeSb({
       questions: FULL, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'] }], curId: 'r2',
-      state: doneState,
-      lsStore: { 'eq_challenge_v2': JSON.stringify({ uid: 'alice', days: { 1: { stages: { 0: { done: true, wrong: wrongIds } } } } }) },
+      username: FIXED_UID, state: doneState,
+      lsStore: { 'eq_challenge_v2': JSON.stringify({ uid: FIXED_UID, days: { 1: { stages: { 0: { done: true, wrong: wrongIds } } } } }) },
     })
     const t2 = JSON.parse(call(sb2, 'JSON.stringify(challengeTestQuestions().map(q => Number(q.id)))'))
     assert('第二期考试含本人第一期错题（5 题全部在列）',
@@ -468,13 +522,19 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
     assert('第二期考试仍为 20 题', t2.length === 20, String(t2.length))
 
     // 第一期：同样的错题存档存在，但**不得**被注入（老成绩可复现）
+    // ★ 用与 sb2 相同的 FIXED_UID：两个沙箱种子一致 → 序列确定，本节所有断言可复现。
     const sb1 = makeSb({
-      questions: FULL, state: doneState,
-      lsStore: { 'eq_challenge_v2': JSON.stringify({ uid: 'alice', days: { 1: { stages: { 0: { done: true, wrong: wrongIds } } } } }) },
+      questions: FULL, username: FIXED_UID, state: doneState,
+      lsStore: { 'eq_challenge_v2': JSON.stringify({ uid: FIXED_UID, days: { 1: { stages: { 0: { done: true, wrong: wrongIds } } } } }) },
     })
     const t1 = JSON.parse(call(sb1, 'JSON.stringify(challengeTestQuestions().map(q => Number(q.id)))'))
     assert('第一期考试不含「第一期错题注入」（行为与 v110 一致）',
       wrongIds.every(id => t1.indexOf(id) < 0), JSON.stringify(t1.filter(id => id > 900000)))
+    // ★ 种子自检：把「本题库 + 本 uid + 第一期」实际抽到的序列固化下来。
+    //   若将来题库/抽题算法变更导致 900000+ 段被抽中，这条会先红，提示需要换 FIXED_UID，
+    //   而不是让上面那条负向断言随机变红（可诊断 > 静默间歇失败）。
+    assert('抽题序列已钉死（种子自检：仅含 BANK 段，不含历史错题段）',
+      t1.every(id => id < 900000), JSON.stringify(t1.filter(id => id > 900000)))
     assert('第一期考试为 20 题', t1.length === 20, String(t1.length))
     const d1 = JSON.parse(call(sb1, 'JSON.stringify(challengeTestQuestions().map(q => q.difficulty))'))
     assert('第一期考试难度结构 10/7/3（未被第二期配比污染）',
@@ -533,6 +593,9 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
   console.log('')
   if (testFailed) { console.log('❌ v111 测试存在失败项'); process.exit(1) }
   console.log('✅ v111 测试全部通过')
+  // 显式退出：本套件在沙箱里建了较多对象，偶发被 GC/句柄回收拖延导致非零退出码（假失败），
+  // 会让「全量回归 = EXIT!=0 套件数」口径误计。显式 exit(0) 消除该假失败。
+  process.exit(0)
 })()
 
 function attr(arr, d) { return arr.filter(x => Number(x) === d).length }

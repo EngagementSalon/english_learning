@@ -388,6 +388,10 @@ function makeDeptSandbox() {
     `, sb)
     vm.runInContext(extractFn(CH, 'chDeptKey'), sb)
     vm.runInContext(extractFn(CH, 'chBankQuestions'), sb)
+    // v154：chBankCount/chBankIdSet 改走「当前营次」口径 → 需注入新依赖；
+    //   本沙箱无云端营次（CloudSync 未定义）→ chRoundBankQuestions 回落视角口径，计数不变（240）
+    vm.runInContext(extractFn(CH, 'chRoundRecForCurrent'), sb)
+    vm.runInContext(extractFn(CH, 'chRoundBankQuestions'), sb)
     vm.runInContext(extractFn(CH, 'chBankIdSet'), sb)
     vm.runInContext(extractFn(CH, 'chBankCount'), sb)
     const bankIds = JSON.parse(call(sb, 'JSON.stringify(chBankQuestions().map(q => q.id))'))
@@ -422,11 +426,11 @@ function makeDeptSandbox() {
 
   console.log('\n[6b] challengePool / challengeRandomQuestions 题源同源（本部门）')
   {
-    assert('challengePool 用 chBankQuestions（不再直连 Store.getQuestions）',
-      /function challengePool\(\) \{\s*const all = chBankQuestions\(\)/.test(CH))
+    assert('challengePool 用 chRoundBankQuestions（v154：抽题池跟营次，不再直连 Store.getQuestions）',
+      /function challengePool\(\) \{\s*const all = chRoundBankQuestions\(\)/.test(CH))
     assert('challengePool 不再有 Store.getQuestions().filter(category 12)',
       !/function challengePool\(\) \{[\s\S]{0,120}?Store\.getQuestions\(\)/.test(CH))
-    assert('challengeRandomQuestions 用 chBankQuestions', /challengeStratifiedDraw\(chBankQuestions\(\), total\)/.test(CH))
+    assert('challengeRandomQuestions 用 chRoundBankQuestions（v154）', /challengeStratifiedDraw\(chRoundBankQuestions\(\), total\)/.test(CH))
     assert('renderChallenge 的题库计数用 chBankCount()', /const bankN = chBankCount\(\)/.test(CH))
     assert('入口页题库计数也走挑战题库（app.js 未直连 category 12 计数）',
       !/const bankN = Store\.getQuestions\(\)\.filter/.test(CH))
@@ -453,6 +457,9 @@ function makeDeptSandbox() {
     `, sb)
     vm.runInContext(extractFn(CH, 'chDeptKey'), sb)
     vm.runInContext(extractFn(CH, 'chBankQuestions'), sb)
+    // v154：chBankIdSet 改走营次口径 → 注入新依赖（无云端营次 → 回落视角口径，行为不变）
+    vm.runInContext(extractFn(CH, 'chRoundRecForCurrent'), sb)
+    vm.runInContext(extractFn(CH, 'chRoundBankQuestions'), sb)
     vm.runInContext(extractFn(CH, 'chBankIdSet'), sb)
     vm.runInContext(extractFn(CH, 'chPrevDayWrongQuestions'), sb)
     const got = JSON.parse(call(sb, 'JSON.stringify(chPrevDayWrongQuestions(1).map(q => q.id))'))

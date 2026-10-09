@@ -145,7 +145,11 @@ function makePoolSandbox(bank, hardRound) {
   // 函数（真实源码）
   ;['challengeRng', 'chIsHardRound', 'chDiffPlan', 'chTestPlan',
     'chDiffBucketOf', 'chBankMaxDiff', 'chDrawWithBackfill', 'chBankDiffStats',
-    'chPlanAllocate', 'chBankQuestions', 'chBankCount', 'challengePool',
+    'chPlanAllocate', 'chBankQuestions',
+    // v154：challengePool / chBankCount / chBankDiffStats 改走营次口径 → 注入新依赖
+    //   （本沙箱无 CloudSync 营次数据 → chRoundBankQuestions 回落视角口径，题源不变）
+    'chRoundRecForCurrent', 'chRoundBankQuestions',
+    'chBankCount', 'challengePool',
     'challengeStratifiedDraw'].forEach(n => {
     vm.runInContext(extractFn(CH, n), sb)
   })

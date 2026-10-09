@@ -94,8 +94,48 @@ function chBankQuestions() {
     return false                                   // 其他部门（含同大部门其他分部门）的题不给
   })
 }
+// ====== v154：抽题池跟「当前营次」走 —— 做哪期就抽哪期的题 ======
+// 背景（2026-10-09 线上实撞）：管理员「题目部门」=饮食部一级切片做 r4（客房送餐）时，
+//   chDeptKey()='dining' → chBankQuestions() 走大部门分支 = 全库 1215 题（含艳中 295 道），
+//   而营次条经 chCurrentRound() 回落解析到 r4 → 「送餐挑战里出艳中题」（u1827 撞实）。
+//   学员身份做题不受影响（分部门视角下 chBankQuestions 已收窄），但管理员/大部门视角试做
+//   任何分队挑战都会混题。用户拍板：抽题池跟营次 depts 收窄，与视角/切片解耦。
+// 口径：
+//   · 当前营次挂了明确 depts（如 r4=['dining/ird']）→ 从**全量 cat12**按营次 depts 收窄
+//     （不从 chBankQuestions 出发：管理员切片到艳中做 r4 时，艳中视角题库里根本没有 ird 题）；
+//     通用题（dept 空 / 'all'）保留，与分部门可见性口径一致；营次挂大部门（'dining'）时其
+//     分部门题整包可见（同 chBankQuestions 的 major 规则）。
+//   · 当前营次未挂部门（legacy 全部门营次）或无营次数据（云端未拉到 / '第一期' 兜底）→
+//     维持 chBankQuestions() 原视角口径，老行为零变化。
+// ⚠️ 只供**抽题链路**使用（challengePool / challengeRandomQuestions / challengeTestQuestions /
+//   challengeTestWithWrongQuestions / chBankIdSet / chBankDiffStats / chBankCount）；
+//   chBankQuestions 本体不动 —— 它仍是「视角题库」口径（上传默认部门等视角用途继续用它）。
+function chRoundRecForCurrent() {
+  try {
+    if (typeof CloudSync === 'undefined' || !Array.isArray(CloudSync._chRounds) || !CloudSync._chRounds.length) return null
+    const id = (typeof chCurrentRound === 'function') ? chCurrentRound() : ''
+    if (!id) return null
+    return CloudSync._chRounds.find(r => r && String(r.id) === String(id)) || null
+  } catch (e) { return null }
+}
+function chRoundBankQuestions() {
+  try {
+    const rec = chRoundRecForCurrent()
+    const depts = rec && Array.isArray(rec.depts) ? rec.depts.filter(x => x) : []
+    if (!depts.length) return chBankQuestions()    // legacy 全部门营次 / 无营次数据 → 视角口径不变
+    const all = Store.getQuestions().filter(q => Number(q.category_id) === 12)
+    const majors = depts.map(d => String(d).split('/')[0])
+    return all.filter(q => {
+      const d = q.dept || ''
+      if (!d || d === 'all') return true           // 通用题所有人可见（兼容历史题）
+      return depts.indexOf(d) >= 0 || majors.indexOf(d) >= 0
+    })
+  } catch (e) { return chBankQuestions() }
+}
 // v89：本部门题库题目数（入口页文案用）
-function chBankCount() { return chBankQuestions().length }
+// v154：改走 chRoundBankQuestions()——入口文案与 chBankShort 警告都应描述「本期实际可抽的题」，
+//   否则管理员大部门视角下文案写 1215、实际抽题却是营次收窄后的池，两数对不上。
+function chBankCount() { return chRoundBankQuestions().length }
 // v89：本部门题库是否够跑完七天（Day7 需 170 练习 + 20 测试；不足时入口页提示管理员补题）
 const CHALLENGE_MIN_BANK = 190
 function chBankShort() { const n = chBankCount(); return n > 0 && n < CHALLENGE_MIN_BANK }
@@ -117,7 +157,7 @@ function chBankDiffGap() {
 // v89：题目 id 集合（本地进度里的 qid 需按当前部门题库过滤，避免跨部门串题）
 function chBankIdSet() {
   const set = new Set()
-  chBankQuestions().forEach(q => set.add(String(q.id)))
+  chRoundBankQuestions().forEach(q => set.add(String(q.id)))
   return set
 }
 
@@ -189,9 +229,10 @@ function chDrawWithBackfill(need, buckets) {
   return { list: order, total }
 }
 // 各档题量统计（题库结构告警用）：返回 { 1:n, 2:n, 3:n, max }
+// v154：跟抽题池同源（chRoundBankQuestions）——缺口告警描述的必须是「本期实际会抽的题」
 function chBankDiffStats() {
   const buckets = { 1: 0, 2: 0, 3: 0 }
-  const list = chBankQuestions()
+  const list = chRoundBankQuestions()
   const mx = chBankMaxDiff(list)
   list.forEach(q => { buckets[chDiffBucketOf(q && q.difficulty, mx)]++ })
   return { 1: buckets[1], 2: buckets[2], 3: buckets[3], max: mx, total: list.length }
@@ -426,8 +467,10 @@ function chUserSeed() {
 // 返回数组即练习序列：Day1 巩固练习 10 题在前，依次到 Day7 巩固练习 10 题在后（测试题不占序列，见下）。
 // 难度逐日递增：Day1 均值 1.0 → Day7 均值 2.2；题库总量不足配比时自动顺延到下一个难度桶。
 // v89：题源收窄为 chBankQuestions()（本部门 + 通用），七天挑战不再跨部门串题。
+// v154：题源再收窄为 chRoundBankQuestions()（当前营次挂了 depts 时按营次收窄）——
+//   管理员/大部门视角试做某期挑战时，抽的也是该期自己的题（见 chRoundBankQuestions 注释）。
 function challengePool() {
-  const all = chBankQuestions()
+  const all = chRoundBankQuestions()
   const seen = new Set()
   const uniq = []
   for (const q of all) {
@@ -557,8 +600,9 @@ function challengeStratifiedDraw(source, total) {
 }
 // 全库随机抽题（v80 前 test 唯一题源；现保留给 Day1 摸底——尚无已刷题时回退使用）
 // v89：题源收窄为本部门题库
+// v154：题源跟营次走（chRoundBankQuestions）
 function challengeRandomQuestions(total) {
-  return challengeStratifiedDraw(chBankQuestions(), total)
+  return challengeStratifiedDraw(chRoundBankQuestions(), total)
 }
 // v80：考试题目出自本人已刷过的练习题——题源 = 个人练习序列中「已完成练习阶段」覆盖的前缀
 //（线性解锁 → 已完成阶段恰为个人序列的前缀），从中分层随机抽 20 题；
@@ -572,7 +616,7 @@ function challengeTestQuestions() {
   challengeStageMeta().forEach(m => {
     if (m.kind === 'practice' && chStageDone(m.day, m.si)) k = Math.max(k, m.start + m.count)
   })
-  const source = (k < 20) ? chBankQuestions() : pool.slice(0, k)
+  const source = (k < 20) ? chRoundBankQuestions() : pool.slice(0, k)
   if (chIsHardRound()) return challengeTestWithWrongQuestions(source, 20)
   if (k < 20) return challengeRandomQuestions(20)
   return challengeStratifiedDraw(source, 20)
@@ -653,7 +697,7 @@ function challengeTestWithWrongQuestions(source, total) {
   }
   wrong.forEach(push)
   if (out.length < total) {
-    challengeStratifiedDraw(source || chBankQuestions(), total).forEach(push)
+    challengeStratifiedDraw(source || chRoundBankQuestions(), total).forEach(push)
   }
   return out.slice(0, total)
 }
