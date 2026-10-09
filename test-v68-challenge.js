@@ -87,7 +87,12 @@ const DAY = 86400000
   assert('CHALLENGE_TOTAL = 210', vm.runInContext('CHALLENGE_TOTAL', sb) === 210)
   {
     const types = new Set(vm.runInContext('challengePool().map(q => q.type)', sb))
-    assert('题型只剩 listen/single（听音选中文改造生效）', types.size === 2 && !types.has('voicematch'), `got ${[...types].join(',')}`)
+    // v151：「题型只剩 listen/single」是 v71 针对标帜餐厅那批题的契约（当时 cat12 里只有这两种）。
+    //   分类 12 后来追加了客房送餐部批次（含 judge + voicematch）→ 该契约作废，改为
+    //   「全部属于挑战池合法题型集，且至少 2 种」—— 仍能拦住 fill/translate 等非客观题漏进挑战池。
+    const OK_TYPES = ['single', 'listen', 'voicematch', 'judge']
+    assert('题型全部属于挑战池合法集（single/listen/voicematch/judge）且 ≥2 种',
+      [...types].every(x => OK_TYPES.includes(x)) && types.size >= 2, `got ${[...types].join(',')}`)
   }
 
   // ---------- ② 阶段切片 + 测试随机 + 难度递增 ----------
@@ -147,7 +152,8 @@ const DAY = 86400000
     assert('Day1 练习无难度 3 题', vm.runInContext('challengePool().slice(0,10).every(q => Number(q.difficulty) < 3)', sb))
     assert('Day7 练习含难度 3 题', vm.runInContext('challengePool().slice(160,170).some(q => Number(q.difficulty) === 3)', sb))
     const types = new Set(vm.runInContext('challengeStageQuestions(2,0).map(q => q.type)', sb))
-    assert('题型混合（listen/single）', types.size === 2, `got ${[...types].join(',')}`)
+    assert('题型混合（≥2 种，且均为合法题型）',
+      types.size >= 2 && [...types].every(x => ['single', 'listen', 'voicematch', 'judge'].includes(x)), `got ${[...types].join(',')}`)
   }
   {
     // 选项每次进入重洗（id 稳定，选项顺序可变）

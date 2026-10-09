@@ -91,11 +91,12 @@ The proper way to greet a visitor is with "good + part of the day".（问候访�
 
   // 总数校验：原 535 → 515（删 20 劣质）→ 527（v36 追加 12 条 voicematch 种子题）
   // → v67（题库 v9）：追加分类 12「标帜餐厅常见词汇」684 题 → 题目 1200 + 分类 12 条 = 正则命中 1212
+  // → v151：分类 12 追加客房送餐部 236 题（id 8700-8935）→ 题目 1436 + 分类 12 条 = 正则命中 1448
   const ids = []
   const re = /\{\s*id:\s*(\d+),/g
   let m
   while ((m = re.exec(src)) !== null) ids.push(+m[1])
-  assert('bank-data.js 总条目 = 1212（1200 题 + 12 分类）', ids.length === 1212, '现有 ' + ids.length)
+  assert('bank-data.js 总条目 = 1448（1436 题 + 12 分类）', ids.length === 1448, '现有 ' + ids.length)
 
   console.log('\n' + (failed ? '❌ 有失败项' : '✅ 全部通过'))
   process.exit(failed ? 1 : 0)

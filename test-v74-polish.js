@@ -137,7 +137,10 @@ function makeSandbox() {
     vm.runInContext(fs.readFileSync(path.join(__dirname, 'bank-data.js'), 'utf-8'), sb)
     const BANK = vm.runInContext('BANK', sb)
     const q12 = BANK.questions.filter(q => Number(q.category_id) === 12)
-    assert('cat12 仍为 684 题（BANK v9）', q12.length === 684 && BANK.version === 9, `got ${q12.length} / v${BANK.version}`)
+    // v151：分类 12 追加客房送餐部 236 题（id 8700-8935）→ 684 + 236 = 920。
+    //   BANK.version 仍须为 9 —— cat>=12 种子走 getQuestions() 运行时拼接，bump 版本会无谓触发
+    //   全设备一次性迁移写库（test-v87 有该契约的显式断言）。
+    assert('cat12 = 920 题（684 标帜/酒吧 + 236 客房送餐）且 BANK.version 仍为 9', q12.length === 920 && BANK.version === 9, `got ${q12.length} / v${BANK.version}`)
     const done12 = q12.filter(q => DONE[q.question])
     assert('熟度题共 12 道（4 词 × listen原生/listen改造/single）', done12.length === 12, `got ${done12.length}`)
     assert('12 题全部 4 选项 + answer [0] + 无重复选项', done12.every(q => q.options.length === 4 && JSON.stringify(q.answer) === '[0]' && new Set(q.options).size === 4))

@@ -1,14 +1,19 @@
 // ====== 测试 v67：种子题库拼接（分类12「标帜餐厅常见词汇」，BANK v9）======
 // （v71 更新：cat12 原 228 道 voicematch「看字选音」已改造为 listen「听音选中文义」，
 //   改造后 listen 456 + single 228 = 684 题、id/difficulty 不变、干扰项同池且与同词 listen 题不相交）
-// ① BANK 结构：cat=12 存在，684 题（listen 456 + single 228，无 voicematch），id 8001-8684，dept 全 dining
+// （v151 更新：分类 12 追加「客房送餐部」批次 236 题（id 8700-8935，single/listen/voicematch/judge 各 59）。
+//   → cat12 由 684 → 920 题。**BANK.version 仍为 9**（cat>=12 走 getQuestions 运行时拼接，bump 会无谓触发全设备迁移）。
+//   因新增批次引入了 judge（中文题干/2 选项）与 voicematch（英文选项），本文件里「cat12 全为英文题干+中文选项」
+//   「cat12 无 voicematch」等形态断言已按 **id 段分块**：v9 块（8001-8684）与客房送餐块（8700-8935）各自校验。
+//   客房送餐批次的专项断言在 test-v151-ird-vocab.js。）
+// ① BANK 结构：cat=12 存在，920 题（v9 块 684 + 客房送餐块 236），id 区间 8001-8684 与 8700-8935，dept 全为分部门 slug
 // ② getQuestions 拼接：v43 清空后的空库也能看到种子题（_seed 标记）；本地库同 id 题优先（去重防御）
 // ③ getCategories 拼接：空分类表 → 含 id=12；已含 → 不重复
 // ④ 老设备迁移（eq_bank_version=8 → 9）：分类表 = 线下课题库 + 种子新分类；派生题保留
-// ⑤ 部门筛选：dining 学员可单独刷 684 题；rooms 学员 0 题
+// ⑤ 部门筛选：dining 学员可单独刷全部 cat12 题；rooms 学员 0 题
 // ⑥ rebuildBankFromCourse 整体替换派生库后种子题仍可见、分类表仍含 cat=12
 // ⑦ 种子题只读：updateQuestion → null，deleteQuestion → false
-// ⑧ 题型内容格式：listen/single 题干英文、选项中文（v71 起原 voicematch 题亦为 listen + 中文选项）
+// ⑧ 题型内容格式（按 id 段分块）：v9 块 listen/single 题干英文、选项中文
 // ⑨ 源码接线：app.js 管理端 _seed 只读渲染、i18n seedReadOnly 双语
 const fs = require('fs')
 const path = require('path')
@@ -58,20 +63,33 @@ function makeSandbox(pre) {
     assert('BANK.version = 9', BANK.version === 9, `got ${BANK.version}`)
     assert('分类 id=12「标帜餐厅常见词汇」存在', !!cat12 && cat12.name === '标帜餐厅常见词汇', JSON.stringify(cat12))
     const q12 = BANK.questions.filter(q => Number(q.category_id) === 12)
-    assert('cat12 共 684 题', q12.length === 684, `got ${q12.length}`)
-    assert('listen 456 / single 228 / voicematch 0（v71 改造后）', q12.filter(q => q.type === 'listen').length === 456 && q12.filter(q => q.type === 'single').length === 228 && q12.filter(q => q.type === 'voicematch').length === 0,
-      JSON.stringify(['listen', 'single', 'voicematch'].map(ty => ty + ':' + q12.filter(q => q.type === ty).length)))
+    // v151：cat12 分两块 —— v9 种子块（id 8001-8684）+ 客房送餐批次（id 8700-8935）。
+    //   两块形态不同（后者含 judge 的 2 选项/中文题干、voicematch 的英文选项），故按 id 段分别断言。
+    const V9 = q12.filter(q => q.id >= 8001 && q.id <= 8684)
+    const IRD = q12.filter(q => q.id >= 8700 && q.id <= 8935)
+    assert('cat12 共 920 题（v9 块 684 + 客房送餐块 236）', q12.length === 920, `got ${q12.length}`)
+    assert('v9 块 684 题：listen 456 / single 228 / voicematch 0 / judge 0（v71 改造后）',
+      V9.length === 684 && V9.filter(q => q.type === 'listen').length === 456 && V9.filter(q => q.type === 'single').length === 228 && V9.filter(q => q.type === 'voicematch').length === 0 && V9.filter(q => q.type === 'judge').length === 0,
+      JSON.stringify(['listen', 'single', 'voicematch', 'judge'].map(ty => ty + ':' + V9.filter(q => q.type === ty).length)))
+    assert('客房送餐块 236 题：single/listen/voicematch/judge 各 59',
+      IRD.length === 236 && ['single', 'listen', 'voicematch', 'judge'].every(ty => IRD.filter(q => q.type === ty).length === 59),
+      JSON.stringify(['single', 'listen', 'voicematch', 'judge'].map(ty => ty + ':' + IRD.filter(q => q.type === ty).length)))
     const ids = q12.map(q => q.id)
-    assert('id 区间 8001-8684 且唯一', Math.min(...ids) === 8001 && Math.max(...ids) === 8684 && new Set(ids).size === 684)
+    assert('v9 块 id 区间 8001-8684 且唯一', Math.min(...V9.map(q => q.id)) === 8001 && Math.max(...V9.map(q => q.id)) === 8684 && new Set(V9.map(q => q.id)).size === 684)
+    assert('客房送餐块 id 区间 8700-8935 且唯一', Math.min(...IRD.map(q => q.id)) === 8700 && Math.max(...IRD.map(q => q.id)) === 8935 && new Set(IRD.map(q => q.id)).size === 236)
+    assert('cat12 全部 id 唯一（两块无交集）', new Set(ids).size === ids.length, `got ${ids.length}/${new Set(ids).size}`)
     assert('dept 全部为饮食部分部门 slug（v89 起）', q12.every(q => ['dining/sig', 'dining/yan', 'dining/bar', 'dining/ird'].indexOf(q.dept) >= 0),
       JSON.stringify([...new Set(q12.map(q => q.dept))]))
     assert('dept 无遗留大部门值 dining/rooms/all', q12.every(q => ['dining', 'rooms', 'all', ''].indexOf(q.dept) < 0))
-    assert('标帜餐厅(dining/sig) 是分类12 主体', q12.filter(q => q.dept === 'dining/sig').length > q12.length * 0.7,
-      `sig=${q12.filter(q => q.dept === 'dining/sig').length}/${q12.length}`)
-    assert('全部 4 选项 + answer [0] + 无重复选项', q12.every(q => q.options.length === 4 && JSON.stringify(q.answer) === '[0]' && new Set(q.options).size === 4))
-    assert('全部题干英文、选项中文（v71 后无英文选项题）', q12.every(q => /^[\x00-\x7F]/.test(q.question) && q.options.every(o => /[\u4e00-\u9fff]/.test(o))),
+    assert('v9 块不含 ird（三分队）', V9.every(q => ['dining/sig', 'dining/yan', 'dining/bar'].indexOf(q.dept) >= 0),
+      JSON.stringify([...new Set(V9.map(q => q.dept))]))
+    assert('客房送餐块全为 dining/ird', IRD.every(q => q.dept === 'dining/ird'))
+    assert('v9 块内标帜餐厅是主体（>70%）', V9.filter(q => q.dept === 'dining/sig').length > V9.length * 0.7,
+      `sig=${V9.filter(q => q.dept === 'dining/sig').length}/${V9.length}`)
+    assert('v9 块：全部 4 选项 + answer [0] + 无重复选项', V9.every(q => q.options.length === 4 && JSON.stringify(q.answer) === '[0]' && new Set(q.options).size === 4))
+    assert('v9 块：全部题干英文、选项中文（v71 后无英文选项题）', V9.every(q => /^[\x00-\x7F]/.test(q.question) && q.options.every(o => /[\u4e00-\u9fff]/.test(o))),
       '存在题干非英文或选项非中文的题')
-    assert('cat12 无 voicematch；原 vm 题（id%3==2）均为 listen', q12.filter(q => q.id % 3 === 2).length === 228 && q12.filter(q => q.id % 3 === 2).every(q => q.type === 'listen'))
+    assert('v9 块无 voicematch；原 vm 题（id%3==2）均为 listen', V9.filter(q => q.id % 3 === 2).length === 228 && V9.filter(q => q.id % 3 === 2).every(q => q.type === 'listen'))
     assert('与旧种子 id 无重叠', !BANK.questions.some(q => Number(q.category_id) < 12 && q.id >= 8001 && q.id <= 8684))
   }
 
@@ -83,24 +101,24 @@ function makeSandbox(pre) {
     Store.init()
     const qs = Store.getQuestions()
     const seeds = qs.filter(q => Number(q.category_id) === 12)
-    assert('空库下可见 684 道种子题', seeds.length === 684, `got ${seeds.length}`)
+    assert('空库下可见 920 道种子题（v9 块 684 + 客房送餐块 236）', seeds.length === 920, `got ${seeds.length}`)
     assert('种子题带 _seed 标记', seeds.every(q => q._seed === true))
     const cats = Store.getCategories()
     assert('分类下拉含 id=12', cats.some(c => Number(c.id) === 12 && c.name === '标帜餐厅常见词汇'), JSON.stringify(cats.map(c => c.id)))
     assert('localStorage 未被种子污染', (JSON.parse(sb.localStorage.getItem('eq_questions')) || []).length === 0)
     // v89：分类12 已按四分队打标。大部门 key 'dining' 走前缀匹配 → 应拿到全部分类12 题。
     const cat12q = Store.queryQuestions({ category_id: 12, dept: 'dining' })
-    assert('饮食部（大部门）按分类 12 拿到全部 684 题', cat12q.total === 684, `got ${cat12q.total}`)
+    assert('饮食部（大部门）按分类 12 拿到全部 920 题', cat12q.total === 920, `got ${cat12q.total}`)
     // 分部门 slug 只拿自己那部分
     const sigQ = Store.queryQuestions({ category_id: 12, dept: 'dining/sig' })
     const sigN = seeds.filter(q => q.dept === 'dining/sig').length
     assert('标帜餐厅按分类 12 只拿本分队题', sigQ.total === sigN, `got ${sigQ.total} 期望 ${sigN}`)
-    assert('标帜餐厅分类12 题数 < 全量（确已分流）', sigN < 684, `sig=${sigN}`)
+    assert('标帜餐厅分类12 题数 < 全量（确已分流）', sigN < 920, `sig=${sigN}`)
     const roomsQ = Store.queryQuestions({ category_id: 12, dept: 'rooms' })
     assert('房务部学员按分类 12 抽到 0 题', roomsQ.total === 0, `got ${roomsQ.total}`)
     // 练习页传字符串分类 id（startPractice 场景）
     const strQ = Store.queryQuestions({ category_id: '12', dept: 'dining' })
-    assert('category_id 传字符串也命中', strQ.total === 684, `got ${strQ.total}`)
+    assert('category_id 传字符串也命中', strQ.total === 920, `got ${strQ.total}`)
   }
 
   // ---------- ③ 老设备迁移 8→9 ----------
@@ -120,7 +138,7 @@ function makeSandbox(pre) {
       JSON.stringify(cats.map(c => c.id)))
     const qs = Store.getQuestions()
     assert('派生题保留', qs.some(q => q.question === '派生题甲'))
-    assert('种子题拼接可见', qs.filter(q => Number(q.category_id) === 12).length === 684)
+    assert('种子题拼接可见（920）', qs.filter(q => Number(q.category_id) === 12).length === 920)
     assert('eq_bank_version 已升至 9', JSON.parse(sb.localStorage.getItem('eq_bank_version')) === 9)
     assert('分类表未写回 11 大主题（id=1 名实一致）', cats.find(c => Number(c.id) === 1).name === '线下课题库')
   }
@@ -147,7 +165,7 @@ function makeSandbox(pre) {
     const n = Store.rebuildBankFromCourse(doc.classes)
     assert('派生写入 1 题', n === 1, `got ${n}`)
     const qs = Store.getQuestions()
-    assert('种子题仍拼接可见（684）', qs.filter(q => Number(q.category_id) === 12).length === 684)
+    assert('种子题仍拼接可见（920）', qs.filter(q => Number(q.category_id) === 12).length === 920)
     assert('派生题可见', qs.some(q => q.question === 'Course derived X'))
     const cats = Store.getCategories()
     assert('分类表仍含 id=12', cats.some(c => Number(c.id) === 12))
@@ -176,7 +194,12 @@ function makeSandbox(pre) {
     const sb = makeSandbox()
     const BANK = vm.runInContext('BANK', sb)
     const q12 = BANK.questions.filter(q => Number(q.category_id) === 12)
-    const byEn = en => q12.filter(q => q.question === en)
+    // v151：本段针对 v9 种子块（「英文题干 + 中文选项」形态）。客房送餐批次的形态不同
+    //   （含 judge 的中文题干/2 选项、voicematch 的英文选项），其专项断言在 test-v151-ird-vocab.js。
+    //   ⚠️ byEn 必须限定 V9 —— 「Oat milk」在客房送餐批次里同样存在（该批 59 词也含 Oat milk），
+    //      不限定会从 3 题变成 6 题，断言直接失效。
+    const V9 = q12.filter(q => q.id >= 8001 && q.id <= 8684)
+    const byEn = en => V9.filter(q => q.question === en)
     const milk = byEn('Oat milk')
     assert('Oat milk 三题齐全（2 listen + 1 single）', milk.length === 3 && milk.filter(q => q.type === 'listen').length === 2 && milk.filter(q => q.type === 'single').length === 1, JSON.stringify(milk.map(q => q.type)))
     const vmMilk = milk.find(q => q.id % 3 === 2)   // 原 voicematch（id 8078），v71 改造为 listen
@@ -186,19 +209,19 @@ function makeSandbox(pre) {
     assert('同词两 listen 干扰项无交集（排除同词 listen 干扰）', dSets[0].size === 3 && dSets[1].size === 3 && [...dSets[0]].every(o => !dSets[1].has(o)), JSON.stringify(milkListen.map(q => q.options)))
     assert('改造题干扰项来自同池中文释义（含奶基/餐饮词均可）', milkListen.every(q => q.options.slice(1).every(o => typeof o === 'string' && o.length > 0)))
     const explOk = q12.every(q => typeof q.explanation === 'string' && q.explanation.length > 4)
-    assert('全部有解析', explOk)
-    // 干扰项不得等于正确项（v71 后全库 684 题均为中文选项，一并校验）
-    assert('中文干扰项 ≠ 正确释义（全部 684 题）', q12.every(q => {
+    assert('全部有解析（v9 块 + 客房送餐块，共 920 题）', explOk)
+    // 干扰项不得等于正确项（v9 块全为中文选项）
+    assert('v9 块中文干扰项 ≠ 正确释义（684 题）', V9.every(q => {
       const correct = q.options[q.answer[0]]
       return q.options.filter(o => o === correct).length === 1
     }))
     // 同词多题正确释义一致（听音/看题两种入口答案必须相同）
     const groupOK = (() => {
       const g = {}
-      q12.forEach(q => { (g[q.question] = g[q.question] || []).push(q.options[q.answer[0]]) })
+      V9.forEach(q => { (g[q.question] = g[q.question] || []).push(q.options[q.answer[0]]) })
       return Object.keys(g).every(en => new Set(g[en]).size === 1)
     })()
-    assert('同词各题正确释义一致', groupOK)
+    assert('v9 块同词各题正确释义一致', groupOK)
   }
 
   // ---------- ⑧ 源码接线 ----------

@@ -332,10 +332,17 @@ group('组五 · 端到端：关闭章节里放行了最终考试（真实渲染
 // ================================================================
 group('组六 · 版本号')
 {
-  const v150 = (HTML.match(/\?v=150/g) || []).length
-  const v149 = (HTML.match(/\?v=149/g) || []).length
-  assert(`index.html 全部 ?v=150（实得 ${v150}）`, v150 === 12)
-  assert(`index.html 无残留 ?v=149（实得 ${v149}）`, v149 === 0)
+  // v151：本组原先把版本号写死成 ?v=150（×12）/ 无 ?v=149 残留 —— 属「每发一版必变的数值写死」，
+  //   每发一次版都会红一次（v116/v117 已踩两遍）。改为弹性口径：
+  //   ① 12 处 ?v= 且**取值唯一**；② 唯一值 ≥ 本套件版本（151）。
+  //   ⚠️ 下限写的是「本套件自己的版本」，而不是「当前最新版」—— 后续版本只需要 >= 151 就通过。
+  const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
+  const uniq = Array.from(new Set(vms))
+  assert('index.html 12 处 ?v= 且取值唯一', vms.length === 12 && uniq.length === 1,
+    `n=${vms.length} set=${JSON.stringify(uniq)}`)
+  assert('资源版本号 ≥ 150（本套件版本，允许后续版本继续 bump）',
+    uniq.length === 1 && uniq[0] >= 150, JSON.stringify(uniq))
+  assert('index.html 无残留 ?v=149', !/\?v=149\b/.test(HTML))
 }
 
 // ================================================================
