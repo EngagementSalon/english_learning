@@ -585,12 +585,13 @@ const NOSTEM = { id: 9199, type: 'voicematch', question: '', options: ['alpha', 
     r('LANG = "zh"')
   }
 
-  console.log('\n[十] 版本号已 bump 到 v155')
+  console.log('\n[十] 版本号已 bump 到 v155（或更高）')
   {
     const vers = (SRC.html.match(/\?v=(\d+)/g) || []).map(s => +s.slice(3))
     assert('index.html 资源版本号总数为 12', vers.length === 12, `got ${vers.length}`)
     assert('index.html 资源版本号取值唯一', new Set(vers).size === 1, JSON.stringify([...new Set(vers)]))
-    assert('index.html 资源版本号 = 155', vers[0] === 155, `got ${vers[0]}`)
+    // ★ 每发一版必变的数值绝不写死（v116/v117/v150 连撞）→ 断「>= 本套件版本」
+    assert('index.html 资源版本号 >= 155', vers[0] >= 155, `got ${vers[0]}`)
   }
 
   console.log()

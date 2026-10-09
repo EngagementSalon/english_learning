@@ -1,4 +1,4 @@
-// ====== 测试：练习页部门切片（v92；v109 层级化更新）======
+// ====== 测试：练习页部门切片（v92；v109 层级化更新；v156 学员口径收窄）======
 // 覆盖：
 //   1. 一级行只放 全部部门/饮食部/房务部/通用 四个一级栏目（v109：分部门收进二级展开行）
 //   2. 合法切片全集 PRACTICE_DEPT_SLUGS 含一级 + 全部分队（13 项）
@@ -7,6 +7,8 @@
 //   5. 分队切片只拿到「本分队 + 大部门自身 + 通用」，不串其他分队
 //   6. 非管理员受切片状态影响为零（practiceDept 被忽略）
 //   7. 选中大部门时下方展开分部门二级行；点二级按钮不回落（v109）
+// ★ v156：学员练习页抽题口径从「大部门 key」收窄为「本人分部门 slug」
+//   （旧契约「学员 = 整个大部门池，含各兄弟分队题」已被推翻 → 第 8 组断言按新契约重写）
 const fs = require('fs')
 const path = require('path')
 const vm = require('vm')
@@ -214,21 +216,31 @@ const run = code => vm.runInContext(code, sandbox)
   assert('学员页无管理员提示', !stuHtml.includes(run('t("practiceDeptAdminHint")')))
 
   const stuKey = Store.getSessionDeptKey()
-  assert('学员大部门 key = dining', stuKey === 'dining', stuKey)
-  // 即便强行设置 practiceDept，学员取题也只看本人部门
+  assert('学员大部门 key = dining（store 旧接口仍返回大部门）', stuKey === 'dining', stuKey)
+  // 即便强行设置 practiceDept，学员取题也只看本人分部门
   run('practiceDept = "dining/bar"')
   getEl('pCategory').value = '0'; getEl('pDifficulty').value = '0'
   getEl('pLevel').value = '0'; getEl('pCount').value = '0'
   run('startPractice()')
   const stuList = run('practiceState.questions')
-  const expN = Store.getQuestionsByDept('dining').length
-  assert('学员取题按本人部门（忽略 practiceDept）', stuList.length === expN, `${stuList.length} vs ${expN}`)
-  const stuBad = stuList.filter(q => q.dept && q.dept !== 'all' && q.dept !== 'dining' && q.dept.indexOf('dining/') !== 0)
-  assert('学员取题不出饮食部范围', stuBad.length === 0, `越界 ${stuBad.length} 题`)
-  // 学员拿到的是整个饮食部池，含各分队题（这是 v89 既有语义：大部门 = 全部子分队）
+  // ★ v156：学员练习页口径从「大部门 key」收窄为「本人分部门 slug」——
+  //   标帜餐厅学员只看到 标帜 + 饮食部整包 + 通用，不再混入艳中/酒吧/送餐题。
+  const stuSubKey = Store.getSessionSubDeptKey()   // 'dining/sig'
+  assert('学员分部门 slug = dining/sig', stuSubKey === 'dining/sig', stuSubKey)
+  const expN = Store.getQuestionsByDept(stuSubKey).length
+  assert('★ v156 学员取题按本人分部门（忽略 practiceDept）', stuList.length === expN, `${stuList.length} vs ${expN}`)
+  const stuBad = stuList.filter(q => q.dept && q.dept !== 'all' && q.dept !== 'dining' && q.dept !== stuSubKey)
+  assert('学员取题不出本分部门范围', stuBad.length === 0, `越界 ${stuBad.length} 题`)
+  // ★ v156 新契约：学员拿到的池里**不含**兄弟分队题（这正是本版修的目标）
   const stuBar = stuList.filter(q => q.dept === 'dining/bar').length
-  const expBar = Store.getQuestionsByDept('dining').filter(q => q.dept === 'dining/bar').length
-  assert('学员见到的酒吧题数 = 饮食部池内酒吧题数', stuBar === expBar, `${stuBar} vs ${expBar}`)
+  assert('★ v156 学员见不到酒吧题（收窄生效）', stuBar === 0, `got=${stuBar}`)
+  const stuYan = stuList.filter(q => q.dept === 'dining/yan').length
+  assert('★ v156 学员见不到艳中题（收窄生效）', stuYan === 0, `got=${stuYan}`)
+  const stuSig = stuList.filter(q => q.dept === 'dining/sig').length
+  assert('★ v156 学员能看到本分队（标帜）题', stuSig > 0, `got=${stuSig}`)
+  // 对比：旧大部门口径确实含酒吧题（证明收窄确有区别）
+  const oldPoolBar = Store.getQuestionsByDept('dining').filter(q => q.dept === 'dining/bar').length
+  assert('★ 旧大部门口径含酒吧题（v156 收窄前的混题来源）', oldPoolBar > 0, `got=${oldPoolBar}`)
 
   console.log('\n9️⃣  其他部门学员：切片与题库均不受影响')
   Store.getSession = () => ({ role: 'student', name: 's2', dept: '其他部门·行政' })

@@ -463,6 +463,9 @@ function closeProfileSetup() {
 function saveProfile() {
   const name = document.getElementById('profileName').value.trim()
   if (!name) return
+  // v156：部门设为必选项 —— 原先读不到会静默存空串，导致后续练习页/挑战页收窄无依据
+  const dept = readDeptCascade(DEPT_GROUPS.profile)
+  if (!dept) return alert(t('errDeptRequired'))
   const s = Store.getSession()
   // —— 学员自助改登录用户名 ——
   let renamed = null
@@ -475,7 +478,7 @@ function saveProfile() {
       renamed = r
     }
   }
-  Store.setUser({ name, dept: readDeptCascade(DEPT_GROUPS.profile) })
+  Store.setUser({ name, dept })
   // 同步账号表姓名（看板显示用）
   if (s) Store.updateUser(s.id, { name })
   if (renamed) applyCourseRename(renamed.old, renamed.nu)
@@ -1184,12 +1187,30 @@ function renderHome() {
 
 // ====== Practice Page ======
 let practiceState = { questions: [], index: 0, answers: [], submitted: false, correctCount: 0 }
+// v156：学员练习页抽题口径收窄到「分部门」（v92 起一直走大部门 key → 混题）。
+//   背景：v154 只修了挑战页抽题池；练习页 startPractice() 仍取 Store.getSessionDeptKey()
+//   （恒为大部门 key 'dining'/'rooms'）→ 标帜餐厅学员能抽到艳中/送餐的题，管理员更是全库混题。
+//   用户拍板（2026-10-09）：练习页也收窄成跟分部门走，与挑战页学员口径对齐。
+//   口径：
+//     · 管理员 → 沿用切片 practiceDept（'' = 全部，v92 行为不变）
+//     · 学员   → sessionDeptSlug()（'dining/sig' 等）；无分部门（其他部门/旧数据）回落 ''
+//   注意：仅**练习页抽题**收窄。首页/进度页的**统计数**（getStats）与考试/水平测试**暂不改**，
+//   它们各有独立门禁，不在本次拍板范围内 —— 避免「练习页能看到但统计数对不上」的二次困惑。
+function practiceDeptKey() {
+  try {
+    if (typeof Store !== 'undefined' && Store.isAdmin && Store.isAdmin()) {
+      return (typeof practiceDept !== 'undefined' && PRACTICE_DEPT_SLUGS.indexOf(practiceDept) >= 0) ? practiceDept : ''
+    }
+    if (typeof sessionDeptSlug === 'function') return sessionDeptSlug()
+  } catch (e) {}
+  return ''
+}
 // v92：管理员练习页部门切片 —— 可切到任一部门/分队视角抽题。
 //   ''      = 全部题目（管理员默认，等同 v91 行为）
 //   'dining'/'rooms' = 该大部门（含其所有分队 + 通用）
 //   'dining/bar' 等分队 slug = 该分队 + 大部门自身 + 通用
 //   'all'   = 仅通用题
-// 非管理员不使用本变量（恒走 Store.getSessionDeptKey()），切片 UI 也不渲染。
+// 非管理员不使用本变量（恒走 practiceDeptKey()），切片 UI 也不渲染。
 // v109：一级栏目层级化 —— 顶部一级行只放 全部部门/饮食部/房务部/通用 四项（用户口径：
 //   「应该只有餐饮部和房务部两个栏目」），分部门不再平铺在一级行，选中大部门时在下方展开二级行。
 const PRACTICE_DEPT_TABS = ['', 'dining', 'rooms', 'all']
@@ -1454,8 +1475,8 @@ function startPractice() {
   const diff = document.getElementById('pDifficulty').value
   const lvl = document.getElementById('pLevel').value
   let count = Number(document.getElementById('pCount').value)
-  // v92：管理员改用切片所选部门（'' = 全部）；非管理员仍按本人所属部门
-  const deptKey = Store.isAdmin() ? (practiceDept || '') : Store.getSessionDeptKey()
+  // v156：统一走 practiceDeptKey() —— 管理员=切片，学员=本人分部门（v92 起学员走大部门 key → 混题）
+  const deptKey = practiceDeptKey()
   let { list } = Store.queryQuestions({
     category_id: cat !== '0' ? cat : undefined,
     difficulty: diff !== '0' ? diff : undefined,
