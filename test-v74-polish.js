@@ -238,23 +238,36 @@ vm.runInContext(extractFn(chSrc, 'chLbAggregate'), sb)
       },
     ]
     const top = vm.runInContext(`chLbAggregate(${JSON.stringify(rows)})`, sb)
-    // v78：Day7 考试 18 对 ×300 → carol = 8×100 + 30×100 + 18×300 − 890 = 8310（超过 bob 的 7480）
-    assert('carol 8310（Day7 考试 3 倍：8×100+30×100+18×300−890s）', top[0].username === 'carol' && top[0].score === 8310 && top[0].correct === 56 && top[0].sec === 890, JSON.stringify(top[0]))
-    assert('bob 7480（81 对×100−620s，重练 30 对/60s 不计）', top[1].username === 'bob' && top[1].score === 7480 && top[1].correct === 81 && top[1].sec === 620, JSON.stringify(top[1]))
+    // v160：积分 = Σ(答对×100×环节权重) × 首答准确率 − 用时秒（准确率与答对同源，重做两处都不计）
+    // carol：得分 8×100 + 30×100 + 18×300 = 9200；首答 56/70 = 0.8 → round(9200×0.8)=7360 − 890 = 6470
+    assert('carol 6470（得分 9200 × 首答 0.8 − 890s）', top[0].username === 'carol' && top[0].score === 6470 && top[0].correct === 56 && top[0].q === 70 && Math.abs(top[0].acc - 0.8) < 1e-9 && top[0].sec === 890, JSON.stringify(top[0]))
+    // bob：得分 81×100 = 8100；首答 81/100 = 0.81 → round(8100×0.81)=6561 − 620 = 5941
+    //      重练那条（30 对/60s）既不进分子也不进分母 —— 否则「重做刷准确率」就能刷分
+    assert('bob 5941（得分 8100 × 首答 0.81 − 620s；重练 30 对/60s 不计）', top[1].username === 'bob' && top[1].score === 5941 && top[1].correct === 81 && top[1].q === 100 && Math.abs(top[1].acc - 0.81) < 1e-9 && top[1].sec === 620, JSON.stringify(top[1]))
     assert('积分降序（🥇carol 在前）', top[0].score > top[1].score)
-    // slice 3 + 同分按用时升序
-    const rows4 = rows.concat([{ username: 'dave', name: '老张', chy: [{ day: 1, si: 0, correct: 80, total: 100, at: 1, usedSec: 520 }] }])   // 7480 分 / 520s → 与 bob 同分，用时更短
+    // slice 3：dave 首答 80/100 → round(8000×0.8)=6400 − 520 = 5880（低于 carol / bob）
+    const rows4 = rows.concat([{ username: 'dave', name: '老张', chy: [{ day: 1, si: 0, correct: 80, total: 100, at: 1, usedSec: 520 }] }])
     const top3 = vm.runInContext(`chLbAggregate(${JSON.stringify(rows4)})`, sb)
-    assert('只取前三（carol 8310 / dave 7480 / bob 7480）', top3.length === 3 && top3.map(x => x.username).join(',') === 'carol,dave,bob', JSON.stringify(top3.map(x => x.username)))
-    assert('同分按用时升序（dave 520s 先于 bob 620s）', top3[1].username === 'dave' && top3[1].score === 7480 && top3[1].sec === 520)
+    assert('只取前三（carol 6470 / bob 5941 / dave 5880）', top3.length === 3 && top3.map(x => x.username).join(',') === 'carol,bob,dave', JSON.stringify(top3.map(x => x.username)))
+    assert('得分优先于速度（dave 用时最短仍居末）', top3[2].username === 'dave' && top3[2].score === 5880 && top3[2].sec === 520)
     assert('v78 管理员账号不参加排名（学员端前三剔除）', vm.runInContext(`chLbAggregate([{ username: 'admin2', role: 'admin', chy: [{ day: 1, si: 0, correct: 99, total: 100, at: 1, usedSec: 0 }] }, { username: 'stu', chy: [{ day: 1, si: 0, correct: 10, total: 10, at: 1, usedSec: 0 }] }]).map(x => x.username).join(',') === 'stu'`, sb))
     // 同分同秒比答对数
+    // v160：同分仍按用时升序 —— 乘数生效后必须另造一对真同分的用例（原先 nina/mike 靠「答对数相同」同分，
+    //   现在答对数进分子、准确率又进乘数，两者分差会被放大，不再同分）
     const rowsTie = [
-      { username: 'nina', name: 'N', chy: [{ day: 1, si: 0, correct: 50, total: 60, at: 1, usedSec: 100 }] },   // 5000 分 / 100s
-      { username: 'mike', name: 'M', chy: [{ day: 1, si: 0, correct: 51, total: 60, at: 1, usedSec: 100 }] },   // 5000 分 / 100s
+      { username: 'nina', name: 'N', chy: [{ day: 1, si: 0, correct: 100, total: 100, at: 1, usedSec: 4500 }] },  // 10000×1.00 − 4500 = 5500
+      { username: 'mike', name: 'M', chy: [{ day: 1, si: 0, correct: 80, total: 100, at: 1, usedSec: 900 }] },    //  8000×0.80 −  900 = 5500
     ]
     const tie = vm.runInContext(`chLbAggregate(${JSON.stringify(rowsTie)})`, sb)
-    assert('同分同秒比答对数（mike 51 对先于 nina 50 对）', tie[0].username === 'mike' && tie[1].username === 'nina', JSON.stringify(tie.map(x => x.username)))
+    assert('同分（5500）按用时升序 → mike 900s 先于 nina 4500s', tie[0].username === 'mike' && tie[1].username === 'nina' && tie[0].score === 5500 && tie[1].score === 5500, JSON.stringify(tie.map(x => [x.username, x.score])))
+    // ★ 反证：首次 10/20 之后把该环节重做 5 遍全对 —— 答对数与准确率都只认首次，积分不得被刷高
+    const rowsFarm = [{
+      username: 'farm',
+      chy: [{ day: 1, si: 0, correct: 10, total: 20, at: 1, usedSec: 100 }]
+        .concat([2, 3, 4, 5, 6].map(i => ({ day: 1, si: 0, correct: 20, total: 20, at: 100 + i, usedSec: 10 }))),
+    }]
+    const fm = vm.runInContext(`chLbAggregate(${JSON.stringify(rowsFarm)})[0]`, sb)
+    assert('★ 重做 5 次全对不刷分（答对 10 / 首答 0.5 → round(1000×0.5) − 100 = 400）', fm.correct === 10 && Math.abs(fm.acc - 0.5) < 1e-9 && fm.q === 20 && fm.score === 400, JSON.stringify(fm))
     assert('无 chy / 空 rows / null 安全（返回空数组）', vm.runInContext(`chLbAggregate([]).length === 0 && chLbAggregate([{ username: 'x' }]).length === 0 && chLbAggregate(null).length === 0`, sb))
     assert('无姓名学员回退 username', vm.runInContext(`chLbAggregate([{ username: 'jack', chy: [{ day: 1, si: 0, correct: 10, total: 10, at: 1, usedSec: 0 }] }])[0].name === 'jack'`, sb))
   }
@@ -276,8 +289,8 @@ vm.runInContext(extractFn(chSrc, 'chLbAggregate'), sb)
       const cnt = (i18nSrc.match(new RegExp(k + ':', 'g')) || []).length
       assert(`i18n ${k} zh/en 成对（恰好 2 处）`, cnt === 2, 'count=' + cnt)
     })
-    assert('i18n 中文文案正确', i18nSrc.includes("chLbTitle: '当前积分榜前三'") && i18nSrc.includes("chLbEmpty: '还没有学员完成挑战环节，快来做第一个！'") && i18nSrc.includes("chLbRule: '答对越多、用时越短，积分越高；第七天期末考试每题按 3 倍计分'"))
-    assert('i18n 英文文案正确', i18nSrc.includes("chLbTitle: 'Current Top 3'") && i18nSrc.includes("chLbEmpty: 'No one has finished a challenge stage yet — be the first!'") && i18nSrc.includes("chLbRule: 'More correct answers in less time scores higher; Day-7 final exam answers score 3×'"))
+    assert('i18n 中文文案正确', i18nSrc.includes("chLbTitle: '当前积分榜前三'") && i18nSrc.includes("chLbEmpty: '还没有学员完成挑战环节，快来做第一个！'") && i18nSrc.includes("chLbRule: '答对越多、用时越短、首答越准，积分越高；第七天期末考试每题按 3 倍计分'"))
+    assert('i18n 英文文案正确', i18nSrc.includes("chLbTitle: 'Current Top 3'") && i18nSrc.includes("chLbEmpty: 'No one has finished a challenge stage yet — be the first!'") && i18nSrc.includes("chLbRule: 'More correct answers, less time and a higher first-try accuracy score higher; Day-7 final exam answers score 3×'"))
     assert('app.js 看板积分榜（v73）未回退', appSrc.includes('lbScore') && i18nSrc.includes("dashChRankTitle: '七天挑战积分榜'"))
   }
 

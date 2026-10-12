@@ -4686,16 +4686,19 @@ function dashChExportSheets(list) {
       merges.push('A' + at + ':C' + at)
     }
   })
-  // 积分榜口径与看板一致：管理员不参加排名；同分用时短者在前，再比答对数（v73/v78）
+  // 积分榜口径与看板一致：管理员不参加排名；同分用时短者在前，再比答对数（v73/v78）；积分含首答准确率乘数（v160）
   const lb = rows0.filter(p => p.role !== 'admin').slice()
     .sort((a, b) => (b.lbScore - a.lbScore) || (a.lbT - b.lbT) || (b.lbC - a.lbC))
   const rankRows = [[
     t('dashChThRank'), t('thUsername'), t('thName'), t('thDept'),
-    t('dashChThScore'), t('dashChThCorrect'), t('dashChThUseSec')
+    t('dashChThScore'), t('dashChThCorrect'), t('dashChThFirstAcc'), t('dashChThUseSec')
   ]]
   lb.forEach((p, i) => {
     rankRows.push([i + 1, p.username || '', p.name || '', p.dept || '',
-      p.lbScore || 0, p.lbC || 0, p.lbT || 0])
+      p.lbScore || 0, p.lbC || 0,
+      // v160：首答准确率（0~1，Excel 里按百分比显示）—— 积分乘的就是这一列，导出也要看得见
+      { v: (p.lbQ > 0 ? Math.min(1, (p.lbC || 0) / p.lbQ) : 1), s: { align: 'center', fmt: '0%' } },
+      p.lbT || 0])
   })
   return [
     { name: t('dashChSheetDetail'), rows: rows, merges: merges, cols: cols },
@@ -4840,13 +4843,19 @@ function renderDashChallengeBlock(rows) {
       const k = x.day + '-' + x.si
       if (!firstByStage[k] || (x.at || 0) < (firstByStage[k].at || 0)) firstByStage[k] = x
     })
-    let lbC = 0, lbT = 0, lbPts = 0
+    // v160：积分乘上「首答准确率」——答对分与准确率必须同源（都用去重后的首次完成记录）。
+    //   ★ 绝不能用明细表那个「正确率」（含重做的全部作答）：学生把环节重做几遍就能把准确率刷高，
+    //     而积分里的答对数恰恰按 v73 去重防的就是这个刷分路径。故此处独立累计 lbQ。
+    let lbC = 0, lbQ = 0, lbT = 0, lbPts = 0
     Object.keys(firstByStage).forEach(k => {
       const x = firstByStage[k]
       lbC += x.correct || 0
+      lbQ += x.total || 0
       lbT += x.usedSec || 0
       lbPts += (x.correct || 0) * 100 * dashChStageWeight(x.day, x.kind)
     })
+    // 首答准确率（0~1）：lbQ=0（旧记录缺 total）时按 1 处理 → 与加乘数前完全等价，不让老数据归零
+    const lbAcc = lbQ > 0 ? Math.min(1, lbC / lbQ) : 1
     return {
       username: r.username, name: r.name, dept: r.dept, role: r.role,
       maxDay, stagesDone, q, acc: q > 0 ? Math.round(c / q * 100) : 0,
@@ -4854,7 +4863,7 @@ function renderDashChallengeBlock(rows) {
       // v105：该场成绩是否来自管理员手动补录（看板打「手动录入」标记，便于事后区分人工数据）
       m7: !!(t7 && t7.manual), m1: !!(t1 && t1.manual),
       checkin,
-      lbC, lbT, lbScore: lbPts - lbT,
+      lbC, lbQ, lbAcc, lbT, lbScore: Math.round(lbPts * lbAcc) - lbT,
       chQ: r.chQ || {},
     }
   })
@@ -4865,7 +4874,7 @@ function renderDashChallengeBlock(rows) {
   list.forEach(p => (p.checkin || []).forEach((c, i) => { if (c === 2) checkinStats[i]++ }))
   // v139：原三态打卡单元格（✅/◐/—）随「三段分组 + D1–D7 用 1/-1」的改造下线，
   // 由下面的 dayCell 取代 —— 别再引入第二套打卡渲染，否则口径会分叉。
-  // v73 积分榜排序：积分（答对×权重×100−用时秒）高者在前；同分用时短者在前，再比答对数
+  // v160 积分榜排序：积分（答对×权重×100×首答准确率−用时秒）高者在前；同分用时短者在前，再比答对数
   // v78：管理员账号不参加排名（进度明细表与汇总仍含管理员，便于自查）
   const lbList = list.filter(p => p.role !== 'admin').slice().sort((a, b) => (b.lbScore - a.lbScore) || (a.lbT - b.lbT) || (b.lbC - a.lbC))
   const fmtSec = s => { s = Math.max(0, s || 0); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') }
@@ -5017,6 +5026,7 @@ function renderDashChallengeBlock(rows) {
             <th>${t('thUsername')}</th><th>${t('thName')}</th><th>${t('thDept')}</th>
             <th style="text-align:center">${t('dashChThScore')}</th>
             <th style="text-align:center">${t('dashChThCorrect')}</th>
+            <th style="text-align:center">${t('dashChThFirstAcc')}</th>
             <th style="text-align:center">${t('dashChThTime')}</th>
           </tr></thead>
           <tbody>
@@ -5027,8 +5037,9 @@ function renderDashChallengeBlock(rows) {
               <td>${escHtml(p.dept || '—')}</td>
               <td style="text-align:center;font-weight:700;color:#b45309">${p.lbScore}</td>
               <td style="text-align:center">${p.lbC}</td>
+              <td style="text-align:center;color:#6b7280">${Math.round((p.lbAcc == null ? 0 : p.lbAcc) * 100)}%</td>
               <td style="text-align:center;color:#6b7280">${fmtSec(p.lbT)}</td>
-            </tr>`).join('') : `<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:16px">${t('dashChRankEmpty')}</td></tr>`}
+            </tr>`).join('') : `<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:16px">${t('dashChRankEmpty')}</td></tr>`}
           </tbody>
         </table>
       </div>

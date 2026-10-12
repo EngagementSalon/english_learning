@@ -1122,7 +1122,9 @@ function chProgressHtml() {
 
 // ====== 积分榜前三（v74）======
 // 与管理员看板 renderDashChallengeBlock 同口径：每环节按首次完成计（day-si 去重取 at 最早的 chy，
-// 重练不刷分），积分 = Σ(答对×100×环节权重) − Σ用时秒；v78：第七天期末考试 3 倍权重，管理员不参加排名。
+// 重练不刷分），积分 = Σ(答对×100×环节权重) × 首答准确率 − Σ用时秒；v78：第七天期末考试 3 倍权重，管理员不参加排名。
+// v160：乘以首答准确率（= 首次作答答对数 ÷ 首次作答题数）—— 与答对同源；绝不能用含重做的「正确率」，
+//   否则把环节重做几遍就能把准确率刷到接近 100%，等于开了刷分后门（积分里的答对数按 v73 去重防的就是这个）。
 // v84：被管理员重置成绩的测试记录（cleared 存根）不计分——重考后的新记录才计入。
 // v88：只看当前营次的记录（rd 缺省 = 第一期/单期制旧数据）；round 省略时用当前营次。
 // v110：round 省略且视角下有多个营次（大部门视角）→ 汇总这些营次的全部记录（与「饮食部能看到下属部门挑战」一致）；
@@ -1150,14 +1152,18 @@ function chLbAggregate(rows, round) {
       const k = x.day + '-' + x.si
       if (!first[k] || (x.at || 0) < (first[k].at || 0)) first[k] = x
     })
-    let c = 0, tsec = 0, pts = 0
+    let c = 0, tq = 0, tsec = 0, pts = 0
     Object.keys(first).forEach(k => {
       const x = first[k]
       c += x.correct || 0
+      tq += x.total || 0
       tsec += x.usedSec || 0
       pts += (x.correct || 0) * 100 * chLbStageWeight(x.day, x.kind)
     })
-    return { name: r.name || r.username || '', username: r.username, correct: c, sec: tsec, score: pts - tsec }
+    // v160：与看板同口径 —— 积分 = 首答得分 × 首答准确率 − 用时秒。
+    //   ★ 准确率必须与答对同源（去重后的首次完成记录），绝不能用含重做的「正确率」——那样重做就能刷分。
+    const acc = tq > 0 ? Math.min(1, c / tq) : 1
+    return { name: r.name || r.username || '', username: r.username, correct: c, q: tq, acc: acc, sec: tsec, score: Math.round(pts * acc) - tsec }
   })
   list.sort((a, b) => (b.score - a.score) || (a.sec - b.sec) || (b.correct - a.correct))
   return list.slice(0, 3)
@@ -1169,7 +1175,7 @@ function chLbRowsHtml(top) {
     <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:${i < top.length - 1 ? '1px solid #f3f4f6' : 'none'}">
       <span style="font-size:18px;width:28px;text-align:center;flex-shrink:0">${medal(i)}</span>
       <span style="flex:1;min-width:0;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.name)}</span>
-      <span style="color:#6b7280;font-size:12px;flex-shrink:0">${t('dashChThCorrect')} ${p.correct}</span>
+      <span style="color:#6b7280;font-size:12px;flex-shrink:0">${t('dashChThCorrect')} ${p.correct} · ${Math.round((p.acc == null ? 0 : p.acc) * 100)}%</span>
       <span style="font-weight:800;color:#b45309;flex-shrink:0">${p.score} ${t('scoreUnit')}</span>
     </div>`).join('')
 }

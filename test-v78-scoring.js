@@ -157,10 +157,12 @@ const rowsMix = [
     const html = renderDash(sb, rowsMix)
     const lb = makeLbSandbox()
     const top = vm.runInContext(`chLbAggregate(${JSON.stringify(rowsMix)})`, lb)
-    // stuA = 10×100 + 12×300 − 160 = 1000+3600-160 = 4440；stuB = 5×300 − 0 = 1500
-    assert('看板 stuA 积分 4440（含 Day7 考试 12×300）', html.includes('4440'), '')
-    assert('学员端 stuA 积分同为 4440', top[0].username === 'stuA' && top[0].score === 4440, JSON.stringify(top[0]))
-    assert('学员端 stuB 积分 1500（5×300）', top[1].username === 'stuB' && top[1].score === 1500, JSON.stringify(top[1]))
+    // v160：积分 = 得分 × 首答准确率 − 用时秒
+    //   stuA：得分 10×100 + 12×300 = 4600；首答 22/40 = 0.55 → round(4600×0.55)=2530 − 160 = 2370
+    //   stuB：得分 5×300 = 1500；首答 5/20 = 0.25 → round(1500×0.25)=375 − 0 = 375
+    assert('看板 stuA 积分 2370（4600 × 首答 0.55 − 160s）', html.includes('2370'), '')
+    assert('学员端 stuA 积分同为 2370', top[0].username === 'stuA' && top[0].score === 2370, JSON.stringify(top[0]))
+    assert('学员端 stuB 积分 375（1500 × 首答 0.25）', top[1].username === 'stuB' && top[1].score === 375, JSON.stringify(top[1]))
     assert('未加权时的旧值 2200 不再出现（口径已切换）', !html.includes('>2200<'))
   }
 

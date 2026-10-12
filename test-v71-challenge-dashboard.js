@@ -157,10 +157,13 @@ function makeSandbox() {
     assert('参加人数 2', html.includes('>2<'), '')
     assert('总答题数 20+30+30+50+20+30+20=200', html.includes('200'))
     assert('积分榜标题与奖品提示渲染', html.includes('七天挑战积分榜') && html.includes('前三名可获得奖品'))
-    assert('积分规则渲染（答对×100 − 用时）', html.includes('× 100'))
-    assert('bob 积分 7480（81 对×100−620s；重练 30 对/60s 不计）', html.includes('7480'))
-    assert('carol 积分 8310（8×100 + 30×100 + 18×300(Day7 考试 3 倍) − 890s）', html.includes('8310'), '')
-    assert('🥇 carol（8310）排在 🥈 bob（7480）之前（积分降序）', html.indexOf('🥇') >= 0 && html.indexOf('🥇') < html.indexOf('🥈') && html.indexOf('8310') < html.indexOf('7480'))
+    assert('积分规则渲染（答对×100×准确率 − 用时）', html.includes('× 100') && html.includes('首答准确率'))
+    // v160：积分 = 得分 × 首答准确率 − 用时秒
+    //   bob  ：8100 × 0.81（81/100，重练 30 对/60s 不计分子分母）= 6561 − 620 = 5941
+    //   carol：9200 × 0.80（56/70）                              = 7360 − 890 = 6470
+    assert('bob 积分 5941（8100 × 首答 0.81 − 620s；重练不计）', html.includes('5941'))
+    assert('carol 积分 6470（9200(含 Day7 考试 3 倍) × 首答 0.8 − 890s）', html.includes('6470'), '')
+    assert('🥇 carol（6470）排在 🥈 bob（5941）之前（积分降序）', html.indexOf('🥇') >= 0 && html.indexOf('🥇') < html.indexOf('🥈') && html.indexOf('6470') < html.indexOf('5941'))
     assert('v78 积分规则含「第七天期末考试每题按 3 倍计分」', html.includes('第七天期末考试每题按 3 倍计分'))
     assert('v78 积分榜含「管理员账号不参加排名」说明', html.includes('管理员账号不参加排名'))
     assert('用时格式化（620s→10:20 / 890s→14:50）', html.includes('10:20') && html.includes('14:50'))
