@@ -4836,6 +4836,23 @@ function renderDashChallengeBlock(rows) {
     const score = x => x && x.total ? Math.round(x.correct / x.total * 100) : null
     // v73 积分榜：每环节按首次完成计（day-si 去重取 at 最早一条，重练不刷速度分）；
     // v78：答对分按环节权重（第七天期末考试 3 倍），用时扣分不变
+    // v161：积分里的计时改为**计分用时** —— 每个阶段先按 total × 30 秒封顶再累加。
+    //   动机（用户质疑「排前面的没别人答得多、也没别人准」的真因之一）：原口径直接取 chy 的 usedSec
+    //   = 「进入环节 → 完成」的净耗时。学员中途被工作打断、页面就那么挂着，时长照样全额累积。
+    //   线上实测：有学员单个 30 题练习阶段耗 3675 秒（122.5 秒/题），而全体每题用时 P90 仅约 25 秒
+    //   → 单个环节白扣 3675 分（≈37 道题的分），名次实际由「谁没被打断」决定，而不是「谁答得又多又准」。
+    //   为什么 30 秒/题：实测每题用时 中位≈9~13s、P75≈10~17s、P90≈13~25s → 留了约 20% 余量，
+    //   正常作答（含较慢的学员）一分不扣，只削「被中断」那条长尾。day7 权重 3 倍仍照常计答对分。
+    //   ★ 刻意定义在函数内部、不抽到模块级：本块会被各测试套件按源码切片注入，
+    //     抽出去会让所有既有套件的沙箱缺注入而整片报错（challenge.js chLbAggregate 同此处理）。
+    //   ★ total 缺失（老记录 / 手动补录异常）时**不封顶** —— 绝不凭空给老数据加分。
+    const LB_SEC_PER_Q_CAP = 30
+    const lbDeductSec = x => {
+      const sec = Math.max(0, Number(x && x.usedSec) || 0)
+      const total = Number(x && x.total) || 0
+      if (total <= 0) return sec
+      return Math.min(sec, total * LB_SEC_PER_Q_CAP)
+    }
     // v84：成绩已重置的考试存根不计分（重考后产生的新记录才计入）
     const firstByStage = {}
     chy.forEach(x => {
@@ -4846,12 +4863,15 @@ function renderDashChallengeBlock(rows) {
     // v160：积分乘上「首答准确率」——答对分与准确率必须同源（都用去重后的首次完成记录）。
     //   ★ 绝不能用明细表那个「正确率」（含重做的全部作答）：学生把环节重做几遍就能把准确率刷高，
     //     而积分里的答对数恰恰按 v73 去重防的就是这个刷分路径。故此处独立累计 lbQ。
-    let lbC = 0, lbQ = 0, lbT = 0, lbPts = 0
+    // v161：lbT = **计分用时**（每阶段每题封顶 30 秒，见 lbDeductSec）；lbTa = 实际用时（仅供看板对照显示）。
+    //   ★ lbT 的既有一切消费点（排序次位 / 导出 / 积分公式）语义不变，只是取值改成了封顶后的值。
+    let lbC = 0, lbQ = 0, lbT = 0, lbTa = 0, lbPts = 0
     Object.keys(firstByStage).forEach(k => {
       const x = firstByStage[k]
       lbC += x.correct || 0
       lbQ += x.total || 0
-      lbT += x.usedSec || 0
+      lbT += lbDeductSec(x)
+      lbTa += Math.max(0, x.usedSec || 0)
       lbPts += (x.correct || 0) * 100 * dashChStageWeight(x.day, x.kind)
     })
     // 首答准确率（0~1）：lbQ=0（旧记录缺 total）时按 1 处理 → 与加乘数前完全等价，不让老数据归零
@@ -4863,7 +4883,7 @@ function renderDashChallengeBlock(rows) {
       // v105：该场成绩是否来自管理员手动补录（看板打「手动录入」标记，便于事后区分人工数据）
       m7: !!(t7 && t7.manual), m1: !!(t1 && t1.manual),
       checkin,
-      lbC, lbQ, lbAcc, lbT, lbScore: Math.round(lbPts * lbAcc) - lbT,
+      lbC, lbQ, lbAcc, lbT, lbTa, lbScore: Math.round(lbPts * lbAcc) - lbT,
       chQ: r.chQ || {},
     }
   })
@@ -5038,7 +5058,7 @@ function renderDashChallengeBlock(rows) {
               <td style="text-align:center;font-weight:700;color:#b45309">${p.lbScore}</td>
               <td style="text-align:center">${p.lbC}</td>
               <td style="text-align:center;color:#6b7280">${Math.round((p.lbAcc == null ? 0 : p.lbAcc) * 100)}%</td>
-              <td style="text-align:center;color:#6b7280">${fmtSec(p.lbT)}</td>
+              <td style="text-align:center;color:#6b7280"${(p.lbTa || 0) > (p.lbT || 0) ? ' title="' + escAttr(t('dashChTimeCapped', fmtSec(p.lbT))) + '"' : ''}>${fmtSec(p.lbTa)}${(p.lbTa || 0) > (p.lbT || 0) ? ' <span style="color:#b45309" title="' + escAttr(t('dashChTimeCapped', fmtSec(p.lbT))) + '">*</span>' : ''}</td>
             </tr>`).join('') : `<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:16px">${t('dashChRankEmpty')}</td></tr>`}
           </tbody>
         </table>

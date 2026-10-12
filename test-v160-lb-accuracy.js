@@ -204,8 +204,8 @@ const rowsAcc = [
     const cell = rank.rows[1][6]
     assert('准确率单元格 = {v:1, s:{fmt:\'0%\'}}（Excel 按百分比显示）',
       cell && typeof cell === 'object' && cell.v === 1 && cell.s && cell.s.fmt === '0%', JSON.stringify(cell))
-    assert('准确率列排在「答对」与「用时(秒)」之间',
-      rank.rows[0].join('|') === '排名|用户名|姓名|部门|积分|答对|首答准确率|用时(秒)', rank.rows[0].join('|'))
+    assert('准确率列排在「答对」与「计分用时(秒)」之间',
+      rank.rows[0].join('|') === '排名|用户名|姓名|部门|积分|答对|首答准确率|计分用时(秒)', rank.rows[0].join('|'))
   }
 
   console.log('\n[6] 文案（规则必须能自证：看板上什么、公式就用什么）')

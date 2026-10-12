@@ -1143,6 +1143,16 @@ function chLbAggregate(rows, round) {
     const s = chRoundSlug(String((x && x.rd) || ''))
     return wantList ? wantList.indexOf(s) >= 0 : s === wantSlug
   }
+  // v161：与看板 app.js 同口径的**计分用时**（两处独立实现，必须同步改，否则学员端与看板不一致）：
+  //   每阶段先按 total × 30 秒封顶再累加 —— 削掉「页面挂着自己跑」的超长计时（实测有学员单个
+  //   30 题阶段耗 3675 秒 = 122.5 秒/题，而全体 P90 仅约 25 秒/题）。total 缺失时不封顶。
+  //   ★ 定义在函数内部、刻意不抽到模块级（与看板同理由：各套件按源码切片注入，抽出去会集体报错）。
+  const chLbDeductSec = x => {
+    const sec = Math.max(0, Number(x && x.usedSec) || 0)
+    const total = Number(x && x.total) || 0
+    if (total <= 0) return sec
+    return Math.min(sec, total * 30)
+  }
   // v78：管理员账号不参加排名（学员端前三同样剔除）
   const list = (rows || []).filter(r => r && r.role !== 'admin' && r.chy && r.chy.length).map(r => {
     const first = {}
@@ -1157,7 +1167,7 @@ function chLbAggregate(rows, round) {
       const x = first[k]
       c += x.correct || 0
       tq += x.total || 0
-      tsec += x.usedSec || 0
+      tsec += chLbDeductSec(x)   // v161：计分用时（每阶段每题封顶 30 秒），与看板同口径
       pts += (x.correct || 0) * 100 * chLbStageWeight(x.day, x.kind)
     })
     // v160：与看板同口径 —— 积分 = 首答得分 × 首答准确率 − 用时秒。

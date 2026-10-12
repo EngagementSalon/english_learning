@@ -254,12 +254,15 @@ vm.runInContext(extractFn(chSrc, 'chLbAggregate'), sb)
     // 同分同秒比答对数
     // v160：同分仍按用时升序 —— 乘数生效后必须另造一对真同分的用例（原先 nina/mike 靠「答对数相同」同分，
     //   现在答对数进分子、准确率又进乘数，两者分差会被放大，不再同分）
+    // v161：计时改为「计分用时」（每阶段每题封顶 30 秒）→ 原 nina 的 4500s 会被封到 3000（100 题 × 30），
+    //   与 mike 不再同分（7000 vs 5500），故重造一对**都落在封顶线以内**的真同分用例，
+    //   让这组只验「同分按用时升序」的排序口径，不掺封顶因素。
     const rowsTie = [
-      { username: 'nina', name: 'N', chy: [{ day: 1, si: 0, correct: 100, total: 100, at: 1, usedSec: 4500 }] },  // 10000×1.00 − 4500 = 5500
-      { username: 'mike', name: 'M', chy: [{ day: 1, si: 0, correct: 80, total: 100, at: 1, usedSec: 900 }] },    //  8000×0.80 −  900 = 5500
+      { username: 'nina', name: 'N', chy: [{ day: 1, si: 0, correct: 100, total: 100, at: 1, usedSec: 2500 }] },  // 10000×1.00 − 2500 = 7500
+      { username: 'mike', name: 'M', chy: [{ day: 1, si: 0, correct: 90, total: 100, at: 1, usedSec: 600 }] },    //  9000×0.90 −  600 = 7500
     ]
     const tie = vm.runInContext(`chLbAggregate(${JSON.stringify(rowsTie)})`, sb)
-    assert('同分（5500）按用时升序 → mike 900s 先于 nina 4500s', tie[0].username === 'mike' && tie[1].username === 'nina' && tie[0].score === 5500 && tie[1].score === 5500, JSON.stringify(tie.map(x => [x.username, x.score])))
+    assert('同分（7500）按用时升序 → mike 600s 先于 nina 2500s', tie[0].username === 'mike' && tie[1].username === 'nina' && tie[0].score === 7500 && tie[1].score === 7500, JSON.stringify(tie.map(x => [x.username, x.score])))
     // ★ 反证：首次 10/20 之后把该环节重做 5 遍全对 —— 答对数与准确率都只认首次，积分不得被刷高
     const rowsFarm = [{
       username: 'farm',
@@ -289,8 +292,9 @@ vm.runInContext(extractFn(chSrc, 'chLbAggregate'), sb)
       const cnt = (i18nSrc.match(new RegExp(k + ':', 'g')) || []).length
       assert(`i18n ${k} zh/en 成对（恰好 2 处）`, cnt === 2, 'count=' + cnt)
     })
-    assert('i18n 中文文案正确', i18nSrc.includes("chLbTitle: '当前积分榜前三'") && i18nSrc.includes("chLbEmpty: '还没有学员完成挑战环节，快来做第一个！'") && i18nSrc.includes("chLbRule: '答对越多、用时越短、首答越准，积分越高；第七天期末考试每题按 3 倍计分'"))
-    assert('i18n 英文文案正确', i18nSrc.includes("chLbTitle: 'Current Top 3'") && i18nSrc.includes("chLbEmpty: 'No one has finished a challenge stage yet — be the first!'") && i18nSrc.includes("chLbRule: 'More correct answers, less time and a higher first-try accuracy score higher; Day-7 final exam answers score 3×'"))
+    // v161：chLbRule 文案补上「用时按每题最多 30 秒计」（计时改为计分用时后必须同步说明）
+    assert('i18n 中文文案正确', i18nSrc.includes("chLbTitle: '当前积分榜前三'") && i18nSrc.includes("chLbEmpty: '还没有学员完成挑战环节，快来做第一个！'") && i18nSrc.includes("chLbRule: '答对越多、首答越准，积分越高；用时按每题最多 30 秒计；第七天期末考试每题按 3 倍计分'"))
+    assert('i18n 英文文案正确', i18nSrc.includes("chLbTitle: 'Current Top 3'") && i18nSrc.includes("chLbEmpty: 'No one has finished a challenge stage yet — be the first!'") && i18nSrc.includes("chLbRule: 'More correct answers and a higher first-try accuracy score higher; time counts at max 30 seconds per question; Day-7 final exam answers score 3×'"))
     assert('app.js 看板积分榜（v73）未回退', appSrc.includes('lbScore') && i18nSrc.includes("dashChRankTitle: '七天挑战积分榜'"))
   }
 
