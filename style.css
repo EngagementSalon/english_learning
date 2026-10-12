@@ -655,6 +655,8 @@ select { min-width: 120px; }
   .topbar-nav.open { display: flex; }
   .topbar-nav .nav-item { padding: 13px 14px; font-size: 15px; border-radius: 8px; width: 100%; }
   .cloud-status { display: none !important; }
+  /* v158：手机端版本号保留可见（它是排查「学员看到旧版」的关键信号），只缩小不隐藏 */
+  .ver-badge-top { font-size:10px; padding:2px 7px; gap:3px; }
   .lang-toggle-top { padding: 4px 10px; font-size: 12px; }
   .logout-btn { font-size: 12px; padding: 4px 8px; }
   .topbar-user { padding: 4px 8px; font-size: 13px; gap: 4px; }
@@ -924,6 +926,23 @@ select { min-width: 120px; }
 .cloud-status.on { color:#047857; background:#ecfdf5; border-color:#a7f3d0; }
 .cloud-status.busy { color:#b45309; background:#fffbeb; border-color:#fde68a; }
 .cloud-status.off { color:#9ca3af; background:#f3f4f6; border-color:#e5e7eb; }
+
+/* ====== v158：前端版本号徽章（页面显眼处 · 点击刷新） ====== */
+/* 徽章文本由 app.js renderAppVersion() 从 index.html 资源 ?v= 反读填入。
+   :empty 兜底 —— 万一 JS 未执行（脚本报错），不显示空胶囊而是整块隐藏。 */
+.ver-badge {
+  display:inline-flex; align-items:center; gap:4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Courier New', monospace;
+  font-size:12px; font-weight:700; letter-spacing:.02em;
+  color:var(--brand-text-dark); background:#FCEAE3; border:1px solid #F3C0B2;
+  padding:3px 10px; border-radius:999px;
+  cursor:pointer; user-select:none; white-space:nowrap;
+  transition: all .2s;
+}
+.ver-badge:hover { background:var(--primary); border-color:var(--primary); color:#fff; }
+.ver-badge::before { content:'🏷'; font-size:10px; line-height:1; }
+.ver-badge:empty { display:none; }
+.ver-badge-row { display:flex; justify-content:center; margin-top:14px; }
 
 /* ====== 线下课 / 班级 / 作业模块 ====== */
 .course-list { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:16px; }

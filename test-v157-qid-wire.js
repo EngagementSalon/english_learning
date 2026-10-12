@@ -333,8 +333,10 @@ console.log('\n组六 版本号')
   const vers = (HTML_SRC.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
   const uniq = [...new Set(vers)]
   assert('index.html 资源版本号出现 12 处且唯一', vers.length === 12 && uniq.length === 1, `出现 ${vers.length} 处，唯一值 ${uniq.join(',')}`)
-  assert('index.html 资源版本号 = 157', uniq[0] === 157, String(uniq[0]))
-  assert('index.html 无旧版本号残留', !/\?v=15[0-6]\b/.test(HTML_SRC))
+  // ★ 弹性断言（v158 实撞：本行原写死 `=== 157`，下一版 bump 就红 —— 这类「每发一版必变」的
+  //   数值已第四次复发，此后一律写「≥ 本版」而绝不写死等值，旧版本号残留也按动态值判）
+  assert('index.html 资源版本号 ≥ 157（弹性：bump 不该弄红旧套件）', uniq[0] >= 157, String(uniq[0]))
+  assert('index.html 无更旧版本号残留（所有 ?v= 均不低于当前）', vers.every(v => v >= uniq[0]), JSON.stringify(vers))
 }
 
 done()

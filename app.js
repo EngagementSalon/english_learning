@@ -5626,6 +5626,41 @@ function updateCloudStatus(s) {
   el.style.display = ''
 }
 
+// ====== v158：前端版本号（页面显眼处显示） ======
+// ★ 单一数据源：版本号只存在于 index.html 的资源声明 `?v=N`（12 处，测试强约束「取值唯一」），
+//   这里从 DOM 反读 —— 绝不另立 JS 常量（否则每次 bump 要手改两处、必漏其一）。
+// ★ 也绝不往 index.html 里再塞 `?v=` 字面量（会打破「恰好 12 处」的契约，多个套件会红）。
+// ★ 语义正确性：读的是「当前这份 HTML 声明的版本」= 用户实际加载的 JS 版本；
+//   若浏览器拿到的是缓存旧 HTML，徽章显示旧版号 —— 正是我们要的诊断信号。
+function appVersionFromDom() {
+  const els = Array.from(document.querySelectorAll('script[src*="v="], link[href*="v="]'))
+  const pick = (el) => {
+    const u = el.getAttribute('src') || el.getAttribute('href') || ''
+    const m = u.match(/[?&]v=(\d+)/)
+    return m ? Number(m[1]) : 0
+  }
+  // ★ 只认 app.js 自己：正则绝不能写成 /app\.js/ 去匹配 src ——
+  //   course-app.js 含 'app.js' 子串，会误命中（本项目反复踩过的「前缀/子串」坑）。
+  const own = els.find(el => /(^|\/)app\.js\?/.test(el.getAttribute('src') || ''))
+  const v = own ? pick(own) : 0
+  if (v) return v
+  for (const el of els) { const x = pick(el); if (x) return x }
+  return 0
+}
+function appVersionText() {
+  const v = appVersionFromDom()
+  return v ? ('v' + v) : 'v?'
+}
+function renderAppVersion() {
+  const text = appVersionText()
+  const ids = ['appVerBadge', 'authVerBadge']
+  for (const id of ids) {
+    const el = document.getElementById(id)
+    if (el) el.textContent = text
+  }
+  return text
+}
+
 // ====== Init ======
 function init() {
   Store.init()
@@ -5636,6 +5671,7 @@ function init() {
   ensureCourseBankSynced()      // v43：后台派生线下课题库（不阻塞首屏；离线时静默沿用本地）
   renderStaticText() // 按 i18n 语言渲染登录页/导航静态文本
   renderLogo()       // 渲染平台品牌 Logo（登录页 + 顶栏；云端新 Logo 到达时经事件自动刷新）
+  renderAppVersion() // v158：把前端版本号写进登录页 + 顶栏徽章（从资源 ?v= 反读）
   if (typeof window !== 'undefined' && window.addEventListener) {
     window.addEventListener('eq-logo-updated', () => { try { renderLogo() } catch (e) { /* ignore */ } })
   }

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ENGAGEMENT SALON</title>
-  <link rel="stylesheet" href="style.css?v=157">
+  <link rel="stylesheet" href="style.css?v=158">
 </head>
 <body>
   <!-- 登录/注册界面 -->
@@ -59,6 +59,10 @@
       </div>
 
       <p class="auth-hint" id="authHint">管理员账号由系统预置或由管理员创建</p>
+      <!-- v158：登录页也显示版本号（未登录即可确认自己看到的是哪一版） -->
+      <div class="ver-badge-row">
+        <span id="authVerBadge" class="ver-badge" title="当前前端版本，点击刷新页面" onclick="location.reload()"></span>
+      </div>
     </div>
   </div>
 
@@ -89,6 +93,8 @@
         <span class="user-avatar">👤</span>
       </div>
       <span id="cloudStatus" class="cloud-status" style="display:none"></span>
+      <!-- v158：顶栏常驻版本号（文本由 app.js renderAppVersion 从资源版本参数反读填入） -->
+      <span id="appVerBadge" class="ver-badge ver-badge-top" title="当前前端版本，点击刷新页面" onclick="location.reload()"></span>
       <button id="langToggleTop" class="lang-toggle-btn lang-toggle-top" onclick="toggleLang()" title="Switch to English">EN</button>
       <a class="logout-btn" id="navLogout" onclick="doLogout()" title="退出登录">退出</a>
     </nav>
@@ -141,16 +147,16 @@
     </div>
   </div>
 
-  <script src="training-questions.js?v=157"></script>
-  <script src="bank-data.js?v=157"></script>
-  <script src="cloud-store.js?v=157"></script>
-  <script src="store.js?v=157"></script>
-  <script src="i18n.js?v=157"></script>
-  <script src="qgen.js?v=157"></script>
-  <script src="course-store.js?v=157"></script>
-  <script src="anti-cheat.js?v=157"></script>
-  <script src="course-app.js?v=157"></script>
-  <script src="challenge.js?v=157"></script>
-  <script src="app.js?v=157"></script>
+  <script src="training-questions.js?v=158"></script>
+  <script src="bank-data.js?v=158"></script>
+  <script src="cloud-store.js?v=158"></script>
+  <script src="store.js?v=158"></script>
+  <script src="i18n.js?v=158"></script>
+  <script src="qgen.js?v=158"></script>
+  <script src="course-store.js?v=158"></script>
+  <script src="anti-cheat.js?v=158"></script>
+  <script src="course-app.js?v=158"></script>
+  <script src="challenge.js?v=158"></script>
+  <script src="app.js?v=158"></script>
 </body>
 </html>
