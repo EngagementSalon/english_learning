@@ -197,6 +197,61 @@ function _roundLevels(doc, id) {
   return { chResets: resets, chResetModes: modes }
 }
 
+// ====== v159：营次侧信道「离线兜底」（修「七天挑战进度被从头开始」的假象）======
+// 病根（2026-10-12 排查 Cloud/艳中）：_getDoc() 拉取失败**直接 throw**，而 _chRounds / _chRoundCurId
+//   等侧信道**只在成功路径赋值、不做任何持久化**。页面一刷新内存即清空；此时若云端不可达
+//   （textdb.dev 托管在境外、长期被墙，实测 443/80 全超时），侧信道就一直是空的 →
+//   challenge.js 的 chRoundRecForDept() / chRoundListForView() 因 CloudSync._chRounds 为 undefined
+//   双双返空 → chCurrentRound() 回落 '第一期' → chStorageKey() 指向**第一期存档键** →
+//   处在非第一期营次的学员（艳中 r2 / 送餐 ird）读到第一期（多半是空的）
+//   → **表现为「七天挑战进度被从头开始了」**。
+//   ⚠️ 这是**假象**：真进度仍在 eq_challenge_v2_<期> 键里，云端恢复后自动回来。
+//      标帜(r1)学员因存档键本就是第一期键 → 毫无异常，所以此前只在艳中暴露。
+// 修法：用「上次成功拉取的完整 doc」（成功路径本就在写 eq_cloud_cache）在本机**按当前部门重算**营次侧信道。
+//   三条红线：
+//     ① 必须用当前登录部门 depSlug 重算 —— 同一台设备上不同部门学员解析出的营次不同；
+//     ② **幂等**：仅当 _chRounds 为空（首屏 / 上次拉取失败）时填充；在线成功路径随后**原样覆盖**
+//        → 在线行为零变化（v88 契约不动）；
+//     ③ 赋值与 _getDoc() 成功路径**逐字同口径**（排期 / 开关 / 重置台账全部按本机时间重算），
+//        以后改动成功路径时必须同步改这里。
+//   注：刻意**不与成功路径抽公共函数** —— 成功路径是 v88 以来的主链路，保持它零改动优先于去重。
+function _chSideHydrateFromCache(obj) {
+  try {
+    if (!obj) return false
+    if (Array.isArray(obj._chRounds) && obj._chRounds.length) return false   // ② 幂等：已有侧信道 → 不碰
+    const raw = localStorage.getItem('eq_cloud_cache')
+    if (!raw) return false
+    const doc = JSON.parse(raw)
+    if (!doc || typeof doc !== 'object' || !Array.isArray(doc.events)) return false
+    const rounds = _roundsNorm(doc)
+    if (!rounds.length) return false
+    // ① 按当前登录部门重算（管理员/未登录 → ''，与 _getDoc 同口径：指针必命中）
+    const depSlug = (typeof obj._deptSlug === 'string') ? obj._deptSlug : ''
+    const cur = _roundCurrentForDept(doc, depSlug)
+    const curId = cur ? cur.id : ''
+    obj._chRounds = rounds
+    obj._chHasRounds = true
+    obj._chNoRound = !cur
+    obj._chRoundCurId = curId
+    obj._chRoundCurName = cur ? cur.name : ''
+    obj._chRoundCurDepts = (cur && Array.isArray(cur.depts)) ? cur.depts : []
+    obj._chRoundSeen = _roundsSeenIds()
+    const effOpen = cur ? roundOpenState(cur, Date.now()) : { state: 'closed', on: false, locked: true, everOpen: false }
+    const effExam = cur ? roundExamState(cur, Date.now(), effOpen) : { on: false, locked: true, everOpen: false }
+    obj._chExamOpen = effExam.on
+    obj._chOpen = effOpen.on
+    obj._chOpenAt = cur ? (cur.at || 0) : 0
+    obj._chOpenLocked = effOpen.locked
+    obj._chStartAt = cur ? cur.startAt : 0
+    obj._chEndAt = cur ? cur.endAt : 0
+    const lv = _roundLevels(doc, curId)
+    obj._chResets = lv.chResets
+    obj._chResetModes = lv.chResetModes
+    obj._chSideOffline = true    // 诊断标记：本次侧信道来自离线兜底（在线成功路径不会置它）
+    return true
+  } catch (e) { return false }
+}
+
 // ---- v88 自动排期结算（学员端与看板共用同一口径，看板 renderDashRoundBlock 内联同逻辑）----
 // 时间窗（本地时区）三态：
 //   endAt>0 且 now>=endAt                    → 'ended'    已结束（无视手动开关）
@@ -408,7 +463,12 @@ const CloudSync = {
   setUser(u, n) { this._user = { u, n } },
   // v89：设置当前学员分部门 slug（'dining/bar'）。登录/切部门/退出时由 app.js 调用；
   // 传空字符串即「不按部门挑营次」（管理员/未登录/其他部门）。
-  setDeptSlug(s) { this._deptSlug = String(s || '') },
+  setDeptSlug(s) {
+    this._deptSlug = String(s || '')
+    // v159：部门一确定就兜底一次 —— 首屏渲染挑战入口可能早于任何云端拉取（CloudSync 构造后
+    //   Store.syncDeptSlug() 先跑），此时侧信道为空会让入口/存档键回落第一期。
+    if (typeof _chSideHydrateFromCache === 'function') _chSideHydrateFromCache(this)
+  },
 
   // ---------- 待上报队列（localStorage 持久化，断网不丢） ----------
   _queue() {
@@ -455,6 +515,11 @@ const CloudSync = {
   },
   // ---------- 云端读写 ----------
   async _getDoc() {
+    // v159：进门先用「上次成功拉取的 doc」把营次侧信道兜底填上。
+    //   必须在最前面 —— 本函数失败是 throw，拉不到时侧信道会一直空着，
+    //   challenge.js 随即回落 '第一期'，非第一期学员就会读到第一期空档（进度假清零）。
+    //   幂等（侧信道非空即跳过）；在线成功路径随后原样覆盖，行为不变。
+    if (typeof _chSideHydrateFromCache === 'function') _chSideHydrateFromCache(this)
     const r = await _cloudFetch(CLOUD_SYNC_URL, { cache: 'no-store' })
     if (!r.ok) throw new Error('cloud GET ' + r.status)
     const txt = await r.text()
