@@ -4886,7 +4886,7 @@ function renderDashChallengeBlock(rows) {
     .filter(qid => qMap[qid])
     .map(qid => {
       const q = qMap[qid]
-      return { qid: Number(qid), question: q.question, type: TYPE_LABELS[q.type] || q.type, wrong: wrongAgg[qid].wrong }
+      return { qid: q.id, question: q.question, type: TYPE_LABELS[q.type] || q.type, wrong: wrongAgg[qid].wrong }
     })
     .sort((a, b) => b.wrong - a.wrong)
     .slice(0, 50)
@@ -5146,7 +5146,7 @@ function renderPerQBlock(rows) {
     const q = qMap[qid]
     const a = agg[qid]
     return {
-      qid: Number(qid),
+      qid: q.id,
       question: q.question,
       category: Store.getCategoryName(q.category_id),
       difficulty: q.difficulty || 1,

@@ -1956,7 +1956,11 @@ function coursePerQReport(qz) {
       if (ans === undefined || ans === -1 || (Array.isArray(ans) && !ans.length) || (typeof ans === 'string' && !String(ans).trim())) return
       const qid = map[(q.type || 'single') + '|' + String(q.question || '').trim()]
       if (qid == null) return
-      CloudSync.enqueue({ u: me, n: courseUserName(), ty: 'perq', d: { qid: Number(qid), correct: courseCheckAnswer(q, ans) ? 1 : 0 } })
+      // ★ v157：题号过 qidToWire（原写死 Number → 非数字题号（上传库 'u1792' 等）变 NaN→null，
+      //   云端静默丢弃；线下课题库同样可能派生自上传库，统一收口）
+      const wireQid = (typeof qidToWire === 'function') ? qidToWire(qid) : qid
+      if (wireQid == null) return
+      CloudSync.enqueue({ u: me, n: courseUserName(), ty: 'perq', d: { qid: wireQid, correct: courseCheckAnswer(q, ans) ? 1 : 0 } })
     })
   } catch (e) { /* 上报失败不影响交卷 */ }
 }

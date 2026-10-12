@@ -29,6 +29,23 @@ function levelOf(q) {
   return Math.max(1, Math.min(4, hardCat ? d + 1 : d))
 }
 
+// ====== v157：perq 事件的题号线格式 ======
+// 背景（2026-10-12 定位的线上故障）：本地上传题库的题号形如 'u1792'（cloud-store.js
+//   _upqUnpack：id: String(x.i)），而 reportPerQuestion 里写死了 Number(qid)：
+//   Number('u1792') = NaN → JSON.stringify({qid: NaN}) 序列化成 {"qid":null}
+//   → 云端聚合 cloud-store.js `if (d.qid != null)` 直接丢弃该事件
+//   → **凡是用上传库的部门（艳中/送餐等），单题上报全部丢失**：
+//      ① 个人 perQ（每题正确率明细）② 挑战错题 chQ（→ 看板「挑战错题排行」整卡不渲染）。
+// 现口径：数字（含纯数字字符串）仍发数字——与存量云端 perQ/chQ 键完全兼容（聚合侧本就
+//   统一 String(d.qid) 建键），非数字题号按原字符串发；题号缺失才返回 null（调用方跳过）。
+// ★ 红线：本函数只做「线格式」转型，绝不改变题号本身（不做 Number 强转、不做归一化）。
+function qidToWire(qid) {
+  if (typeof qid === 'number') return isFinite(qid) ? qid : null
+  const s = String(qid == null ? '' : qid).trim()
+  if (!s) return null
+  return /^-?\d+$/.test(s) ? Number(s) : s
+}
+
 // v43：线下课题库 = 线下课班级已激活作业中的题目，由 rebuildBankFromCourse 动态派生到本地题库，
 // 统一归入此单一分类；原 bank-data.js 的 11 大主题种子题库仅作为首次初始化占位，随后即被替换
 const COURSE_BANK_CATEGORY = { id: 1, name: '线下课题库', description: '线下课班级已激活作业中的题目' }
@@ -1508,13 +1525,17 @@ const Store = {
   },
   // 上报单题答题对错到云端（perq 事件）
   // 云端聚合结构：聚合记录的 perQ[qid] = { correct, total }；挑战错题（isChallenge）聚合到 chQ[qid] = { wrong }
+  // ★ v157：题号一律过 qidToWire()（原来写死 Number(qid)，把 'u1792' 类上传库题号变成 NaN→null 后
+  //   被云端静默丢弃，导致艳中等上传库部门既无 perQ 也无 chQ）。
   reportPerQuestion(qid, correct, isChallenge) {
     const s = this.getSession()
     if (!s || !s.username) return
     if (typeof CloudSync === 'undefined' || !CloudSync.enqueue) return
+    const wireQid = qidToWire(qid)
+    if (wireQid == null) return
     const d = isChallenge
-      ? { qid: Number(qid), correct: 0, ch: 1 }
-      : { qid: Number(qid), correct: correct ? 1 : 0 }
+      ? { qid: wireQid, correct: 0, ch: 1 }
+      : { qid: wireQid, correct: correct ? 1 : 0 }
     CloudSync.enqueue({ u: s.username, n: s.name || '', ty: 'perq', d })
   },
   // v71：七天挑战阶段完成上报（chy 事件）→ 数据看板聚合参与名单 / 进度 / 每阶段分数 / Day1-Day7 测试分
