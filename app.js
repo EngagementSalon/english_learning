@@ -3794,6 +3794,7 @@ async function renderDashboard() {
   //   顺序「营次管理 → 挑战成绩统计」被 v76 / v77 / v107 的历史断言约束，不要调换。
   //   v118：原独立的「🎛️ 七天挑战开关」卡片区（#dashChGate）已并入营次管理表两列，容器随之下线。
   const challengeHtml = `
+    ${typeof dashChViewBarHtml === 'function' ? dashChViewBarHtml() : ''}
     <div id="dashRoundsPanel">${dashRoundsPanelHtml()}</div>
 
     <div id="dashChallengeBlock"></div>`
@@ -4273,6 +4274,33 @@ let dashChDept = 'all'
 function dashChSetDept(k) {
   dashChDept = String(k || 'all')
   renderDashChallengeBlock(_perQLastRows || [])
+}
+// ====== v162：七天挑战看板视图切换（营次越铺越多 → 需要一本「总账」）======
+// 'round' = 当期看板（原样：营次筛选 + 成绩明细 + 积分榜）
+// 'total' = 累计总览（跨**全部营次**累计答题数与准确率，按学员一行）
+// 动机（用户原话）：「之后每个部门的七天挑战会越来越多，能否加一个页面看到他所有挑战的
+//   累计答题数和准确率」——原来只能一期一期看，跨期总账无处可看。
+let dashChView = 'round'
+// 视图切换条（渲染在挑战标签顶部，营次管理面板之上）
+function dashChViewBarHtml() {
+  const cur = (typeof dashChView === 'undefined') ? 'round' : dashChView
+  const btn = (v, ico, key, id) => `<button class="btn btn-sm ${cur === v ? 'btn-primary' : 'btn-ghost'}" id="${id}" style="padding:4px 12px;font-size:12px" onclick="dashChSetView('${v}')">${ico} ${t(key)}</button>`
+  return `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+      <span style="font-size:12px;color:#6b7280">${t('dashChViewLabel')}：</span>
+      ${btn('round', '🏅', 'dashChViewRound', 'dashChViewBtnRound')}
+      ${btn('total', '🗂️', 'dashChViewTotal', 'dashChViewBtnTotal')}
+    </div>`
+}
+// 切换视图。累计总览是「总账页」——顺手把营次管理面板收起，避免两个面板抢视线；
+// 切回当期看板即恢复（营次管理/开关仍可正常使用）。
+function dashChSetView(v) {
+  dashChView = (v === 'total') ? 'total' : 'round'
+  const rp = document.getElementById('dashRoundsPanel')
+  if (rp) rp.style.display = dashChView === 'total' ? 'none' : ''
+  // ★ typeof 守卫：既有套件按源码切片注入本函数时**没有** _perQLastRows ——
+  //   直接引用会 ReferenceError（v162 自测实撞，v161 同类教训）。
+  const rows = (typeof _perQLastRows === 'undefined') ? [] : (_perQLastRows || [])
+  renderDashChallengeBlock(rows)
 }
 
 // ====== 管理员看板：重置某学员的挑战考试成绩（v83 引入，v84 收窄口径，v85 修按钮接线） ======
@@ -4757,6 +4785,12 @@ function dashRoundUnderDept(r, sel) {
 function renderDashChallengeBlock(rows) {
   const el = document.getElementById('dashChallengeBlock')
   if (!el) return
+  // v162：累计总览视图 → 交给独立渲染函数（跨**全部营次**的总账，不再按营次筛选）。
+  //   ★ 必须用 typeof 守卫：既有套件（test-v71/v74/v78/v139/v160/v161 …）按源码切片只注入
+  //     本函数，沙箱里既没有 dashChView 也没有 renderDashChTotalBlock —— 直接引用会
+  //     ReferenceError 让整片套件崩（v161 血泪同款）。切片沙箱里 typeof 恒为 undefined → 走原路径。
+  const _chView = (typeof dashChView === 'undefined') ? 'round' : dashChView
+  if (_chView === 'total' && typeof renderDashChTotalBlock === 'function') return renderDashChTotalBlock(rows)
   // v94：营次列表必须按所选部门过滤——选了「标帜餐厅」就不该再看到「艳中餐厅第一期」。
   // 用 dashRoundUnderDept（筛选方向，见该函数注释），不要用学员方向的 roundDeptMatch。
   const rdAll = dashRoundList()
@@ -5099,6 +5133,142 @@ function renderDashChallengeBlock(rows) {
       </div>
     </div>` : ''}
   `
+}
+
+// ====== v162：七天挑战「累计总览」——跨全部营次的累计答题数与准确率 ======
+// 用户诉求（原话）：「之后每个部门的七天挑战会越来越多，能否在管理员后台加一个页面，
+//   看到他所有挑战的累计答题数和准确率」——此前只能一期一期看，跨期总账无处可查。
+// 口径（两个准确率**并列显示**，因为含义不同，只给一个必然误导）：
+//   · 累计答题数     = Σ 全部 chy 记录的 total（含重做）—— 与明细表「答题数」同口径的跨期累加
+//   · 正确率(含重做) = Σ correct / Σ total              —— 与明细表「正确率」同口径的跨期累加
+//   · 首答准确率     = 各营次各阶段**首次完成**记录的 correct/total —— 与积分榜 (v160) 同口径
+// ★★ 正确性红线：首答去重键必须带**营次 slug**（`rd|day|si`）。
+//    若只按 `day-si` 去重，会把不同营次的「同一天同一阶段」误判成同一阶段 —— 第 2 期跑完
+//    反而把第 1 期挤掉，累计值会「越练越少」。当期看板里只有一个营次，所以那边不需要 rd。
+// ★ 其余护栏与当期看板逐条对齐：`cleared`（v84 成绩重置存根）不计入首答；准确率钳在 0~100%；
+//    分母为 0（无作答）显示「-」而不是 0%，与「答了但全错」区分开。
+function dashChTotalRows(rows, deptSel) {
+  const sel = String(deptSel == null ? 'all' : deptSel) || 'all'
+  // 部门筛选（与当期看板 deptFilter 同口径：'all' / 大部门 key / '大部门/分部门' slug）
+  const deptHit = r => {
+    if (sel === 'all') return true
+    const hit = (typeof normDept === 'function') ? normDept(r && r.dept) : null
+    if (!hit) return false
+    if (sel.indexOf('/') >= 0) return hit.key === sel
+    return hit.majorKey === sel
+  }
+  const pct = (a, b) => (b > 0 ? Math.round(Math.min(1, a / b) * 100) : null)
+  const out = []
+  ;(rows || []).forEach(r => {
+    if (!r || !Array.isArray(r.chy) || !r.chy.length) return
+    if (!deptHit(r)) return
+    const slugOf = x => (typeof dashRoundSlug === 'function')
+      ? dashRoundSlug(x && x.rd)
+      : String((x && x.rd) || '第一期')
+    let q = 0, c = 0
+    const first = {}
+    const seenRounds = {}
+    r.chy.forEach(x => {
+      q += Number(x.total) || 0
+      c += Number(x.correct) || 0
+      const slug = slugOf(x)
+      seenRounds[slug] = true
+      if (x.cleared) return                        // v84：成绩重置存根不计首答
+      const k = slug + '|' + x.day + '|' + x.si    // ★★ 必须带营次（见上方红线）
+      if (!first[k] || (x.at || 0) < (first[k].at || 0)) first[k] = x
+    })
+    let fQ = 0, fC = 0
+    Object.keys(first).forEach(k => { fQ += Number(first[k].total) || 0; fC += Number(first[k].correct) || 0 })
+    const roundSlugs = Object.keys(seenRounds)
+    out.push({
+      username: r.username, name: r.name, dept: r.dept, role: r.role,
+      rounds: roundSlugs.length, roundSlugs: roundSlugs,
+      stages: Object.keys(first).length,
+      q: q, c: c, accAll: pct(c, q),
+      fQ: fQ, fC: fC, accFirst: pct(fC, fQ),
+    })
+  })
+  // 累计答题数降序（与当期明细表组内排序同口径）；并列时按首答题量
+  out.sort((a, b) => (b.q - a.q) || (b.fQ - a.fQ))
+  return out
+}
+
+function renderDashChTotalBlock(rows) {
+  const el = document.getElementById('dashChallengeBlock')
+  if (!el) return
+  // 累计总览是「总账页」→ 把营次管理面板收起，避免两个面板抢视线（切回当期看板即恢复）。
+  // ★ 刻意**不动 renderDashboard 模板里那行字面量**：test-v76 / test-v118 的正则就锚在
+  //   `<div id="dashRoundsPanel">${dashRoundsPanelHtml()}</div>` 上，改它等于把两条接线断言弄红
+  //   （本轮实撞）。收起动作放在这里，位置变了行为不变。
+  const rp = document.getElementById('dashRoundsPanel')
+  if (rp) rp.style.display = 'none'
+  const sel = (typeof dashChDept === 'undefined') ? 'all' : dashChDept
+  const list = dashChTotalRows(rows, sel)
+  // 部门筛选条（与当期看板同款）。★ 刻意**内联、不抽公共函数**：既有套件按源码切片注入，
+  //   抽成模块级函数会让 renderDashChallengeBlock 的沙箱缺注入而整片报错（v161 同款教训）。
+  const deptBarOptions = ['all'].concat(
+    (typeof ADMIN_DEPT_TABS !== 'undefined' ? ADMIN_DEPT_TABS : []).filter(k => k !== 'all')
+  )
+  const deptLabelOf = k => k === 'all'
+    ? t('roundDeptAll')
+    : ((typeof adminTabLabel === 'function' && adminTabLabel(k)) || k)
+  const deptBar = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+      <span style="font-size:12px;color:#6b7280">${t('dashChDeptFilterLabel')}：</span>
+      ${deptBarOptions.map(k => `<button class="btn btn-sm ${sel === k ? 'btn-primary' : 'btn-ghost'}" style="padding:3px 10px;font-size:12px" onclick="dashChSetDept('${escAttr(k)}')">${escHtml(deptLabelOf(k))}</button>`).join('')}
+    </div>`
+  // 营次名映射：「参与营次」列悬停显示含哪几期（营次已删 → 回落原始 slug）
+  const rdList = (typeof dashRoundList === 'function') ? dashRoundList() : []
+  const rdNameOf = slug => {
+    const hit = rdList.filter(r => ((typeof dashRoundSlug === 'function') ? dashRoundSlug(r.id) : r.id) === slug)[0]
+    return (hit && hit.name) || slug
+  }
+  const totQ = list.reduce((s, p) => s + p.q, 0)
+  const totC = list.reduce((s, p) => s + p.c, 0)
+  const totFQ = list.reduce((s, p) => s + p.fQ, 0)
+  const totFC = list.reduce((s, p) => s + p.fC, 0)
+  const pctText = (a, b) => (b > 0 ? Math.round(Math.min(1, a / b) * 100) + '%' : '—')
+  const accCell = v => (v == null
+    ? '<span style="color:#9ca3af">-</span>'
+    : `<span class="perq-rate ${v >= 80 ? 'perq-good' : v >= 60 ? 'perq-ok' : 'perq-bad'}">${v}%</span>`)
+  const body = list.map(p => `<tr>
+      <td style="white-space:nowrap;text-align:center;color:#6b7280;font-size:12px">${escHtml(p.dept || '—')}</td>
+      <td style="white-space:nowrap">${escHtml(p.name || '—')}${p.role === 'admin' ? ` <span style="font-size:10px;color:#92400e;background:#fef3c7;border-radius:6px;padding:1px 5px">${escHtml(t('roleAdmin'))}</span>` : ''}</td>
+      <td style="white-space:nowrap;color:#6b7280;font-size:12px">${escHtml(p.username || '—')}</td>
+      <td style="text-align:center" title="${escAttr(p.roundSlugs.map(rdNameOf).join('、'))}">${p.rounds}</td>
+      <td style="text-align:center;font-weight:700">${p.q}</td>
+      <td style="text-align:center">${accCell(p.accFirst)}</td>
+      <td style="text-align:center;color:#6b7280">${accCell(p.accAll)}</td>
+      <td style="text-align:center;color:#9ca3af;font-size:12px" title="${escAttr(t('dashChTotalStagesHint'))}">${p.stages}</td>
+    </tr>`).join('')
+  el.innerHTML = `
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin:0 0 8px">🗂️ ${t('dashChTotalTitle')}</h3>
+      ${deptBar}
+      <div class="dashboard-summary" style="margin-bottom:12px">
+        <div class="dash-stat"><div class="dash-val">${list.length}</div><div class="dash-lbl">${t('dashChTotalStatPeople')}</div></div>
+        <div class="dash-stat"><div class="dash-val">${totQ}</div><div class="dash-lbl">${t('dashChTotalStatQ')}</div></div>
+        <div class="dash-stat"><div class="dash-val">${pctText(totFC, totFQ)}</div><div class="dash-lbl">${t('dashChTotalStatFirst')}</div></div>
+        <div class="dash-stat"><div class="dash-val">${pctText(totC, totQ)}</div><div class="dash-lbl">${t('dashChTotalStatAll')}</div></div>
+      </div>
+      <p class="form-hint" style="margin:0 0 10px">${t('dashChTotalHint')}</p>
+      <div style="overflow-x:auto">
+        <table class="admin-table" style="font-size:13px">
+          <thead><tr>
+            <th style="text-align:center">${t('thDept')}</th>
+            <th>${t('thName')}</th>
+            <th>${t('thUsername')}</th>
+            <th style="text-align:center">${t('dashChTotalThRounds')}</th>
+            <th style="text-align:center">${t('dashChTotalThQ')}</th>
+            <th style="text-align:center">${t('dashChTotalThFirst')}</th>
+            <th style="text-align:center">${t('dashChTotalThAll')}</th>
+            <th style="text-align:center">${t('dashChTotalThStages')}</th>
+          </tr></thead>
+          <tbody>
+            ${body || `<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:16px">${t('dashChTotalEmpty')}</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>`
 }
 
 // ====== 管理员看板：分类题库分布（按部门切换） ======
