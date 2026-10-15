@@ -4275,6 +4275,23 @@ function dashChSetDept(k) {
   dashChDept = String(k || 'all')
   renderDashChallengeBlock(_perQLastRows || [])
 }
+// ====== v163：全站统一的准确率配色（唯一口径） ======
+// 产品口径（用户拍板）：>90% 绿 · 80–90% 粉 rgb(237,57,151) · ≤80% 红 rgb(221,61,0)。
+// ★ 90 整算「粉」（「90以上」与「90及以下」在 90 处重叠 → 用户明确选「90 算粉」）。
+// 配色来源必须**唯一**：当期看板成绩明细 / 累计总览两列准确率 / 每道题正确率表，全部走本函数；
+//   任何一处再写死阈值，就会出现「同一个数字两种颜色」。
+// ★★ 但**调用点不能直接裸调本函数**：既有套件按源码切片只注入目标函数体，
+//    盒外没有 accRateClass 时会 ReferenceError 让整片套件崩（v161/v162 两次教训）。
+//    → 各调用点写成 `typeof accRateClass === 'function' ? accRateClass(v) : <同口径内联>`
+//      （typeof 对未声明标识符安全返回 'undefined'，不会抛错）
+function accRateClass(v) {
+  const n = Number(v)
+  if (!isFinite(n)) return 'perq-low'   // 无数据/非法值 → 最低档（调用点通常已渲染成「-」）
+  if (n > 90) return 'perq-good'        // >90 绿
+  if (n > 80) return 'perq-high'        // 81–90 粉 #ED3997
+  return 'perq-low'                     // ≤80 红 #DD3D00
+}
+
 // ====== v162：七天挑战看板视图切换（营次越铺越多 → 需要一本「总账」）======
 // 'round' = 当期看板（原样：营次筛选 + 成绩明细 + 积分榜）
 // 'total' = 累计总览（跨**全部营次**累计答题数与准确率，按学员一行）
@@ -4301,6 +4318,56 @@ function dashChSetView(v) {
   //   直接引用会 ReferenceError（v162 自测实撞，v161 同类教训）。
   const rows = (typeof _perQLastRows === 'undefined') ? [] : (_perQLastRows || [])
   renderDashChallengeBlock(rows)
+}
+
+// ====== v163：累计总览「分部门分组 + 可点表头排序 + 组内名次」======
+// 需求（用户原话）：「给这个新的排名表出分部门功能 以及 可以按准确率排名」。
+// 拍板：① 按分部门分组显示（同部门聚在一起、部门列合并单元格，与当期看板一致）
+//       ② 三个表头都能点（累计答题数 / 首答准确率 / 正确率(含重做)），可升可降
+//       ③ 90 整算粉档；配色全站统一（见 accRateClass）
+// 规则：**组内**按当前排序键排；**组间**按各组第一名的排序值排 → 全表第一行就是整体最好的人。
+//   名次列 = 组内名次（筛选到单个分部门时它即为全局名次）。
+let dashChTotalSort = 'q'   // 'q' | 'accFirst' | 'accAll'
+let dashChTotalDir = -1     // -1 降序 / 1 升序
+// 点表头：同键 → 升降序取反；换键 → 回到该键的默认方向（降序）
+function dashChTotalSetSort(k) {
+  const key = (k === 'accFirst' || k === 'accAll') ? k : 'q'
+  if (dashChTotalSort === key) dashChTotalDir = (dashChTotalDir === -1) ? 1 : -1
+  else { dashChTotalSort = key; dashChTotalDir = -1 }
+  const rows = (typeof _perQLastRows === 'undefined') ? [] : (_perQLastRows || [])
+  renderDashChallengeBlock(rows)
+}
+// 分组 + 组内排序 → 返回 [{deptLabel, items:[...]}]（items 已按当前键排好，[0] = 组内第一）
+function dashChTotalGroups(list, key, dir) {
+  const kk = (key === 'accFirst' || key === 'accAll') ? key : 'q'
+  const dd = (dir === 1) ? 1 : -1
+  const val = p => kk === 'accFirst' ? (p.accFirst == null ? -1 : p.accFirst)
+    : kk === 'accAll' ? (p.accAll == null ? -1 : p.accAll)
+      : (Number(p.q) || 0)
+  // 并列时按题量（与 v162 默认口径一致），保证顺序稳定可复现
+  const cmp = (a, b) => ((val(a) - val(b)) * dd) || (b.q - a.q) || (b.fQ - a.fQ)
+  const groups = []
+  const gmap = {}
+  ;(list || []).forEach(p => {
+    const hit = (typeof normDept === 'function') ? normDept(p && p.dept) : null
+    const k = hit ? hit.key : ('zz|' + String((p && p.dept) || ''))
+    if (!gmap[k]) { gmap[k] = { key: k, hit: hit, raw: String((p && p.dept) || ''), items: [] }; groups.push(gmap[k]) }
+    gmap[k].items.push(p)
+  })
+  groups.forEach(g => g.items.sort(cmp))
+  // 组间：按「组内第一名」的排序值 —— 降序时最强的组在最前，升序时最弱的组在最前（方向一致）
+  groups.sort((a, b) => {
+    const x = a.items[0], y = b.items[0]
+    if (!x && !y) return 0
+    if (!x) return 1
+    if (!y) return -1
+    return cmp(x, y)
+  })
+  // 组标签：归一化成功 → 分部门短名；否则回落原始字符串
+  groups.forEach(g => {
+    g.label = g.hit ? (g.hit.subName || g.raw) : (g.raw || '—')
+  })
+  return groups
 }
 
 // ====== 管理员看板：重置某学员的挑战考试成绩（v83 引入，v84 收窄口径，v85 修按钮接线） ======
@@ -4990,8 +5057,9 @@ function renderDashChallengeBlock(rows) {
     const body = b.rows.map((p, i) => {
       const pi = list.indexOf(p)   // 供操作按钮定位（沿用原 pi 语义）
       const run = runs.filter(r => r.from === i)[0]
+      // v163：配色与累计总览/正确率表统一（>90 绿 / 80–90 粉 / ≤80 红）；★ 见 accRateClass 的 typeof 守卫说明
       const accCell = (Number(p.q) || 0) > 0
-        ? `<span class="perq-rate ${p.acc >= 80 ? 'perq-good' : p.acc >= 60 ? 'perq-ok' : 'perq-bad'}">${p.acc}%</span>`
+        ? `<span class="perq-rate ${(typeof accRateClass === 'function') ? accRateClass(p.acc) : (Number(p.acc) > 90 ? 'perq-good' : Number(p.acc) > 80 ? 'perq-high' : 'perq-low')}">${p.acc}%</span>`
         : '<span style="color:#9ca3af">-</span>'
       return `<tr>
         ${run ? `<td rowspan="${run.to - run.from + 1}" style="vertical-align:middle;text-align:center;color:#6b7280;font-size:12px">${escHtml(p.dept || '—')}</td>` : ''}
@@ -5227,19 +5295,39 @@ function renderDashChTotalBlock(rows) {
   const totFQ = list.reduce((s, p) => s + p.fQ, 0)
   const totFC = list.reduce((s, p) => s + p.fC, 0)
   const pctText = (a, b) => (b > 0 ? Math.round(Math.min(1, a / b) * 100) + '%' : '—')
+  // v163：全站统一配色（>90 绿 / 80–90 粉 / ≤80 红）。★ typeof 守卫见 accRateClass 注释
+  const accCls = v => (typeof accRateClass === 'function')
+    ? accRateClass(v)
+    : (Number(v) > 90 ? 'perq-good' : Number(v) > 80 ? 'perq-high' : 'perq-low')
   const accCell = v => (v == null
     ? '<span style="color:#9ca3af">-</span>'
-    : `<span class="perq-rate ${v >= 80 ? 'perq-good' : v >= 60 ? 'perq-ok' : 'perq-bad'}">${v}%</span>`)
-  const body = list.map(p => `<tr>
-      <td style="white-space:nowrap;text-align:center;color:#6b7280;font-size:12px">${escHtml(p.dept || '—')}</td>
+    : `<span class="perq-rate ${accCls(v)}">${v}%</span>`)
+  // v163：分部门分组 + 组内排序（组间按各组第一名排）→ 全表第一行就是整体最好的人
+  const sortKey = (typeof dashChTotalSort === 'undefined') ? 'q' : dashChTotalSort
+  const sortDir = (typeof dashChTotalDir === 'undefined') ? -1 : dashChTotalDir
+  const groups = (typeof dashChTotalGroups === 'function')
+    ? dashChTotalGroups(list, sortKey, sortDir)
+    : [{ label: '', items: list }]   // ★ 切片沙箱兜底（既有套件没有 dashChTotalGroups）
+  const dirIco = k => (sortKey === k ? (sortDir === -1 ? ' ▼' : ' ▲') : '')
+  const thSort = k => `style="text-align:center;cursor:pointer;white-space:nowrap" title="${escAttr(t('dashChTotalSortHint'))}" onclick="dashChTotalSetSort('${k}')"`
+  const body = groups.map(g => g.items.map((p, i) => `<tr>
+      <td style="text-align:center;color:#6b7280;font-size:12px" title="${escAttr(t('dashChTotalRankHint'))}">${i + 1}</td>
+      ${i === 0 ? `<td rowspan="${g.items.length}" style="vertical-align:middle;text-align:center;color:#6b7280;font-size:12px">${escHtml(g.label || '—')}</td>` : ''}
       <td style="white-space:nowrap">${escHtml(p.name || '—')}${p.role === 'admin' ? ` <span style="font-size:10px;color:#92400e;background:#fef3c7;border-radius:6px;padding:1px 5px">${escHtml(t('roleAdmin'))}</span>` : ''}</td>
       <td style="white-space:nowrap;color:#6b7280;font-size:12px">${escHtml(p.username || '—')}</td>
       <td style="text-align:center" title="${escAttr(p.roundSlugs.map(rdNameOf).join('、'))}">${p.rounds}</td>
       <td style="text-align:center;font-weight:700">${p.q}</td>
       <td style="text-align:center">${accCell(p.accFirst)}</td>
-      <td style="text-align:center;color:#6b7280">${accCell(p.accAll)}</td>
+      <td style="text-align:center">${accCell(p.accAll)}</td>
       <td style="text-align:center;color:#9ca3af;font-size:12px" title="${escAttr(t('dashChTotalStagesHint'))}">${p.stages}</td>
-    </tr>`).join('')
+    </tr>`).join('')).join('')
+  // 配色图例（与 accRateClass 同口径；三档直接用真实徽章，避免「说明和实际不一致」）
+  const legend = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 10px">
+      <span style="font-size:12px;color:#6b7280">${t('dashChTotalColorHint')}：</span>
+      <span class="perq-rate ${accCls(95)}">&gt;90%</span>
+      <span class="perq-rate ${accCls(85)}">81–90%</span>
+      <span class="perq-rate ${accCls(70)}">≤80%</span>
+    </div>`
   el.innerHTML = `
     <div class="card" style="margin-top:16px">
       <h3 style="margin:0 0 8px">🗂️ ${t('dashChTotalTitle')}</h3>
@@ -5251,20 +5339,23 @@ function renderDashChTotalBlock(rows) {
         <div class="dash-stat"><div class="dash-val">${pctText(totC, totQ)}</div><div class="dash-lbl">${t('dashChTotalStatAll')}</div></div>
       </div>
       <p class="form-hint" style="margin:0 0 10px">${t('dashChTotalHint')}</p>
+      <p class="form-hint" style="margin:0 0 10px">${t('dashChTotalSortHint')}</p>
+      ${legend}
       <div style="overflow-x:auto">
         <table class="admin-table" style="font-size:13px">
           <thead><tr>
+            <th style="text-align:center">${t('dashChTotalThRank')}</th>
             <th style="text-align:center">${t('thDept')}</th>
             <th>${t('thName')}</th>
             <th>${t('thUsername')}</th>
             <th style="text-align:center">${t('dashChTotalThRounds')}</th>
-            <th style="text-align:center">${t('dashChTotalThQ')}</th>
-            <th style="text-align:center">${t('dashChTotalThFirst')}</th>
-            <th style="text-align:center">${t('dashChTotalThAll')}</th>
+            <th ${thSort('q')}>${t('dashChTotalThQ')}${dirIco('q')}</th>
+            <th ${thSort('accFirst')}>${t('dashChTotalThFirst')}${dirIco('accFirst')}</th>
+            <th ${thSort('accAll')}>${t('dashChTotalThAll')}${dirIco('accAll')}</th>
             <th style="text-align:center">${t('dashChTotalThStages')}</th>
           </tr></thead>
           <tbody>
-            ${body || `<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:16px">${t('dashChTotalEmpty')}</td></tr>`}
+            ${body || `<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:16px">${t('dashChTotalEmpty')}</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -5367,7 +5458,10 @@ function renderPerQBlock(rows) {
   const totalAnswered = list.reduce((s, x) => s + x.total, 0)
   const totalCorrect = list.reduce((s, x) => s + x.correct, 0)
   const overallRate = totalAnswered > 0 ? Math.round(totalCorrect / totalAnswered * 100) : 0
-  const trClass = r => r.rate >= 80 ? 'perq-good' : r.rate >= 60 ? 'perq-ok' : r.rate >= 40 ? 'perq-warn' : 'perq-bad'
+  // v163：每道题正确率也走全站统一配色（>90 绿 / 80–90 粉 / ≤80 红）；★ typeof 守卫见 accRateClass
+  const trClass = r => (typeof accRateClass === 'function')
+    ? accRateClass(r.rate)
+    : (Number(r.rate) > 90 ? 'perq-good' : Number(r.rate) > 80 ? 'perq-high' : 'perq-low')
   el.innerHTML = `
     <h2 style="margin:24px 0 12px;font-size:18px">📈 ${t('perQTitle')}</h2>
     <div class="card">

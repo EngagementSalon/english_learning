@@ -82,11 +82,14 @@
   background:var(--brand-soft); color:var(--brand-soft-text); margin-right:6px;
 }
 .role-badge.role-admin { background:#fef3c7; color:#b45309; }
-/* ====== 每道题正确率 ====== */
+/* ====== 每道题正确率 / 全站准确率（v163 起统一配色） ====== */
+/* 阈值口径（产品口径，全站唯一来源 = app.js accRateClass）：>90 绿 · 80–90 粉 · ≤80 红 */
 .perq-rate {
   display:inline-block; min-width:44px; font-size:12px; font-weight:700; padding:2px 8px; border-radius:999px;
 }
 .perq-rate.perq-good { background:#d1fae5; color:#047857; }
+.perq-rate.perq-high { background:rgba(237,57,151,.14); color:rgb(237,57,151); }
+.perq-rate.perq-low  { background:rgba(221,61,0,.12);  color:rgb(221,61,0); }
 .perq-rate.perq-ok  { background:#dbeafe; color:#1d4ed8; }
 .perq-rate.perq-warn{ background:#fef3c7; color:#b45309; }
 .perq-rate.perq-bad { background:#fee2e2; color:#b91c1c; }

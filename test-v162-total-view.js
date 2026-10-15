@@ -251,9 +251,10 @@ const rowsCross = [
     assert('「参与营次」列悬停列出期名（第一期、r2）', html.includes('title="第一期、r2"'), '未找到期名提示')
     assert('口径说明写明「跨全部营次」', html.includes('跨全部营次'))
     // 空态：★ 断言必须连「空态专属文案」一起给，只查 colspan 会假绿（v160 血泪）
+    //    v163：新增「排名」列 → colspan 8 → 9（契约随需求变更，非回归）
     const emptyHtml = renderTotal(sb, [])
-    assert('空态行 = colspan 8 + 空态专属文案（精确到文案，防假绿）',
-      emptyHtml.includes('colspan="8" style="text-align:center;color:#9ca3af;padding:16px">还没有任何营次的挑战作答记录。'),
+    assert('空态行 = colspan 9 + 空态专属文案（精确到文案，防假绿）',
+      emptyHtml.includes('colspan="9" style="text-align:center;color:#9ca3af;padding:16px">还没有任何营次的挑战作答记录。'),
       '未找到空态行')
     // 排序：累计答题数降序
     const rowsSort = [
