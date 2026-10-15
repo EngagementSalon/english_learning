@@ -3,6 +3,7 @@
 // 文档结构：{ v: 1, base: { <username>: 聚合统计 }, events: [最近事件] }
 // 事件格式（紧凑键名）：{ id, u:用户名, n:姓名, ty:类型, ts:时间戳, d:数据 }
 // 事件类型：register / login / duration / practice / exam / placement / delete / rename / role / dept
+//   / perq / chy / chyfix / chreset / chlevel（v166：七天挑战能力等级 L1–L4）
 // 平台级配置（如品牌 Logo）存于文档顶层字段 logo / logoAt，不随事件折叠
 // 说明：密码不进入云端，仍保存在各终端本地（账号只能在注册它的设备上登录）
 
@@ -1372,6 +1373,12 @@ const CloudSync = {
             if (rt > tt) { tgt.chResetAt = r.chResetAt; tgt.chResetMode = r.chResetMode }
             else if (!tgt.chResetMode && r.chResetMode) tgt.chResetMode = r.chResetMode
           }
+          // v166：挑战等级（chLevel）取两者较高值 —— 合并的语义是「把源的学习成果并进来」，
+          //   等级低的那个若覆盖高的，等于合并后降级（学员视角是倒退）。取 max 与 examBest 同思路。
+          {
+            const tl = Number(tgt.chLevel) || 0, rl = Number(r.chLevel) || 0
+            if (rl > tl) tgt.chLevel = rl
+          }
           // 合并每道题答题明细
           if (r.perQ) {
             tgt.perQ = tgt.perQ || {}
@@ -1472,7 +1479,27 @@ const CloudSync = {
           correct: Number(d.correct) || 0, total: Number(d.total) || 0,
           usedSec: Number(d.usedSec) || 0, at: ev.ts, rd: _roundSlugKey(d.rd),
           ...(d.manual ? { manual: true } : {}),
+          // v166：顺手带一份「写完这一刻的能力等级」快照（历史轨迹，便于事后回溯等级变化）。
+          //   ★ 仅仅是快照：看板/回放的权威来源是 r.chLevel（下方 chlevel 事件），
+          //   绝不从 chy 里反推当前等级 —— chy 是每个阶段一条，重练会产生多条不同 lv。
+          ...((Number.isInteger(Number(d.lv)) && Number(d.lv) >= 1 && Number(d.lv) <= 4) ? { lv: Number(d.lv) } : {}),
         })
+        break
+      case 'chlevel':
+        // v166：七天挑战「能力等级」上云（L1–L4）。
+        //   为什么单开事件类型而不复用 chy：等级是「当前状态」而非「一次事件」，只在练习完成时
+        //   才会变（chLevelApply），但换设备回放、管理员重置后重评都需要能独立落一条，
+        //   复用 chy 会被迫伪造一个阶段完成记录（污染进度/打卡/积分统计）。
+        //   ★ 幂等语义 = 「最后写入者胜」：r.chLevel 是单个数字，重放同一事件结果相同。
+        //   ★ 与 placementLevel **完全分离**：placementLevel 由水平测试驱动，且会被看板旧例程
+        //     recalcCloudPlacementLevels() 用水平测数据改写（只降不升）。挑战等级写进去会被静默改掉，
+        //     所以必须独立字段。（2026-10-15 实测：该例程会改写 16 名存量学员的等级。）
+        {
+          const lv = Number(d.lv)
+          // ★ 必须整数值：Math.round 后再比 —— 只写 `>=1 && <=4` 会放过 1.5/2.7 这类
+          //   （编程/serialize 事故产生的脏值），看板会显示成「L1.5」这种不存在的等级。
+          if (Number.isInteger(lv) && lv >= 1 && lv <= 4) r.chLevel = lv
+        }
         break
       case 'chyfix':
         // v105：管理员修正已录入的挑战成绩（补录录错后改数）。按 (day, si, rd) 定位该营次该阶段
@@ -1538,6 +1565,12 @@ const CloudSync = {
         }
         r.chResetAt = ev.ts
         r.chResetMode = d.mode === 'exam' ? 'exam' : 'all'
+        // v166：挑战等级（chLevel）是「从练习阶段记录推导出来的状态」——
+        //   'all' 重置把练习记录整表清空 → 推导依据没了 → 云端等级必须一并清掉，
+        //   否则学员本机回到 L1、看板却仍显示旧 Lx（静默不一致）。
+        //   'exam' 重置只清两场水平测试，练习进度保留 → 等级依据仍在，**刻意不动 chLevel**。
+        //   幂等：重复重放同一条 chreset（'all'）结果相同（delete 一个不存在的键是无害的）。
+        if (d.mode !== 'exam') delete r.chLevel
         break
       case 'perqfix':
         // v38 看字选音发音修复：无效错答从每题统计的分母中剔除（correct 不变——错答本就未计入）

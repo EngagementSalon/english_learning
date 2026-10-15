@@ -853,6 +853,10 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     chLevelUp: (a, b) => `等级提升：${a} → ${b}`,
     chLevelDown: (a, b) => `等级调整：${a} → ${b}`,
     chLevelBaseAcc: (v) => `（首答准确率 ${v}%）`,
+    // v166：看板「等级」列改显七天挑战能力等级
+    dashChLevelTip: '七天挑战能力等级（按累计首答准确率与已完成难度评定）',
+    dashChLevelFallbackTip: '暂无挑战等级，显示的是水平测试定级',
+    mergeMLevelHint: 'Lx / Lx = 挑战等级 / 水平测定级',
     // v114：七天挑战「部门没同步过来」的自助修复（重新同步按钮 + 本机/资料部门对照自检）
     chDeptResync: '重新同步部门',
     chDeptDiagLocal: '本机记录的部门',
@@ -1875,6 +1879,10 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     chLevelUp: (a, b) => `Level up: ${a} → ${b}`,
     chLevelDown: (a, b) => `Level adjusted: ${a} → ${b}`,
     chLevelBaseAcc: (v) => `(first-try accuracy ${v}%)`,
+    // v166: dashboard "Level" column now shows the 7-day challenge ability level
+    dashChLevelTip: '7-day challenge ability level (from cumulative first-try accuracy and completed difficulty)',
+    dashChLevelFallbackTip: 'No challenge level yet — showing placement test level',
+    mergeMLevelHint: 'Lx / Lx = challenge level / placement level',
     // v114：七天挑战「部门没同步过来」的自助修复（重新同步按钮 + 本机/资料部门对照自检）
     chDeptResync: 'Re-sync department',
     chDeptDiagLocal: 'Department on this device',

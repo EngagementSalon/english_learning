@@ -3502,6 +3502,27 @@ function _courseMatrices(doc, infoMap) {
 }
 
 // ====== 管理员数据加载（账号管理页 / 数据看板页共用）======
+// v166：看板「等级」列 —— 显示**七天挑战能力等级**（云端 base[u].chLevel），
+//   取代原先的「水平测试定级」（placementLevel）。
+//   为什么换口径：定级是「一次性摸底结果」，学员看完就再也不变；挑战等级是跟着练习走的
+//   活数据（累计首答准确率 + 已完成难度天花板），对管理员判断谁在进步有用得多。
+//   降级顺序（三级）：挑战等级 → 水平测试定级 → 未评定。
+//     · 老学员从未跑过七天挑战 → chLevel 为空 → 回落到 placementLevel（不丢信息）
+//     · 两个都空 → 显示「未评定」（文案沿用 v165 的 notPlaced）
+//   ★ 用徽章色阶区分口径：挑战等级用 level-badge（与学员端等级卡视觉一致），
+//     回落显示的水平测定级加 chLevelFallback 类 + 标题提示，避免管理员误读成挑战等级。
+function _chLevelCell(u) {
+  const cl = Number(u && u.chLevel) || 0
+  if (cl >= 1 && cl <= 4) {
+    return `<span class="level-badge level-${cl}" title="${escAttr(t('dashChLevelTip'))}">L${cl}</span>`
+  }
+  const pl = Number(u && u.placementLevel) || 0
+  if (pl >= 1 && pl <= 4) {
+    return `<span class="level-badge level-${pl} ch-lv-fallback" title="${escAttr(t('dashChLevelFallbackTip'))}">L${pl}</span>`
+  }
+  return `<span style="color:#9ca3af;font-size:12px">${t('notPlaced')}</span>`
+}
+
 async function loadAdminRows() {
   // 先触发云端定级重算（一次性，修正旧 bug 导致的等级虚高）
   if (typeof CloudSync !== 'undefined' && CloudSync.recalcCloudPlacementLevels) {
@@ -3576,7 +3597,7 @@ async function loadAdminRows() {
   const totalExams = students.reduce((s, u) => s + (u.examCount || 0), 0)
   const examAvail = students.filter(u => u.examCount > 0)
   const avgExam = examAvail.length > 0 ? Math.round(examAvail.reduce((s, u) => s + u.examAvg, 0) / examAvail.length) : 0
-  const placedCount = students.filter(u => u.placementLevel).length
+  const placedCount = students.filter(u => (u.chLevel >= 1 && u.chLevel <= 4) || u.placementLevel).length
   // 线下汇总
   const courseStudents = students.filter(u => u.courseTotal > 0)
   const courseAvgAll = courseStudents.length ? Math.round(courseStudents.reduce((s,u)=>s+u.courseAvg,0)/courseStudents.length) : 0
@@ -3639,7 +3660,7 @@ async function renderUsers() {
               <td>${escHtml(u.name || '—')}</td>
               <td>${escHtml(u.dept || '—')}</td>
               <td><span class="role-badge ${u.role === 'admin' ? 'role-admin' : ''}">${u.role === 'admin' ? t('roleAdmin') : t('roleStudent')}</span></td>
-              <td>${u.role !== 'admin' ? (u.placementLevel ? `<span class="level-badge level-${u.placementLevel}">L${u.placementLevel}</span>` : `<span style="color:#9ca3af;font-size:12px">${t('notPlaced')}</span>`) : '—'}</td>
+              <td>${u.role !== 'admin' ? _chLevelCell(u) : '—'}</td>
               <td style="font-size:12px;color:#6b7280">${lastActive}</td>
               <td>
                 ${rowId ? `<div class="admin-actions">
@@ -3722,7 +3743,7 @@ async function renderDashboard() {
       <td>${escHtml(u.name || '—')}</td>
       <td>${escHtml(u.dept || '—')}</td>
       <td><span class="role-badge ${u.role === 'admin' ? 'role-admin' : ''}">${u.role === 'admin' ? t('roleAdmin') : t('roleStudent')}</span></td>
-      <td>${u.role !== 'admin' ? (u.placementLevel ? `<span class="level-badge level-${u.placementLevel}">L${u.placementLevel}</span>` : `<span style="color:#9ca3af;font-size:12px">${t('notPlaced')}</span>`) : '—'}</td>
+      <td>${u.role !== 'admin' ? _chLevelCell(u) : '—'}</td>
       <td style="text-align:center">${u.loginCount || 0}</td>
       <td>${u.loginDuration}</td>
       <td style="text-align:center">${u.practiceCount || 0}${u.practiceCount ? ' · ' + u.practiceAccuracy + '%' : ''}</td>
@@ -5708,7 +5729,12 @@ function mergePreviewHtml(srcRow, tgtRow) {
   const pCor = sum(srcRow.practiceCorrect, tgtRow.practiceCorrect)
   const eCnt = sum(srcRow.examCount, tgtRow.examCount)
   const eSum = Math.round(sum(srcRow.examScoreSum, tgtRow.examScoreSum))
-  const lvl = Math.max(srcRow.placementLevel || 0, tgtRow.placementLevel || 0)
+  // v166：等级一行同时列两种口径 —— 挑战等级（cl）与水平测定级（pl）。
+  //   两者合并规则不同：挑战等级云端取 max（见 cloud-store rename 分支），水平测定级取「保留账号优先」。
+  //   这里如实展示，避免管理员以为「合并只保一个」。
+  const clv = Math.max(srcRow.chLevel || 0, tgtRow.chLevel || 0)
+  const plvl = Math.max(srcRow.placementLevel || 0, tgtRow.placementLevel || 0)
+  const lvlTxt = (cl, pl) => `L${cl || '—'} / ${pl ? 'L' + pl : '—'}`
   const line = (label, a, b, m) => `<tr><td style="color:#6b7280">${label}</td><td>${a}</td><td>${b}</td><td style="font-weight:700;color:#b45309">${m}</td></tr>`
   return `<table class="admin-table dash-table" style="margin-top:8px">
     <thead><tr>
@@ -5725,7 +5751,7 @@ function mergePreviewHtml(srcRow, tgtRow) {
       ${line(t('mergeMExamCount'), srcRow.examCount || 0, tgtRow.examCount || 0, eCnt)}
       ${line(t('mergeMExamAvg'), srcRow.examCount ? (srcRow.examAvg + '') : '—', tgtRow.examCount ? (tgtRow.examAvg + '') : '—', eCnt ? Math.round(eSum / eCnt) : '—')}
       ${line(t('mergeMExamBest'), srcRow.examBest || 0, tgtRow.examBest || 0, Math.max(srcRow.examBest || 0, tgtRow.examBest || 0))}
-      ${line(t('mergeMLevel'), lvl ? ('L' + lvl) : '—', (tgtRow.placementLevel ? 'L' + tgtRow.placementLevel : '—'), lvl ? ('L' + lvl) : '—')}
+      ${line(t('mergeMLevel'), lvlTxt(srcRow.chLevel, srcRow.placementLevel), lvlTxt(tgtRow.chLevel, tgtRow.placementLevel), lvlTxt(clv, plvl))}
       ${line(t('mergeMChallenge'), mergeChyCount(srcRow), mergeChyCount(tgtRow), sum(mergeChyCount(srcRow), mergeChyCount(tgtRow)))}
       ${line(t('mergeMCourse'), (srcRow.courseDone || 0) + '/' + (srcRow.courseTotal || 0), (tgtRow.courseDone || 0) + '/' + (tgtRow.courseTotal || 0), (sum(srcRow.courseDone, tgtRow.courseDone)) + '/' + (sum(srcRow.courseTotal, tgtRow.courseTotal)))}
     </tbody>

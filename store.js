@@ -1550,6 +1550,24 @@ const Store = {
     CloudSync.enqueue({ u: s.username, n: s.name || '', ty: 'chy', d: { day: day || 0, si: si || 0, kind: kind || 'practice', correct: correct || 0, total: total || 0, usedSec: usedSec || 0, rd: rd } })
   },
 
+  // v166：七天挑战「能力等级」上报（chlevel 事件）→ 云端 base[u].chLevel（1–4）。
+  //   ★ 为什么独立事件而不塞进 chy：等级是「当前状态」，chy 是「一次阶段完成」。
+  //     塞进 chy 只能顺带同步（练习完成才有），换设备回放/管理员重置后重评都覆盖不到。
+  //   ★ 写入端与重放端都在 cloud-store.js 的 case 'chlevel'（最后写入者胜，单数字 → 天然幂等）。
+  //   ★ lv 非法（null/0/NaN/越界）直接不上报 —— 绝不用 0 或 1 覆盖云端的真实等级：
+  //     未评定（还没有练习记录）时 chLevel() 会回 L1，但那是本机默认值，不代表学员能力。
+  reportChallengeLevel(lv, round) {
+    const n = Number(lv)
+    // ★ 必须是 1~4 的整数：只写范围判断会放过 1.5 / 2.7 这类脏值（云端会存成不存在的等级）。
+    if (!Number.isInteger(n) || n < 1 || n > 4) return
+    const s = this.getSession()
+    if (!s || !s.username) return
+    if (typeof CloudSync === 'undefined' || !CloudSync.enqueue) return
+    const rd = round != null && round !== '' ? String(round)
+      : (typeof chCurrentRound === 'function' ? String(chCurrentRound() || '') : '')
+    CloudSync.enqueue({ u: s.username, n: s.name || '', ty: 'chlevel', d: { lv: n, rd: rd } })
+  },
+
   // v38：看字选音发音修复的分数修正（一次性迁移，由 init 调用，见 init 内说明）
   // fixTs = 修复基准时间；此前提交的 voicematch 错答视为无效题（安卓本地 TTS 静音、无法听音作答）
   _fixVoicematchScores(fixTs) {

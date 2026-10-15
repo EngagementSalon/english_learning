@@ -324,13 +324,28 @@ function chLevelAcc() {
 // 等级评定（返回 1~4）。输入可省略 → 内部实时计算（渲染入口用）。
 //   ★ 回退链：无基准（还没做过练习）或还没做过任何首答 → 恒回 L1。
 //     这与「Day1 开始时所有人都是 L1」的产品预期一致，也避免了「还没开始就显示 L3」的荒谬态。
+//   ★★ v166：唯独「本机完全没有练习依据」（bench === 0）这一种情况要例外 ——
+//     此时说明本机还没恢复出任何阶段记录（换设备第一天 / 云端 chy 被折叠丢失），
+//     本机推不出等级**不等于学员没有等级**。这时回落到云端已知等级 chLevelFloor()，
+//     避免「换台电脑就从 L3 掉到 L1」的假降级。有依据时一律以本机推导为准（它更精确、更新）。
 function chLevelOf(accArg) {
   const acc = (accArg === undefined) ? chLevelAcc() : accArg
   const bench = chLevelBench()
-  if (acc == null || !bench) return 1
+  if (!bench) return (typeof chLevelFloor === 'function') ? chLevelFloor() : 1
+  if (acc == null) return (typeof chLevelFloor === 'function') ? chLevelFloor() : 1
   const a = Number(acc) / 100
   const raw = (a >= 0.90) ? 4 : (a >= 0.60) ? 3 : (a >= 0.30) ? 2 : 1
   return Math.max(1, Math.min(raw, Math.round(bench)))
+}
+// v166：本机存档里记住的「云端已知等级」（1~4；没有 → 1）。
+//   写入时机 = chAbsorbCloudLevel()（从 base[u].chLevel 回放）。
+//   ★ 只作为「本机无依据时」的地板值，绝不参与有依据时的计算 ——
+//     否则云端旧快照会盖住本机刚练出来的新等级（学员当场看到降级）。
+function chLevelFloor() {
+  try {
+    const v = Number(challengeState && challengeState.chLevel)
+    return (Number.isInteger(v) && v >= 1 && v <= 4) ? v : 1
+  } catch (e) { return 1 }
 }
 // 当前等级（渲染入口）。challengeLoad() 已保证 challengeState 是本营次的存档。
 function chLevel() { return chLevelOf() }
@@ -358,6 +373,9 @@ function chLevelApply(day) {
     }
     if (prev == null) prev = (challengeState.lv == null) ? 1 : Number(challengeState.lv)
     challengeState.lv = to
+    // v166：本机已知等级地板值同步抬高（只升不降）。作用：万一之后云端回放读到一个更旧的
+    //   低等级，地板值不会被它拉下去 —— 学员自己的练习成果永远压得过云端旧快照。
+    if (!(Number(challengeState.chLevel) > to)) challengeState.chLevel = to
     if (!dnum) return null
     if (!challengeState.days[dnum]) challengeState.days[dnum] = { stages: {} }
     const d = challengeState.days[dnum]
@@ -365,6 +383,14 @@ function chLevelApply(day) {
     const dir = to > prev ? 'up' : 'down'
     d.lvChg = { from: prev, to: to, dir: dir, acc: acc, bench: Math.round(bench * 100) / 100, at: Date.now() }
     challengeSave()
+    // v166：等级真的有变化 → 上报云端（chlevel 事件 → base[u].chLevel，看板/换设备回放读它）。
+    //   ★ 只在「变化」这一支上报，不在函数入口上报：
+    //     ① 无变化时 repeated 上报只会白白增加云端事件数（每完成一个阶段一条）；
+    //     ② 但首次评定（prev==1 → to==1）也不会触发 —— 那时云端本来就该是空的，
+    //        看板「等级」列显示「—」正是想要的语义（还没练出等级）。
+    //   ★ 刻意放在 challengeSave() 之后：先保证本机落盘成功，再谈上报（本机才是权威）。
+    //   ★ 用 to 而不是 challengeState.lv：两者此刻相等，但用局部变量不依赖后续改动。
+    try { if (Store && Store.reportChallengeLevel) Store.reportChallengeLevel(to, chCurrentRound()) } catch (e) {}
     return d.lvChg
   } catch (e) { return null }
 }
@@ -1449,6 +1475,37 @@ function chAbsorbCloudProgress(rows) {
   return true
 }
 
+// v166：从云端回放「能力等级」（base[u].chLevel）→ 本机存档 challengeState.chLevel（纯数字）。
+//   为什么需要：等级本机是从「已完成的练习阶段」实时推导的（chLevelBench/chLevelAcc），
+//   而练习阶段本身已经通过 chAbsorbCloudProgress 从云端恢复了 —— 但有两个真实的空窗：
+//     ① 换设备第一天、本机 challengeState 全空 → chLevelBench=0 → 恒回 L1，
+//        与看板显示的 L2/L3 不一致（学员会来问「为什么我的等级掉了」）；
+//     ② 云端 chy 记录里 kind==='test' 的阶段不算等级依据（chLevelBench 只认 practice），
+//        而 practice 阶段记录可能早被折叠/丢失 → 本机重算偏低。
+//   本函数写的是「地板值」，由 chLevelOf() 在 **本机无任何依据时** 才使用（见 chLevelFloor）。
+//   口径：
+//     · **只升不降**：云端 lv 高于本机已知值才写。理由：本机值可能刚被本机练习推上去，
+//       云端是历史快照；若本机刚升 L3、chlevel 事件还在推送队列里，采纳云端会让学员当场降级。
+//     · u.chLevel 本身不带 rd（chlevel 事件的 rd 只用于排查），这里直接取云端最新等级 ——
+//       与看板「等级」列完全同源，保证两处显示一致（这是本次需求的核心诉求）。
+//   返回 true 表示本机地板值被云端抬高（渲染层据此刷新等级卡）。
+function chAbsorbCloudLevel(rows) {
+  try {
+    if (typeof challengeState !== 'object' || !challengeState || !challengeState.days) return false
+    const uid = challengeUid()
+    let me = null
+    ;(rows || []).forEach(r => { if (r && r.username === uid) me = r })
+    if (!me) return false
+    const cloudLv = Number(me.chLevel)
+    if (!Number.isInteger(cloudLv) || cloudLv < 1 || cloudLv > 4) return false
+    const known = Number(challengeState.chLevel) || 0
+    if (cloudLv <= known) return false      // ★ 只升不降（同值也跳过，避免无意义落盘）
+    challengeState.chLevel = cloudLv
+    challengeSave()
+    return true
+  } catch (e) { return false }
+}
+
 async function chLoadLeaderboard() {
   const now = Date.now()
   if (_chLbCache.top && now - _chLbCache.at < 60000) {
@@ -1464,6 +1521,10 @@ async function chLoadLeaderboard() {
       top = chLbAggregate(rows, chCurrentRound())
       // v108：手动补录的考试成绩同步进本地进度；v140：泛化为全部云端进度恢复（换设备不再从 Day1 重来）
       try { chAbsorbCloudProgress(rows) } catch (e) { /* 吸收失败不阻断积分榜 */ }
+      // v166：云端等级回放（在进度恢复之后 —— 进度恢复会改变 chLevelBench，先恢复再比才有意义）。
+      //   写的是 challengeState.lv，等级卡渲染走 chLevel() 实时推导，所以它**不改变**等级显示值，
+      //   作用是留痕：让「本机曾从云端获知 Lx」这件事可被后续逻辑（如 chLevelApply 的 prev 起点）读到。
+      try { chAbsorbCloudLevel(rows) } catch (e) { /* 同上，失败不影响主流程 */ }
     }
   } catch (e) { /* 网络失败保留旧缓存或显示空态 */ }
   if (top) _chLbCache = { at: now, top }
