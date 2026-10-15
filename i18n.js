@@ -781,7 +781,7 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     confirmDeleteQuestion: '确定删除这道题目吗？',
 
     // 用户管理/数据看板
-    dashTotalUsers: '总用户数', dashStudents: '学员', dashPlaced: '已完成测评',
+    dashTotalUsers: '总用户数', dashStudents: '学员', dashPlaced: '已评定等级',
     dashTotalPractice: '练习总次数', dashTotalExams: '考试总次数', dashExamAvg: '考试平均分',
     usersPageTitle: '账号管理',
     usersPageHint: '在此新建 / 重置密码 / 改名 / 删除学员账号；完整学习数据请查看「数据看板」页。',
@@ -855,7 +855,8 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     chLevelBaseAcc: (v) => `（首答准确率 ${v}%）`,
     // v166：看板「等级」列改显七天挑战能力等级
     dashChLevelTip: '七天挑战能力等级（按累计首答准确率与已完成难度评定）',
-    dashChLevelFallbackTip: '暂无挑战等级，显示的是水平测试定级',
+    dashChLevelNone: '未评定',
+    dashChLevelNoneTip: '尚未产生挑战等级 —— 完成七天挑战练习后自动评定',
     mergeMLevelHint: 'Lx / Lx = 挑战等级 / 水平测定级',
     // v114：七天挑战「部门没同步过来」的自助修复（重新同步按钮 + 本机/资料部门对照自检）
     chDeptResync: '重新同步部门',
@@ -995,7 +996,7 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     mergeMExamCount: '考试次数',
     mergeMExamAvg: '考试平均分',
     mergeMExamBest: '考试最高分',
-    mergeMLevel: '定级',
+    mergeMLevel: '等级（挑战/定级）',
     mergeMChallenge: '七天挑战记录',
     mergeMCourse: '线下课完成',
 
@@ -1808,7 +1809,7 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     addBtn: 'Add', errCategoryName: 'Please enter a category name',
     confirmDeleteQuestion: 'Delete this question?',
 
-    dashTotalUsers: 'Total Users', dashStudents: 'Students', dashPlaced: 'Placed',
+    dashTotalUsers: 'Total Users', dashStudents: 'Students', dashPlaced: 'Level rated',
     dashTotalPractice: 'Total Practice', dashTotalExams: 'Total Exams', dashExamAvg: 'Avg Exam Score',
     usersPageTitle: 'Account Management',
     usersPageHint: 'Create / reset / rename / delete student accounts here. Full learning data is on the Dashboard page.',
@@ -1881,7 +1882,8 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     chLevelBaseAcc: (v) => `(first-try accuracy ${v}%)`,
     // v166: dashboard "Level" column now shows the 7-day challenge ability level
     dashChLevelTip: '7-day challenge ability level (from cumulative first-try accuracy and completed difficulty)',
-    dashChLevelFallbackTip: 'No challenge level yet — showing placement test level',
+    dashChLevelNone: 'Not rated',
+    dashChLevelNoneTip: 'No challenge level yet — assigned automatically after challenge practice',
     mergeMLevelHint: 'Lx / Lx = challenge level / placement level',
     // v114：七天挑战「部门没同步过来」的自助修复（重新同步按钮 + 本机/资料部门对照自检）
     chDeptResync: 'Re-sync department',
@@ -2020,7 +2022,7 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     mergeMExamCount: 'Exams taken',
     mergeMExamAvg: 'Average score',
     mergeMExamBest: 'Best score',
-    mergeMLevel: 'Placement',
+    mergeMLevel: 'Level (challenge/placement)',
     mergeMChallenge: 'Challenge records',
     mergeMCourse: 'Offline course done',
     clearPlacementFail: 'Cloud clear failed — check your network. Local data was cleared; other devices will sync once online.',

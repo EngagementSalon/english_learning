@@ -783,10 +783,8 @@ select { min-width: 120px; }
 .level-badge.level-2 { background:#d1fae5; color:#047857; }
 .level-badge.level-3 { background:#fef3c7; color:#b45309; }
 .level-badge.level-4 { background:#f3e8ff; color:#7e22ce; }
-/* v166：看板「等级」列回落显示水平测定级时的弱化样式（虚线边 + 半透明）——
-   让管理员一眼看出「这不是挑战等级，是老的定级」。不加这个视觉区分的话，
-   两个口径在表格里长得一模一样，会被误读成同一件事。 */
-.level-badge.ch-lv-fallback { border:1px dashed currentColor; opacity:.72; }
+/* v167：原「回落水平测定级」的弱化徽章样式已移除 ——
+   看板等级列改为只认挑战等级，水平测定级不再回落显示，该样式已无消费方。 */
 .topbar .level-badge { margin-left:6px; cursor:pointer; }
 
 .tag.tag-level { font-size:11px; }
