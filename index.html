@@ -4,30 +4,31 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ENGAGEMENT SALON</title>
-  <!-- v169：分享卡片缩略图补齐三套命名空间 —— 企微/微信抓取器对标签前缀很挑：
-       v168 只写 og:* 时卡片仍无图（10-15 用户复测），故补 twitter:* + wx:* + itemprop。
-       标准 og:* 给 Facebook/Twitter/Telegram 等；twitter:* 与 wx:* 是国内抓取器常用的回落。
-       ★ 图片信息：brand-logo.png（273x248 PNG，78KB），尺寸非标准 300x300 但企微可自适应。 -->
+  <!-- v170：分享卡片文字 —— 企微抓取器不认 og:description，回落抓页面正文
+       （v169 卡片摘要显示「WELCOME TO ENGAGEMENT SALON 👋 水平测试」，即首页横幅 + 导航）。
+       正解 = 补标准 `<meta name="description">`，抓取器优先认它，不再回落正文。
+       ★ 三处文案必须同源（name/og/twitter/wx/itemprop），改一处要全改。 -->
+  <meta name="description" content="每天 10 分钟，英语水平看得见 · 七天挑战进行中">
   <meta property="og:title" content="ENGAGEMENT SALON">
-  <meta property="og:description" content="多题型练习 · 模拟考试 · 培训测试">
+  <meta property="og:description" content="每天 10 分钟，英语水平看得见 · 七天挑战进行中">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://engagementsalon.github.io/english_learning/">
   <meta property="og:image" content="https://engagementsalon.github.io/english_learning/brand-logo.png">
-  <meta property="og:image:width" content="273">
-  <meta property="og:image:height" content="248">
+  <meta property="og:image:width" content="300">
+  <meta property="og:image:height" content="300">
   <meta property="og:image:type" content="image/png">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="ENGAGEMENT SALON">
-  <meta name="twitter:description" content="多题型练习 · 模拟考试 · 培训测试">
+  <meta name="twitter:description" content="每天 10 分钟，英语水平看得见 · 七天挑战进行中">
   <meta name="twitter:image" content="https://engagementsalon.github.io/english_learning/brand-logo.png">
   <meta name="wx:title" content="ENGAGEMENT SALON">
-  <meta name="wx:description" content="多题型练习 · 模拟考试 · 培训测试">
+  <meta name="wx:description" content="每天 10 分钟，英语水平看得见 · 七天挑战进行中">
   <meta name="wx:img" content="https://engagementsalon.github.io/english_learning/brand-logo.png">
   <meta itemprop="name" content="ENGAGEMENT SALON">
-  <meta itemprop="description" content="多题型练习 · 模拟考试 · 培训测试">
+  <meta itemprop="description" content="每天 10 分钟，英语水平看得见 · 七天挑战进行中">
   <meta itemprop="image" content="https://engagementsalon.github.io/english_learning/brand-logo.png">
   <link rel="image_src" href="brand-logo.png">
-  <link rel="stylesheet" href="style.css?v=169">
+  <link rel="stylesheet" href="style.css?v=170">
 </head>
 <body>
   <!-- 登录/注册界面 -->
@@ -170,16 +171,16 @@
     </div>
   </div>
 
-  <script src="training-questions.js?v=169"></script>
-  <script src="bank-data.js?v=169"></script>
-  <script src="cloud-store.js?v=169"></script>
-  <script src="store.js?v=169"></script>
-  <script src="i18n.js?v=169"></script>
-  <script src="qgen.js?v=169"></script>
-  <script src="course-store.js?v=169"></script>
-  <script src="anti-cheat.js?v=169"></script>
-  <script src="course-app.js?v=169"></script>
-  <script src="challenge.js?v=169"></script>
-  <script src="app.js?v=169"></script>
+  <script src="training-questions.js?v=170"></script>
+  <script src="bank-data.js?v=170"></script>
+  <script src="cloud-store.js?v=170"></script>
+  <script src="store.js?v=170"></script>
+  <script src="i18n.js?v=170"></script>
+  <script src="qgen.js?v=170"></script>
+  <script src="course-store.js?v=170"></script>
+  <script src="anti-cheat.js?v=170"></script>
+  <script src="course-app.js?v=170"></script>
+  <script src="challenge.js?v=170"></script>
+  <script src="app.js?v=170"></script>
 </body>
 </html>
