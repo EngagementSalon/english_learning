@@ -4,15 +4,30 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ENGAGEMENT SALON</title>
-  <!-- v168：企微/微信分享卡片缩略图 —— 无 og:image 时抓取器显示灰色占位框（10-15 用户实拍确认）。
-       图 = brand-logo.png（用户提供的高达图 273x248，78KB），同时作浏览器 favicon。
-       注意：og:url 的子路径 english_learning/ 与 GitHub Pages 项目页路径一致，勿删。 -->
+  <!-- v169：分享卡片缩略图补齐三套命名空间 —— 企微/微信抓取器对标签前缀很挑：
+       v168 只写 og:* 时卡片仍无图（10-15 用户复测），故补 twitter:* + wx:* + itemprop。
+       标准 og:* 给 Facebook/Twitter/Telegram 等；twitter:* 与 wx:* 是国内抓取器常用的回落。
+       ★ 图片信息：brand-logo.png（273x248 PNG，78KB），尺寸非标准 300x300 但企微可自适应。 -->
   <meta property="og:title" content="ENGAGEMENT SALON">
   <meta property="og:description" content="多题型练习 · 模拟考试 · 培训测试">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://engagementsalon.github.io/english_learning/">
   <meta property="og:image" content="https://engagementsalon.github.io/english_learning/brand-logo.png">
-  <link rel="stylesheet" href="style.css?v=168">
+  <meta property="og:image:width" content="273">
+  <meta property="og:image:height" content="248">
+  <meta property="og:image:type" content="image/png">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="ENGAGEMENT SALON">
+  <meta name="twitter:description" content="多题型练习 · 模拟考试 · 培训测试">
+  <meta name="twitter:image" content="https://engagementsalon.github.io/english_learning/brand-logo.png">
+  <meta name="wx:title" content="ENGAGEMENT SALON">
+  <meta name="wx:description" content="多题型练习 · 模拟考试 · 培训测试">
+  <meta name="wx:img" content="https://engagementsalon.github.io/english_learning/brand-logo.png">
+  <meta itemprop="name" content="ENGAGEMENT SALON">
+  <meta itemprop="description" content="多题型练习 · 模拟考试 · 培训测试">
+  <meta itemprop="image" content="https://engagementsalon.github.io/english_learning/brand-logo.png">
+  <link rel="image_src" href="brand-logo.png">
+  <link rel="stylesheet" href="style.css?v=169">
 </head>
 <body>
   <!-- 登录/注册界面 -->
@@ -155,16 +170,16 @@
     </div>
   </div>
 
-  <script src="training-questions.js?v=168"></script>
-  <script src="bank-data.js?v=168"></script>
-  <script src="cloud-store.js?v=168"></script>
-  <script src="store.js?v=168"></script>
-  <script src="i18n.js?v=168"></script>
-  <script src="qgen.js?v=168"></script>
-  <script src="course-store.js?v=168"></script>
-  <script src="anti-cheat.js?v=168"></script>
-  <script src="course-app.js?v=168"></script>
-  <script src="challenge.js?v=168"></script>
-  <script src="app.js?v=168"></script>
+  <script src="training-questions.js?v=169"></script>
+  <script src="bank-data.js?v=169"></script>
+  <script src="cloud-store.js?v=169"></script>
+  <script src="store.js?v=169"></script>
+  <script src="i18n.js?v=169"></script>
+  <script src="qgen.js?v=169"></script>
+  <script src="course-store.js?v=169"></script>
+  <script src="anti-cheat.js?v=169"></script>
+  <script src="course-app.js?v=169"></script>
+  <script src="challenge.js?v=169"></script>
+  <script src="app.js?v=169"></script>
 </body>
 </html>

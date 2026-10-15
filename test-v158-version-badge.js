@@ -154,7 +154,7 @@ function evalVersionFns(doc) {
 const realEls = []
 HTML_SRC.replace(/<link[^>]*href="([^"]+)"[^>]*>/g, (m, href) => { realEls.push(mkEl('link', { href })); return m })
 HTML_SRC.replace(/<script[^>]*src="([^"]+)"[^>]*>/g, (m, src) => { realEls.push(mkEl('script', { src })); return m })
-assert('从 index.html 抽出资源数 = 12', realEls.length === 12, '实得 ' + realEls.length)
+assert('从 index.html 抽出资源数 = 13（v169 起 +1：link rel=image_src 分享缩略图兼容）', realEls.length === 13, '实得 ' + realEls.length)
 const realSb = evalVersionFns(makeDoc(realEls, {}))
 const realVer = realSb.appVersionFromDom()
 assert('真实 index.html → 反读出 ' + APP_VER, realVer === APP_VER, '实得 ' + realVer)
