@@ -4320,13 +4320,15 @@ function dashChSetView(v) {
   renderDashChallengeBlock(rows)
 }
 
-// ====== v163：累计总览「分部门分组 + 可点表头排序 + 组内名次」======
-// 需求（用户原话）：「给这个新的排名表出分部门功能 以及 可以按准确率排名」。
-// 拍板：① 按分部门分组显示（同部门聚在一起、部门列合并单元格，与当期看板一致）
-//       ② 三个表头都能点（累计答题数 / 首答准确率 / 正确率(含重做)），可升可降
-//       ③ 90 整算粉档；配色全站统一（见 accRateClass）
-// 规则：**组内**按当前排序键排；**组间**按各组第一名的排序值排 → 全表第一行就是整体最好的人。
-//   名次列 = 组内名次（筛选到单个分部门时它即为全局名次）。
+// ====== v163：累计总览「可点表头排序 + 全局名次 + 分部门筛选」======
+// 需求（用户原话）：「给这个新的排名表出分部门功能 以及 可以按准确率排名」
+//   → 后续修正：「排名不要分部门啊 所有人一起排序」
+// 拍板：① **所有学员一起排**（不做分部门分组、不做部门列合并单元格）
+//       ② 「分部门」= 顶部部门筛选条（切到某部门即只看该部门，名次在该筛选结果内连续）
+//       ③ 三个表头都能点（累计答题数 / 首答准确率 / 正确率(含重做)），可升可降
+//       ④ 90 整算粉档；配色全站统一（见 accRateClass）
+// 规则：**全局**按当前排序键排 → 全表第一行 = 整体最好；名次 = 1..N 连续，与部门无关。
+//   ★ 并列时按题量、再按首答题量兜底 → 顺序稳定可复现（不依赖 Array.sort 的稳定性）。
 let dashChTotalSort = 'q'   // 'q' | 'accFirst' | 'accAll'
 let dashChTotalDir = -1     // -1 降序 / 1 升序
 // 点表头：同键 → 升降序取反；换键 → 回到该键的默认方向（降序）
@@ -4337,7 +4339,22 @@ function dashChTotalSetSort(k) {
   const rows = (typeof _perQLastRows === 'undefined') ? [] : (_perQLastRows || [])
   renderDashChallengeBlock(rows)
 }
+// 全局排序（v163：所有人一起排，与部门无关）→ 返回已排好的扁平数组
+// ★ 与 dashChTotalGroups 同一套取值/比较口径：accFirst/accAll 缺失记为 -1（排最后），
+//   并列时按题量、再按首答题量兜底，保证顺序稳定可复现。
+function dashChTotalSortList(list, key, dir) {
+  const kk = (key === 'accFirst' || key === 'accAll') ? key : 'q'
+  const dd = (dir === 1) ? 1 : -1
+  const val = p => kk === 'accFirst' ? (p.accFirst == null ? -1 : p.accFirst)
+    : kk === 'accAll' ? (p.accAll == null ? -1 : p.accAll)
+      : (Number(p.q) || 0)
+  const cmp = (a, b) => ((val(a) - val(b)) * dd) || (b.q - a.q) || (b.fQ - a.fQ)
+  return (list || []).slice().sort(cmp)
+}
 // 分组 + 组内排序 → 返回 [{deptLabel, items:[...]}]（items 已按当前键排好，[0] = 组内第一）
+// ★ v163 终版：累计总览已改为「所有人一起排」，本函数暂不再被渲染调用；
+//   刻意保留（同名同签名），因为 test-v163 的切片沙箱按名注入它做组间/组内断言，
+//   删掉会让既有套件整片 ReferenceError。后续若确实没有使用场景再单独清理。
 function dashChTotalGroups(list, key, dir) {
   const kk = (key === 'accFirst' || key === 'accAll') ? key : 'q'
   const dd = (dir === 1) ? 1 : -1
@@ -5302,17 +5319,17 @@ function renderDashChTotalBlock(rows) {
   const accCell = v => (v == null
     ? '<span style="color:#9ca3af">-</span>'
     : `<span class="perq-rate ${accCls(v)}">${v}%</span>`)
-  // v163：分部门分组 + 组内排序（组间按各组第一名排）→ 全表第一行就是整体最好的人
+  // v163：**所有人一起排**（不做分部门分组、不做部门列合并）→ 名次 = 1..N 连续全局名次
   const sortKey = (typeof dashChTotalSort === 'undefined') ? 'q' : dashChTotalSort
   const sortDir = (typeof dashChTotalDir === 'undefined') ? -1 : dashChTotalDir
-  const groups = (typeof dashChTotalGroups === 'function')
-    ? dashChTotalGroups(list, sortKey, sortDir)
-    : [{ label: '', items: list }]   // ★ 切片沙箱兜底（既有套件没有 dashChTotalGroups）
+  const sorted = (typeof dashChTotalSortList === 'function')
+    ? dashChTotalSortList(list, sortKey, sortDir)
+    : (list || []).slice()   // ★ 切片沙箱兜底（既有套件没有 dashChTotalSortList）
   const dirIco = k => (sortKey === k ? (sortDir === -1 ? ' ▼' : ' ▲') : '')
   const thSort = k => `style="text-align:center;cursor:pointer;white-space:nowrap" title="${escAttr(t('dashChTotalSortHint'))}" onclick="dashChTotalSetSort('${k}')"`
-  const body = groups.map(g => g.items.map((p, i) => `<tr>
+  const body = sorted.map((p, i) => `<tr>
       <td style="text-align:center;color:#6b7280;font-size:12px" title="${escAttr(t('dashChTotalRankHint'))}">${i + 1}</td>
-      ${i === 0 ? `<td rowspan="${g.items.length}" style="vertical-align:middle;text-align:center;color:#6b7280;font-size:12px">${escHtml(g.label || '—')}</td>` : ''}
+      <td style="white-space:nowrap;text-align:center;color:#6b7280;font-size:12px">${escHtml(p.dept || '—')}</td>
       <td style="white-space:nowrap">${escHtml(p.name || '—')}${p.role === 'admin' ? ` <span style="font-size:10px;color:#92400e;background:#fef3c7;border-radius:6px;padding:1px 5px">${escHtml(t('roleAdmin'))}</span>` : ''}</td>
       <td style="white-space:nowrap;color:#6b7280;font-size:12px">${escHtml(p.username || '—')}</td>
       <td style="text-align:center" title="${escAttr(p.roundSlugs.map(rdNameOf).join('、'))}">${p.rounds}</td>
@@ -5320,7 +5337,7 @@ function renderDashChTotalBlock(rows) {
       <td style="text-align:center">${accCell(p.accFirst)}</td>
       <td style="text-align:center">${accCell(p.accAll)}</td>
       <td style="text-align:center;color:#9ca3af;font-size:12px" title="${escAttr(t('dashChTotalStagesHint'))}">${p.stages}</td>
-    </tr>`).join('')).join('')
+    </tr>`).join('')
   // 配色图例（与 accRateClass 同口径；三档直接用真实徽章，避免「说明和实际不一致」）
   const legend = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 10px">
       <span style="font-size:12px;color:#6b7280">${t('dashChTotalColorHint')}：</span>
