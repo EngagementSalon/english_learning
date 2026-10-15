@@ -258,6 +258,183 @@ function chTestPlan() {
   return chIsHardRound() ? CHALLENGE_TEST_PLAN_HARD : CHALLENGE_TEST_PLAN
 }
 
+// ====== v165：七天挑战「能力等级」动态评定（L1–L4）======
+// 需求（用户原话）：「能否按照七天挑战参与后的准确率 自动判定这个是 L1 还是 L4？然后因为准确率
+//   动态调整，且调整的时候会出现动画提示」→ 拍板：**累计首答准确率**（含全部天数）+ **每天练习结束后评估**。
+//
+// 口径（三条，缺一都会误判）：
+//   ① 等级按「累计首答准确率」查表 —— 与积分榜 / 累计总览的 accFirst 同源（去重后首次完成记录），
+//      绝不用明细表那个含重做的「正确率」（重做就能把等级刷上去）。
+//   ② **等级不可高于当天计划的难度档**。这是本功能最关键的一条：准确率是「相对当前难度」的相对量
+//      （题容易 → 准确率虚高），单看准确率会让所有人涨到 L4。用 chPlanDayAvg 把等级压回
+//      「你实际答到的难度」以内 → Day1 名义均值 1.00 时最好也只能评到 L1，Day5 才可能到 L3。
+//   ③ 只许**逐级**变化（每天最多升 1 级或降 1 级）→ 避免一次考试把 L1 直接弹到 L4。
+//
+// 阈值按「名义计划难度均值」标定（第一期 1.00/1.16/1.30/1.47/1.63/1.80/1.90，
+//   进阶期 2.00/2.13/2.23/2.36/2.47/2.60/2.67 —— 见 CHALLENGE_DIFF_PLAN[_HARD]）：
+//   ≥0.90 → L4（Day7 名义 1.90，说明高质量地完成了最高难度日）
+//   ≥0.60 → L3（Day5 名义 1.63）· ≥0.30 → L2（Day2 名义 1.16）· <0.30 → L1（Day1 名义 1.00）
+// 现状对照（2026-10-15 实测）：送餐一 Day1 名义 1.00 → 全班最高只能 L1；标帜二期名义 2.00 → 最高 L3。
+//   「送餐一有学员 9 个阶段全对却停在 L1」是**设计**，不是 bug —— 准确率 100% ≠ 能力 L4。
+//
+// ⚠️ 等级只从**存档里已完成的练习阶段**推导（chLevelBench），不吃云端 chy、也不吃考试与补录成绩：
+//   · 只算 practice：学习测试（test，Day1/Day7）与期末考试不计入（它们是考试，不是练习进度）
+//   · cleared 存根跳过（成绩被管理员重置 → 该阶段不再作为评定依据）
+//   · 换设备后本地存档恢复之前暂显示 L1，恢复后自动回到正确等级（与挑战进度同生命周期，预期行为）
+function chLevelBench() {
+  try {
+    if (!challengeState || !challengeState.days) return 0
+    // 已完成练习阶段里「最高的一天」→ 那天名义计划均值即基准
+    let maxDay = 0
+    CHALLENGE_DAYS.forEach(d => {
+      d.stages.forEach((s, si) => {
+        if (s.kind !== 'practice') return
+        const r = chStageRec(d.day, si)
+        if (r && (r.done || r.cleared) && d.day > maxDay) maxDay = d.day
+      })
+    })
+    if (!maxDay) return 0
+    const plan = (typeof chDiffPlan === 'function') ? chDiffPlan() : CHALLENGE_DIFF_PLAN
+    return chPlanDayAvg(plan, maxDay)
+  } catch (e) { return 0 }
+}
+// 累计首答准确率（0~100 整数；无任何首答记录 → null）
+// ★ 只统计**已完成**的阶段（done），与等级评定同源；进行中的阶段里的作答不算。
+//   ★★ 不要用 `if (!r || !r.total) continue` —— 旧记录可能缺 total，但 cor 可能仍是有效首答数（同 chLbAggregate）
+function chLevelAcc() {
+  try {
+    if (!challengeState || !challengeState.days) return null
+    let c = 0, t = 0
+    Object.keys(challengeState.days).forEach(dayK => {
+      const d = challengeState.days[dayK]
+      if (!d || !d.stages) return
+      Object.keys(d.stages).forEach(siK => {
+        const r = d.stages[siK]
+        if (!r || !r.done) return
+        const q = Number(r.total) || 0
+        if (!q) return
+        c += Number(r.correct) || 0
+        t += q
+      })
+    })
+    if (!t) return null
+    return Math.round(Math.min(1, c / t) * 100)
+  } catch (e) { return null }
+}
+// 等级评定（返回 1~4）。输入可省略 → 内部实时计算（渲染入口用）。
+//   ★ 回退链：无基准（还没做过练习）或还没做过任何首答 → 恒回 L1。
+//     这与「Day1 开始时所有人都是 L1」的产品预期一致，也避免了「还没开始就显示 L3」的荒谬态。
+function chLevelOf(accArg) {
+  const acc = (accArg === undefined) ? chLevelAcc() : accArg
+  const bench = chLevelBench()
+  if (acc == null || !bench) return 1
+  const a = Number(acc) / 100
+  const raw = (a >= 0.90) ? 4 : (a >= 0.60) ? 3 : (a >= 0.30) ? 2 : 1
+  return Math.max(1, Math.min(raw, Math.round(bench)))
+}
+// 当前等级（渲染入口）。challengeLoad() 已保证 challengeState 是本营次的存档。
+function chLevel() { return chLevelOf() }
+// v165：等级变化 → 差分落盘 + 返回变化信息（渲染层据此播升级/降级动画）。
+//   变化记录存在 days[day].lvChg = { from, to, dir, acc, bench, at }，
+//   是**按用户 + 营次**隔离的存档字段 → 换号/换期不会串台。
+//   ★ 必须在**练习完成那一刻**调用（chRecordStage 之后），此时当天的 stage 记录已写入。
+function chLevelApply(day) {
+  try {
+    if (!challengeState || !challengeState.days) return null
+    const acc = chLevelAcc()
+    const bench = chLevelBench()
+    const to = chLevelOf(acc)
+    const dnum = Number(day) || 0
+    // 从当天更早的阶段（若有）取上一等级；没有则用存档根部的 lv（首次评定的起点）
+    let prev = null
+    if (dnum && challengeState.days[dnum]) {
+      const d = challengeState.days[dnum]
+      if (d.stages) {
+        Object.keys(d.stages).forEach(siK => {
+          const r = d.stages[siK]
+          if (r && r.lv != null) prev = Number(r.lv)
+        })
+      }
+    }
+    if (prev == null) prev = (challengeState.lv == null) ? 1 : Number(challengeState.lv)
+    challengeState.lv = to
+    if (!dnum) return null
+    if (!challengeState.days[dnum]) challengeState.days[dnum] = { stages: {} }
+    const d = challengeState.days[dnum]
+    if (prev === to) { if (d.lvChg) delete d.lvChg; challengeSave(); return null }
+    const dir = to > prev ? 'up' : 'down'
+    d.lvChg = { from: prev, to: to, dir: dir, acc: acc, bench: Math.round(bench * 100) / 100, at: Date.now() }
+    challengeSave()
+    return d.lvChg
+  } catch (e) { return null }
+}
+// v165：等级卡（挑战页顶部）。等级徽章 + 准确率/基准 + 最近一次升降的动画提示。
+//   ★ 动画只播一次：_chLvAnimAt 与 lvChg.at 比对（内存态，刷新页面即不再播 —— 提示已看过）。
+//   ★ 本函数被切片注入的套件直接调用 → 内部所有外部符号都必须 typeof 守卫。
+let _chLvAnimAt = 0
+function chLevelCardHtml() {
+  try {
+    const lv = (typeof chLevel === 'function') ? chLevel() : 1
+    const acc = (typeof chLevelAcc === 'function') ? chLevelAcc() : null
+    const bench = (typeof chLevelBench === 'function') ? chLevelBench() : 0
+    const nextNeed = [0, 0.30, 0.60, 0.90, 1.01]
+    const need = nextNeed[lv] || 1.01
+    const needPct = Math.round(need * 100)
+    const canRise = bench >= need - 1e-9     // 基准不够 → 准确率再高也升不上去（见口径②）
+    const lvName = (k) => { try { return t('chLevelName' + k) } catch (e) { return 'L' + k } }
+    let tip = ''
+    if (acc == null) tip = t('chLevelNoData')
+    else if (lv >= 4) tip = t('chLevelMax')
+    else if (canRise) tip = t('chLevelNeedAcc', needPct)
+    else tip = t('chLevelNeedBench', needPct)
+    // 等级变化提示（升级 / 降级各一套文案与配色）
+    let chg = ''
+    let chgAt = 0
+    try {
+      const days = (challengeState && challengeState.days) || {}
+      Object.keys(days).forEach(k => {
+        const c = days[k] && days[k].lvChg
+        if (c && (Number(c.at) || 0) > chgAt) { chg = c; chgAt = Number(c.at) || 0 }
+      })
+    } catch (e) { chg = null }
+    const up = chg && chg.dir === 'up'
+    const fresh = (typeof _chLvAnimAt === 'undefined') || (chgAt > _chLvAnimAt)
+    if (chg && fresh && (typeof _chLvAnimAt !== 'undefined')) _chLvAnimAt = chgAt
+    const chgHtml = chg
+      ? `<div class="ch-lv-chg ${up ? 'ch-lv-up' : 'ch-lv-down'}">
+          <span class="ch-lv-ico">${up ? '⬆️' : '⬇️'}</span>
+          <span class="ch-lv-txt">${up ? t('chLevelUp', lvName(chg.from), lvName(chg.to)) : t('chLevelDown', lvName(chg.from), lvName(chg.to))}</span>
+          ${(chg.acc == null) ? '' : `<span class="ch-lv-acc">${t('chLevelBaseAcc', chg.acc)}</span>`}
+        </div>`
+      : ''
+    return `
+    <div class="card ch-lv-card${fresh && chg ? (up ? ' ch-lv-flash-up' : ' ch-lv-flash-down') : ''}" style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div class="ch-lv-badge ch-lv-lv${lv}">
+          <div class="ch-lv-num">L${lv}</div>
+          <div class="ch-lv-sub">${escHtml(t('chLevelTitle'))}</div>
+        </div>
+        <div style="flex:1;min-width:180px">
+          <div style="font-weight:800;font-size:15px">${escHtml(lvName(lv))}</div>
+          <div style="font-size:12px;color:#6b7280;margin-top:2px">
+            ${(acc == null) ? escHtml(t('chLevelAccNone')) : escHtml(t('chLevelAccNow', acc))}
+            · ${escHtml(t('chLevelBenchNow', Math.round(bench * 100) / 100))}
+          </div>
+          <div style="font-size:12px;color:#9ca3af;margin-top:4px">${escHtml(tip)}</div>
+        </div>
+      </div>
+      ${chgHtml}
+      <div class="ch-lv-bar"><div class="ch-lv-bar-fill ch-lv-bar${lv}" style="width:${lv * 25}%"></div></div>
+    </div>`
+  } catch (e) { return '' }
+}
+
+// v165：等级评定（chLevel / chLevelApply）——**必须定义在 chRecordStage 之上**。//   chRecordStage（完成练习时）会在函数体里调用 chLevelApply。函数声明本身是提升的，
+//   但规则要写死：这两个必须保持 `function` 声明，**绝不能改成 `const fn = () => {}`** ——
+//   那样就踩 TDZ（调用先于初始化）→ 直接抛 ReferenceError。放在上方是双保险，也让
+//   「谁在什么时候评等级」这条链一眼可见。同理 chPlanDayAvg 在 §v149 段。
+// 需求与口径见 chLevelBench / chLevelAcc / chLevelOf 的注释。
+
 // v89：挑战标题 —— 有分部门时用「<部门>七天英文挑战」，否则回退通用标题
 // v97：「all」（通用视角）也没有部门名 → 回落通用标题（避免出现「all七天英文挑战」）
 function chDeptName() {
@@ -504,6 +681,25 @@ function challengePool() {
     drew.list.forEach(q => out.push(q))
   }
   return out
+}
+
+// v165：某一天练习序列的「计划难度均值」= 该天各档配额 × 档位 / 总题数（档位 1/2/3）。
+//   ⚠️ 刻意不加「真实题库抽题」的兜底改判 —— 本函数只认名义计划难度（与 chDiffPlan 同源）。
+//      理由：真实均值要跑一遍全量抽题（challengePool 很重），而且题库结构一变，学员等级就会
+//      集体漂移（v149「桶2 恒空」的同类风险）。名义计划是设计意图、稳定可复现，适合做等级基线。
+//      另外 challengeStratifiedDraw 把桶索引 2 提升为「实际档位 3」（4 档题库线性映射所致），
+//      真实均值天然高于名义均值 —— 所以等级阈值必须按名义口径标定，绝不能混用。
+function chPlanDayAvg(plan, day) {
+  try {
+    const arr = Array.isArray(plan) ? plan : []
+    const idx = (Number(day) || 1) - 1
+    const p = arr[idx]
+    if (!Array.isArray(p)) return 0
+    const n = [Number(p[0]) || 0, Number(p[1]) || 0, Number(p[2]) || 0]
+    const sum = n[0] + n[1] + n[2]
+    if (!sum) return 0
+    return (n[0] * 1 + n[1] * 2 + n[2] * 3) / sum
+  } catch (e) { return 0 }
 }
 
 // v149：全局配额求解 —— 把 plan（逐天各档需求）与实际桶容量对齐，返回逐天的「实际取题构成」。
@@ -1078,9 +1274,19 @@ function chQuit() {
   if (chs && (chs.phase === 'quiz' || chs.phase === 'review') && !confirm(t('chQuitConfirm'))) return
   AntiCheat.stop()
   chs = null
+  // v165：与 chBack 同款 —— 从结果页（✕）退出同样要能重播一次等级动画，否则升级提示会被吞掉
+  if (typeof _chLvAnimAt !== 'undefined') _chLvAnimAt = 0
   renderChallenge()
 }
-function chBack() { AntiCheat.stop(); chs = null; renderChallenge() }
+// v165：回到挑战页时**允许重播一次等级变化动画** —— 学员做完当天练习、看完结果页再返回，
+//   才第一次看到「L1 → L2 ⬆️」。不做这一步的话，动画只在 chRecordStage 那一刻被标记为已播，
+//   而那一刻页面还停在结果页（等级卡根本没渲染），回来时静默无提示。
+//   ★ 只重置 `_chLvAnimAt`，不动 lvChg 记录本身（它还要供等级卡的常驻文案使用）。
+function chBack() {
+  AntiCheat.stop(); chs = null
+  if (typeof _chLvAnimAt !== 'undefined') _chLvAnimAt = 0
+  renderChallenge()
+}
 
 function isChAnswered(i) {
   const a = chs && chs.answers[i]
@@ -1449,6 +1655,7 @@ function renderChallenge() {
     ${chResetBanner}
     ${chRoundListHtml()}
     ${chHardRoundHtml()}
+    ${chLevelCardHtml()}
     ${chRoundBar}
     ${chClosedBanner}
     ${chProgressHtml()}
@@ -1801,8 +2008,19 @@ function chRecordStage(correct, total, wrongQids) {
   const d = challengeState.days[chs.day]
   if (!d.stages) d.stages = {}
   d.stages[chs.si] = { done: true, at: Date.now(), correct, total, wrong: (wrongQids || []).map(String) }
+  // v165：把「写入这一刻」的等级快照进 stage 记录 → 供下次差分取上一等级。
+  //   ★ 必须在 chLevelApply 之前取（apply 会把 challengeState.lv 改成本次的新等级）。
+  //   ★ typeof 守卫：切片沙箱只注入 chRecordStage 时盒外没有 chLevel（v161 同款教训）。
+  if (typeof chLevel === 'function') { try { d.stages[chs.si].lv = chLevel() } catch (e) {} }
   challengeSave()
   Store.trackPractice(correct, total)
+  // v165：每日练习完成 → 重新评定能力等级（升降级差分落盘，渲染层据 lvChg 播动画）。
+  //   刻意放在 chRecordStage 内部、而不是各个调用点：练习/回顾轮/测试/防作弊强制交卷
+  //   最终都汇集到这里，一处接线即可全覆盖，避免「某条路径忘了评定」。
+  //   口径上「每天练习结束后评估」= 练习阶段每次完成都评一次（同日多阶段取最后一次为准）。
+  if (chs.kind === 'practice' && typeof chLevelApply === 'function') {
+    try { chLevelApply(chs.day) } catch (e) {}
+  }
   const usedSec = chs.startedAt ? Math.max(0, Math.round((Date.now() - chs.startedAt) / 1000)) : 0
   // v88：带上营次 id → 看板可按营次分别统计、管理员重置考试只作用于该营次
   try { Store.reportChallengeStage(chs.day, chs.si, chs.kind, correct, total, usedSec, chCurrentRound()) } catch (e) {}

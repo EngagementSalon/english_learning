@@ -1315,3 +1315,48 @@ tr.chapter-sep-plain.chapter-sep-locked > td { background:#f3f4f6; }
 /* v60：在线 TTS 全源失败提示 */
 .tts-toast { position: fixed; left: 50%; bottom: 18%; transform: translateX(-50%); background: rgba(17,24,39,.88); color: #fff; padding: 9px 16px; border-radius: 10px; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 9999; max-width: 80vw; text-align: center; }
 .tts-toast.show { opacity: 1; }
+
+/* ====== v165：七天挑战「能力等级」卡 + 升降级动画 ====== */
+.ch-lv-card { border: 2px solid #e5e7eb; }
+.ch-lv-badge { flex: none; width: 68px; text-align: center; border-radius: 12px; padding: 8px 4px; }
+.ch-lv-num { font-size: 24px; font-weight: 800; line-height: 1.1; }
+.ch-lv-sub { font-size: 10px; opacity: .8; margin-top: 2px; }
+.ch-lv-lv1 { background: #f3f4f6; color: #4b5563; }
+.ch-lv-lv2 { background: #dbeafe; color: #1d4ed8; }
+.ch-lv-lv3 { background: rgba(237,57,151,.14); color: rgb(237,57,151); }
+.ch-lv-lv4 { background: #d1fae5; color: #047857; }
+.ch-lv-bar { height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; margin-top: 10px; }
+.ch-lv-bar-fill { height: 100%; border-radius: 3px; transition: width .5s ease; }
+.ch-lv-bar1 { background: #9ca3af; }
+.ch-lv-bar2 { background: #3b82f6; }
+.ch-lv-bar3 { background: rgb(237,57,151); }
+.ch-lv-bar4 { background: #059669; }
+.ch-lv-chg { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 700; }
+.ch-lv-up { background: #ecfdf5; border: 1px solid #a7f3d0; color: #047857; }
+.ch-lv-down { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; }
+.ch-lv-ico { font-size: 16px; }
+.ch-lv-acc { font-weight: 500; opacity: .85; font-size: 12px; }
+
+/* 等级变化时整卡闪一下 + 徽章弹一下（只播一次；刷新页面不再播） */
+@keyframes chLvFlashUp {
+  0%   { box-shadow: 0 0 0 0 rgba(5,150,105,.55); border-color: #059669; }
+  70%  { box-shadow: 0 0 0 12px rgba(5,150,105,0); border-color: #059669; }
+  100% { box-shadow: 0 0 0 0 rgba(5,150,105,0); border-color: #e5e7eb; }
+}
+@keyframes chLvFlashDown {
+  0%   { box-shadow: 0 0 0 0 rgba(185,28,28,.5); border-color: #dc2626; }
+  70%  { box-shadow: 0 0 0 12px rgba(185,28,28,0); border-color: #dc2626; }
+  100% { box-shadow: 0 0 0 0 rgba(185,28,28,0); border-color: #e5e7eb; }
+}
+.ch-lv-flash-up { animation: chLvFlashUp 1.6s ease-out 2; }
+.ch-lv-flash-down { animation: chLvFlashDown 1.6s ease-out 2; }
+@keyframes chLvPop {
+  0% { transform: scale(1); } 40% { transform: scale(1.18); } 100% { transform: scale(1); }
+}
+.ch-lv-flash-up .ch-lv-badge, .ch-lv-flash-down .ch-lv-badge { animation: chLvPop .7s ease-out 3; }
+/* 无障碍：尊重「减少动态效果」系统设置（前庭敏感用户） */
+@media (prefers-reduced-motion: reduce) {
+  .ch-lv-flash-up, .ch-lv-flash-down,
+  .ch-lv-flash-up .ch-lv-badge, .ch-lv-flash-down .ch-lv-badge { animation: none; }
+  .ch-lv-bar-fill { transition: none; }
+}
