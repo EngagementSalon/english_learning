@@ -846,6 +846,9 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     chLevelAccNow: (v) => `累计首答准确率 ${v}%`,
     chLevelAccNone: '累计首答准确率 —',
     chLevelBenchNow: (v) => `当前难度基准 ${v}`,
+    // v174：等级来源分项（挑战 70% + 线下课 30%）
+    chLevelSrcBlend: (c, k, s) => `挑战首答 ${c}% × 70% + 线下课 ${k} 分 × 30% = 综合 ${s} 分`,
+    chLevelSrcNoCourse: '挑战首答 × 70% + 线下课 30%（暂无线下课正式考试成绩）',
     chLevelNoData: '完成今天的练习后，系统会自动评定你的等级。',
     chLevelMax: '已达最高等级，继续保持！',
     chLevelNeedAcc: (v) => `首答准确率再达到 ${v}% 即可升到下一级。`,
@@ -1873,6 +1876,9 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     chLevelAccNow: (v) => `First-try accuracy ${v}%`,
     chLevelAccNone: 'First-try accuracy —',
     chLevelBenchNow: (v) => `Difficulty baseline ${v}`,
+    // v174: level source breakdown (challenge 70% + offline course 30%)
+    chLevelSrcBlend: (c, k, s) => `Challenge ${c}% × 70% + Course ${k} × 30% = ${s}`,
+    chLevelSrcNoCourse: 'Challenge × 70% + Course 30% (no graded course exam yet)',
     chLevelNoData: 'Finish today\'s practice and your level will be assessed automatically.',
     chLevelMax: 'You have reached the top level. Keep it up!',
     chLevelNeedAcc: (v) => `Reach ${v}% first-try accuracy to move up to the next level.`,

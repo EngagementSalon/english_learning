@@ -321,6 +321,65 @@ function chLevelAcc() {
     return Math.round(Math.min(1, c / t) * 100)
   } catch (e) { return null }
 }
+// ====== v174：线下课成绩并入等级评定 ======
+// 需求（用户原话）：「可以把线下课的成绩也放入评定标准」→ 拍板三项口径：
+//   ① 只取**有分数的正式考试**：终极大考（coursefinal）+ 随堂考试/水平测试（exam）。
+//      排除作业（homework，可反复重做、分数意义弱）、视频小测（video quizScore，题量 3~7 太少）
+//      与线下实操（offline 只有 done:true，无分数 → 结构性不可用）。
+//   ② 合流 = **加权平均**：合成分 = 挑战首答准确率 × 0.7 + 线下课均分 × 0.3。
+//      线下课无分时**退化为纯挑战准确率**（不是当 0 分算 —— 否则没上过线下课的人被无端压级）。
+//   ③ **地面压制仍然只压挑战那一部分**：先把挑战准确率按难度档压顶 → 得到「挑战侧等级」，
+//      再与线下课均分加权。线下课是另一套标尺（题量、难度、监考都不同），
+//      用挑战的地板去压它逻辑上讲不通，故只对挑战侧生效。
+//
+// ⚠️ 数据源：线下课成绩**不在** eq-quiz-sync 云端文档里（base 无任何 course 字段），
+//   只存在于 courseState.doc（course-app.js 载入的课程文档）。所以本函数读的是**本机课程缓存**：
+//   · 页面刚打开、课程文档还没拉到 → courseState.doc 为 null → 返回 null（退化为纯挑战口径，
+//     不会误判成 0 分；等课程文档到位后评分自动生效）
+//   · 换设备 / 清缓存 → 同上，等级暂时只按挑战算，与「挑战进度跨设备」是同一套生命周期（预期行为）
+// ★ 沙箱切片注入时 courseState / Store 可能不存在 → 全程 typeof 守卫，缺依赖返回 null。
+// ★ 必须 function 声明且位于 chLevelOf 之上（chLevelOf 会调用它；const 会 TDZ）。
+function chCourseScore() {
+  try {
+    if (typeof courseState === 'undefined') return null
+    const doc = courseState && courseState.doc
+    if (!doc || !Array.isArray(doc.classes)) return null
+    const uid = (typeof challengeUid === 'function') ? challengeUid() : ''
+    if (!uid) return null
+    // 收集「我是成员」的班级（成员名单是小写 username；挑战 uid 亦为小写）
+    const myList = []
+    doc.classes.forEach(cls => {
+      if (!cls) return
+      const members = Array.isArray(cls.members) ? cls.members : []
+      const isMine = members.some(m => String(m || '').trim().toLowerCase() === uid)
+      if (!isMine) return
+      ;(cls.assignments || []).forEach(a => {
+        if (!a) return
+        if (a.type !== 'coursefinal' && a.type !== 'exam') return
+        const rs = a.results
+        if (!rs || typeof rs !== 'object') return
+        // results 有两种形态：对象 map（{uid: {...}}）或数组；统一取「我这个 uid」那条
+        let rec = null
+        if (Array.isArray(rs)) {
+          rec = rs.find(r => r && String(r.u || r.username || '').trim().toLowerCase() === uid) || null
+        } else {
+          // 键名大小写可能不一致 → 遍历找（班级规模小，成本可忽略）
+          const hit = Object.keys(rs).find(k => String(k).trim().toLowerCase() === uid)
+          if (hit) rec = rs[hit]
+        }
+        if (!rec || typeof rec !== 'object') return
+        const sc = Number(rec.score)
+        if (Number.isFinite(sc)) myList.push(sc)
+      })
+    })
+    if (!myList.length) return null
+    const avg = myList.reduce((s, v) => s + v, 0) / myList.length
+    return Math.round(Math.max(0, Math.min(100, avg)))
+  } catch (e) { return null }
+}
+// v174：线下课均分（0~100 整数；无人任何正式考试记录 → null）。
+//   与 chCourseScore 同源，但**不做加权**，供等级卡 UI 单列展示。
+function chCourseAvg() { return chCourseScore() }
 // 等级评定（返回 1~4）。输入可省略 → 内部实时计算（渲染入口用）。
 //   ★ 回退链：无基准（还没做过练习）或还没做过任何首答 → 恒回 L1。
 //     这与「Day1 开始时所有人都是 L1」的产品预期一致，也避免了「还没开始就显示 L3」的荒谬态。
@@ -335,7 +394,21 @@ function chLevelOf(accArg) {
   if (acc == null) return (typeof chLevelFloor === 'function') ? chLevelFloor() : 1
   const a = Number(acc) / 100
   const raw = (a >= 0.90) ? 4 : (a >= 0.60) ? 3 : (a >= 0.30) ? 2 : 1
-  return Math.max(1, Math.min(raw, Math.round(bench)))
+  // v174：先按难度档把**挑战侧**压顶（地板只作用于挑战，不压线下课 —— 见 chCourseScore 注释③）
+  const capped = Math.max(1, Math.min(raw, Math.round(bench)))
+  // v174：线下课均分并入（加权 70/30）。无分 → 原样返回 capped，行为与 v167 完全一致。
+  const cs = (typeof chCourseScore === 'function') ? chCourseScore() : null
+  if (cs == null) return capped
+  // ★ 用「挑战侧已压顶的等级」反推等效分数，而不是直接用原始准确率 ——
+  //   否则地板对挑战的压制会被加权稀释掉（例：准确率 100% 但地板 L1，若用原始 100 加权
+  //   再配线下课 100 分会算出高分 → 又跳回 L4，地板形同虚设）。
+  const cappedScore = capped >= 4 ? 0.90 : capped >= 3 ? 0.60 : capped >= 2 ? 0.30 : 0
+  const blended = cappedScore * 70 + (Number(cs) / 100) * 30
+  const b = blended / 100
+  const out = (b >= 0.90) ? 4 : (b >= 0.60) ? 3 : (b >= 0.30) ? 2 : 1
+  // ★ 合成后不与 capped 取 max —— 否则「线下课计入评定」永远只能升不能降，等于没把线下课当标准。
+  //   线下课考砸了就该体现出来（这正符合用户「放入评定标准」的诉求）。
+  return Math.max(1, Math.min(4, out))
 }
 // v166：本机存档里记住的「云端已知等级」（1~4；没有 → 1）。
 //   写入时机 = chAbsorbCloudLevel()（从 base[u].chLevel 回放）。
@@ -403,6 +476,8 @@ function chLevelCardHtml() {
     const lv = (typeof chLevel === 'function') ? chLevel() : 1
     const acc = (typeof chLevelAcc === 'function') ? chLevelAcc() : null
     const bench = (typeof chLevelBench === 'function') ? chLevelBench() : 0
+    // v174：线下课均分（无分 → null），并入后展示在等级卡第二行
+    const cs = (typeof chCourseScore === 'function') ? chCourseScore() : null
     const nextNeed = [0, 0.30, 0.60, 0.90, 1.01]
     const need = nextNeed[lv] || 1.01
     const needPct = Math.round(need * 100)
@@ -433,6 +508,11 @@ function chLevelCardHtml() {
           ${(chg.acc == null) ? '' : `<span class="ch-lv-acc">${t('chLevelBaseAcc', chg.acc)}</span>`}
         </div>`
       : ''
+    // v174：分项展示 —— 让学员看懂等级是怎么算出来的（挑战 70% + 线下课 30%）
+    const srcHtml = (cs == null)
+      ? `<div class="ch-lv-src">${escHtml(t('chLevelSrcNoCourse'))}</div>`
+      : `<div class="ch-lv-src">${escHtml(t('chLevelSrcBlend',
+          (acc == null ? 0 : acc), cs, Math.round((acc == null ? 0 : acc) * 0.7 + cs * 0.3)))}</div>`
     return `
     <div class="card ch-lv-card${fresh && chg ? (up ? ' ch-lv-flash-up' : ' ch-lv-flash-down') : ''}" style="margin-bottom:16px">
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
@@ -446,6 +526,7 @@ function chLevelCardHtml() {
             ${(acc == null) ? escHtml(t('chLevelAccNone')) : escHtml(t('chLevelAccNow', acc))}
             · ${escHtml(t('chLevelBenchNow', Math.round(bench * 100) / 100))}
           </div>
+          ${srcHtml}
           <div style="font-size:12px;color:#9ca3af;margin-top:4px">${escHtml(tip)}</div>
         </div>
       </div>
@@ -455,11 +536,12 @@ function chLevelCardHtml() {
   } catch (e) { return '' }
 }
 
-// v165：等级评定（chLevel / chLevelApply）——**必须定义在 chRecordStage 之上**。//   chRecordStage（完成练习时）会在函数体里调用 chLevelApply。函数声明本身是提升的，
+// v165：等级评定（chLevel / chLevelApply）——**必须定义在 chRecordStage 之上**。
+//   chRecordStage（完成练习时）会在函数体里调用 chLevelApply。函数声明本身是提升的，
 //   但规则要写死：这两个必须保持 `function` 声明，**绝不能改成 `const fn = () => {}`** ——
 //   那样就踩 TDZ（调用先于初始化）→ 直接抛 ReferenceError。放在上方是双保险，也让
 //   「谁在什么时候评等级」这条链一眼可见。同理 chPlanDayAvg 在 §v149 段。
-// 需求与口径见 chLevelBench / chLevelAcc / chLevelOf 的注释。
+// 需求与口径见 chLevelBench / chLevelAcc / chCourseScore / chLevelOf 的注释。
 
 // v89：挑战标题 —— 有分部门时用「<部门>七天英文挑战」，否则回退通用标题
 // v97：「all」（通用视角）也没有部门名 → 回落通用标题（避免出现「all七天英文挑战」）

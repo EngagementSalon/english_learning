@@ -1338,6 +1338,8 @@ tr.chapter-sep-plain.chapter-sep-locked > td { background:#f3f4f6; }
 .ch-lv-down { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; }
 .ch-lv-ico { font-size: 16px; }
 .ch-lv-acc { font-weight: 500; opacity: .85; font-size: 12px; }
+/* v174：等级来源分项（挑战 70% + 线下课 30%） */
+.ch-lv-src { font-size: 12px; color: #6b7280; margin-top: 4px; }
 
 /* 等级变化时整卡闪一下 + 徽章弹一下（只播一次；刷新页面不再播） */
 @keyframes chLvFlashUp {
