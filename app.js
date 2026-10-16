@@ -3452,11 +3452,159 @@ function _userInfoMapFromRows(rows) {
   ;(rows || []).forEach(r => { if (r && r.username) map[r.username] = { name: r.name || '', dept: r.dept || '' } })
   return map
 }
+// v176：看板「线下课」标签的班级切换态。'' = 全部班级（总览平铺）；其余为 classId。
+//   ★ 单一状态源，切班只重渲染矩阵容器（#dashCourseMatrixBox），不动整页 —— 避免重算
+//     整个数据看板（含云端聚合），也避免页面滚动位置丢失。
+let dashCourseSel = ''
+// v176：下拉切班时的局部重渲染数据源（由 _courseMatrices 每次调用刷新）。
+//   ★ 必须与 dashCourseSel 一起声明在 _courseMatrices 之前 —— 后面用 `let` 声明而前面提前
+//     引用会落进 TDZ（ReferenceError），虽然实际调用在脚本加载后，语义上也不应依赖这个巧合。
+let dashCourseDocCache = null
+let dashCourseInfoCache = {}
+
+// v176：单班完成度统计（KPI 卡数据源）。
+//   ★ 口径必须与 _courseSummary / renderCourseDashboard 一致：
+//     · 分母 = 成员数 × 已发布任务数（草稿不计）
+//     · offline / video 无分数 → 不进平均分
+//     · 一个格子「已完成」的判据与矩阵着色完全同源（见 _courseCellDone）
+function _courseClassStat(c) {
+  const members = (c && c.members) || []
+  const assigns = ((c && c.assignments) || []).filter(a => a.status !== 'draft')
+  let done = 0
+  const scores = []
+  assigns.forEach(a => {
+    members.forEach(u => {
+      const r = (a.results || {})[u]
+      if (!r) return
+      if (_courseCellDone(a, r)) done++
+      // 视频 / 线下课无分数，不计入均分（与 _courseSummary 同口径）
+      if (a.type !== 'video' && a.type !== 'offline') {
+        const sc = Number(r.score)
+        if (Number.isFinite(sc)) scores.push(sc)
+      }
+    })
+  })
+  const cells = members.length * assigns.length
+  return {
+    members: members.length,
+    assigns: assigns.length,
+    done,
+    cells,
+    completion: cells > 0 ? Math.round(done / cells * 100) : 0,
+    avgScore: scores.length ? Math.round(scores.reduce((s, x) => s + x, 0) / scores.length) : null,
+  }
+}
+
+// v176：一个格子是否算「已完成」—— 矩阵着色与 KPI 完成度共用同一判据，避免两处口径漂移。
+//   · offline：只有被标注出席（done）才算完成
+//   · video  ：观看 ≥90% 且（无小测 或 小测已作答）才算完成（v44 语义：看完 ≠ 完成）
+//   · 其余   ：有成绩记录即完成
+function _courseCellDone(a, r) {
+  if (!r) return false
+  if (a.type === 'offline') return !!r.done
+  if (a.type === 'video') {
+    const pct = r.watchedPct != null ? Math.min(100, Math.round(r.watchedPct)) : 100
+    if (pct < 90) return false
+    const hasQuiz = Array.isArray(a.quiz) && a.quiz.length > 0
+    if (hasQuiz && r.quizTotal == null) return false   // 配了小测但没答 → 未完成
+    return true
+  }
+  return true
+}
+
+// v176：按任务类型的完成度小条（让老师一眼看出「卡在视频还是卡在作业」）。
+function _courseTypeBars(c) {
+  const members = (c && c.members) || []
+  const assigns = ((c && c.assignments) || []).filter(a => a.status !== 'draft')
+  const order = ['homework', 'exam', 'video', 'offline', 'coursefinal']
+  const byType = {}
+  assigns.forEach(a => {
+    const ty = a.type || 'homework'
+    if (!byType[ty]) byType[ty] = { total: 0, done: 0 }
+    members.forEach(u => {
+      byType[ty].total++
+      const r = (a.results || {})[u]
+      if (r && _courseCellDone(a, r)) byType[ty].done++
+    })
+  })
+  const label = ty => ty === 'offline' ? t('courseTypeOffline')
+    : ty === 'video' ? t('courseTypeVideo')
+    : ty === 'coursefinal' ? t('courseTypeCourseFinal')
+    : ty === 'exam' ? t('courseTypeExam') : t('courseTypeHomework')
+  const icon = ty => ty === 'offline' ? '📅' : ty === 'video' ? '🎬' : ty === 'exam' ? '🧪' : ty === 'coursefinal' ? '🏆' : '📝'
+  return order.filter(ty => byType[ty]).map(ty => {
+    const v = byType[ty]
+    const pct = v.total > 0 ? Math.round(v.done / v.total * 100) : 0
+    const cls = pct >= 80 ? 'good' : pct >= 40 ? 'ok' : 'bad'
+    return `<div class="dcs-type-row">
+      <span class="dcs-type-name">${icon(ty)} ${escHtml(label(ty))}</span>
+      <span class="dcs-type-bar"><span class="dcs-type-bar-in ${cls}" style="width:${pct}%"></span></span>
+      <span class="dcs-type-num">${v.done}/${v.total}<em>${pct}%</em></span>
+    </div>`
+  }).join('')
+}
+
+// v176：班级 KPI 卡 —— 完成率环 + 平均分 + 已完成格数 + 分类型完成度。
+function _courseKpiCard(c) {
+  const st = _courseClassStat(c)
+  const R = 30, CIRC = 2 * Math.PI * R
+  const ring = `<div class="dcs-ring">
+      <svg viewBox="0 0 72 72" width="72" height="72" aria-hidden="true">
+        <circle cx="36" cy="36" r="${R}" fill="none" stroke="#e5e7eb" stroke-width="7"></circle>
+        <circle cx="36" cy="36" r="${R}" fill="none" stroke="var(--primary)" stroke-width="7" stroke-linecap="round"
+          stroke-dasharray="${CIRC.toFixed(1)}" stroke-dashoffset="${(CIRC * (1 - st.completion / 100)).toFixed(1)}"
+          transform="rotate(-90 36 36)"></circle>
+      </svg>
+      <span class="dcs-ring-txt">${st.completion}%</span>
+    </div>`
+  const avgTxt = st.avgScore == null ? '—' : st.avgScore + (LANG === 'en' ? '' : '分')
+  return `<div class="dcs-kpi">
+    ${ring}
+    <div class="dcs-kpi-stats">
+      <div class="dcs-kpi-item"><b>${st.done}<em>/${st.cells}</em></b><span>${escHtml(t('dcsDoneCells'))}</span></div>
+      <div class="dcs-kpi-item"><b>${avgTxt}</b><span>${escHtml(t('dcsAvgScore'))}</span></div>
+      <div class="dcs-kpi-item"><b>${st.members}</b><span>${escHtml(t('courseMembersUnit'))}</span></div>
+      <div class="dcs-kpi-item"><b>${st.assigns}</b><span>${escHtml(t('courseAssignUnit'))}</span></div>
+    </div>
+    <div class="dcs-types">${_courseTypeBars(c)}</div>
+  </div>`
+}
+
+// v176：班级下拉选择器。切换后只重渲染矩阵容器，不重算整页。
+function dashCoursePick(v) {
+  dashCourseSel = String(v == null ? '' : v)
+  const el = document.getElementById('dashCourseMatrixBox')
+  if (el) el.innerHTML = _courseMatrices(dashCourseDocCache, dashCourseInfoCache)
+}
+
 // 每班级成绩矩阵 HTML（infoMap：用户名 → { name, dept }，用于成员列显示中文名+部门）
+// v176：加分班下拉（84 列全平铺太拖沓 → 一次看一个班）+ 班级 KPI 卡。
+//   · '' 全部班级 → 保留原平铺行为（总览，用于横向对比各班进度）
+//   · 指定 classId → 只渲该班，并显示 KPI 卡
+//   ★ 下拉与 KPI 都只影响「视图」，不改任何统计口径与数据。
 function _courseMatrices(doc, infoMap) {
-  const classes = doc.classes || []
+  const classes = (doc && doc.classes) || []
   infoMap = infoMap || {}
-  return classes.map(c => {
+  // v176：缓存文档与映射，供下拉切换时局部重渲染使用（避免把 doc 挂到 window 上）
+  dashCourseDocCache = doc
+  dashCourseInfoCache = infoMap
+  if (!classes.length) return ''
+  // 选中班级已不存在（被删除）→ 回落「全部班级」
+  if (dashCourseSel && !classes.some(c => c.id === dashCourseSel)) dashCourseSel = ''
+
+  const selHtml = `<div class="dcs-bar">
+    <label class="dcs-bar-lbl">${escHtml(t('dcsPickClass'))}</label>
+    <select class="dcs-sel" onchange="dashCoursePick(this.value)">
+      <option value=""${dashCourseSel === '' ? ' selected' : ''}>${escHtml(t('dcsAllClasses'))}（${classes.length}）</option>
+      ${classes.map(c => {
+        const st = _courseClassStat(c)
+        return `<option value="${escAttr(c.id)}"${dashCourseSel === c.id ? ' selected' : ''}>${escHtml(c.name)} · ${escHtml(t('courseProgressOf', st.done, st.cells))}</option>`
+      }).join('')}
+    </select>
+  </div>`
+
+  const shown = dashCourseSel ? classes.filter(c => c.id === dashCourseSel) : classes
+  const body = shown.map(c => {
     const members = c.members || []
     const assigns = c.assignments || []
     if (!assigns.length) return ''
@@ -3489,16 +3637,23 @@ function _courseMatrices(doc, infoMap) {
       }).join('')
       return `<tr><td class="dash-student">${courseMemberCell(u, infoMap)}</td>${cells}</tr>`
     }).join('') || `<tr><td colspan="${assigns.length + 1}" style="text-align:center;color:#9ca3af;padding:20px">${t('courseNoMembers')}</td></tr>`
+    // v176：选中单个班级时，标题右侧补上 KPI 卡（完成率环 + 均分 + 分类型完成度），
+    //   一眼看清「这个班到底进行到哪了」，不用去数矩阵格子。
+    const kpi = dashCourseSel ? _courseKpiCard(c) : ''
     return `<div class="card" style="margin-bottom:16px;padding:0;overflow-x:auto">
       <div style="padding:12px 16px;border-bottom:1px solid #e5e7eb"><strong>🎓 ${escHtml(c.name)}</strong>
         <span style="color:#6b7280;font-size:13px;margin-left:8px">👥 ${members.length}${t('courseMembersUnit')} · 📋 ${assigns.length}${t('courseAssignUnit')}</span>
       </div>
+      ${kpi}
       <table class="admin-table dash-table">
         <thead><tr><th style="min-width:80px">${t('courseMatrixStudent')}</th>${headerCells}</tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`
   }).join('')
+  // v176：空态兜底 —— 全部班级都没任务时不至于渲染出一根孤零零的下拉条
+  const inner = body || `<div class="card" style="padding:24px;text-align:center;color:#9ca3af">${escHtml(t('dashOfflineEmpty'))}</div>`
+  return `<div id="dashCourseMatrixBox">${selHtml}${inner}</div>`
 }
 
 // ====== 管理员数据加载（账号管理页 / 数据看板页共用）======

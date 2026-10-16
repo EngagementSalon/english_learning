@@ -801,6 +801,11 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     thCourseDone: '线下完成', thCourseAvg: '线下均分', thCourseBest: '线下最高',
     dashCourseClasses: '班级数', dashCourseAssigns: '线下作业', dashCourseCompletion: '线下完成率', dashCourseAvg: '线下均分',
     dashCourseMatrixTitle: '线下课程成绩矩阵',
+    // v176：线下课成绩矩阵的班级下拉 + KPI 卡（作业/班级太多时一屏看一个班）
+    dcsPickClass: '选择班级',
+    dcsAllClasses: '全部班级（总览）',
+    dcsDoneCells: '已完成',
+    dcsAvgScore: '平均分',
     dashCatTitle: '分类进度（按部门）', dashCatAnswered: '已答',
     dashCatHint: (d) => `当前统计范围：${d}题库（饮食部/房务部题库含通用题）。题数为该范围题库的题目数量，答题进度为本机答题记录。`,
     perQTitle: '每道题正确率', perQHint: '按题目统计学员答题对错（练习、在线考试与线下课作业/测评）。数据从启用此功能后的答题开始累积。',
@@ -1831,6 +1836,11 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     thCourseDone: 'Course Done', thCourseAvg: 'Course Avg', thCourseBest: 'Course Best',
     dashCourseClasses: 'Classes', dashCourseAssigns: 'Course Asgns', dashCourseCompletion: 'Course Rate', dashCourseAvg: 'Course Avg',
     dashCourseMatrixTitle: 'Course Score Matrix',
+    // v176: class dropdown + KPI card for the course score matrix
+    dcsPickClass: 'Class',
+    dcsAllClasses: 'All classes (overview)',
+    dcsDoneCells: 'Completed',
+    dcsAvgScore: 'Avg score',
     dashCatTitle: 'Category Progress (by Dept)', dashCatAnswered: 'answered',
     dashCatHint: (d) => `Current scope: ${d} bank (Dining/Rooms banks include general questions). Question counts are per-bank; answer stats are from this browser.`,
     perQTitle: 'Per-Question Accuracy', perQHint: 'Per-question correct rate across students (practice, online exams, and course homework/exams). Data accumulates from when this feature is enabled.',
