@@ -802,6 +802,7 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     dashCourseClasses: '班级数', dashCourseAssigns: '线下作业', dashCourseCompletion: '线下完成率', dashCourseAvg: '线下均分',
     dashCourseMatrixTitle: '线下课程成绩矩阵',
     // v176：线下课成绩矩阵的班级下拉 + KPI 卡（作业/班级太多时一屏看一个班）
+    // v178：去掉「全部班级（总览）」项 → dcsAllClasses 已无渲染点，保留仅为兼容旧引用
     dcsPickClass: '选择班级',
     dcsAllClasses: '全部班级（总览）',
     dcsDoneCells: '已完成',
@@ -1837,6 +1838,7 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     dashCourseClasses: 'Classes', dashCourseAssigns: 'Course Asgns', dashCourseCompletion: 'Course Rate', dashCourseAvg: 'Course Avg',
     dashCourseMatrixTitle: 'Course Score Matrix',
     // v176: class dropdown + KPI card for the course score matrix
+    // v178: "All classes (overview)" option removed -> dcsAllClasses kept for compat only
     dcsPickClass: 'Class',
     dcsAllClasses: 'All classes (overview)',
     dcsDoneCells: 'Completed',

@@ -125,24 +125,29 @@ function mkDoc() {
 }
 
 ;(function main() {
-  group('① 下拉形态：有且只有 1 个 select，选项 = 班级数 + 1')
+  // ★★★ v178 需求变更：用户要求「不要有整体回顾了 直接就点某个班就出数据就好」
+  //   → 已删除「全部班级（总览）」项与总览平铺态。本套件相关断言已按项目纪律
+  //     **翻成反证**（而不是删掉），历史意图仍可追溯；新契约由
+  //     test-v178-course-dash-single-class.js 锁定。
+  group('① 下拉形态：有且只有 1 个 select，选项 = 班级数（v178 起无「全部班级」）')
   const sb = makeSandbox()
   const doc = mkDoc()
   setSel(sb, '')
   let html = render(sb, doc)
   assert('只渲染 1 个 <select>', (html.match(/<select/g) || []).length === 1, (html.match(/<select/g) || []).length)
-  assert('选项数 = 2 班 + 1 = 3', (html.match(/<option/g) || []).length === 3, (html.match(/<option/g) || []).length)
-  assert('含「全部班级（总览）」选项', html.includes('全部班级（总览）'))
+  assert('★ 【v178 反证】已无「全部班级（总览）」项', !html.includes('全部班级（总览）'))
+  assert('★ 【v178】选项数 = 班级数（2），不再是 +1', (html.match(/<option/g) || []).length === 2, (html.match(/<option/g) || []).length)
   assert('选项里带各班名', html.includes('餐饮部 202609班') && html.includes('房务部 202609班'))
   assert('★ 下拉切换回调 = courseDashPick', html.includes('onchange="courseDashPick(this.value)"'))
   assert('外层容器 id = cdashBox（切班局部重渲染锚点）', html.includes('id="cdashBox"'))
   assert('复用 v176 的 .dcs-* 组件样式类', html.includes('dcs-bar') && html.includes('dcs-sel'))
 
-  group('② 总览模式（""）：平铺全部班 + 无 KPI 卡（保留原行为）')
-  assert('平铺 2 个班级标题', (html.match(/🎓 /g) || []).length === 2, (html.match(/🎓 /g) || []).length)
-  assert('总览不渲染 KPI 卡', !html.includes('dcs-kpi'))
-  assert('总览不渲染完成率环', !html.includes('dcs-ring'))
-  assert('「全部班级」项已 selected', /<option value="" selected>/.test(html))
+  group('② 【v178 反证】「总览模式」已不存在 —— 空 sel 自动落到第一个班且恒显 KPI')
+  assert('★ 平铺总览已消失：只渲染 1 个班级标题（不再是 2）', (html.match(/🎓 /g) || []).length === 1, (html.match(/🎓 /g) || []).length)
+  assert('★ 【v178】恒渲染 KPI 卡（不再是「总览无 KPI」）', html.includes('dcs-kpi'))
+  assert('★ 【v178】恒渲染完成率环', html.includes('dcs-ring'))
+  assert('★ 【v178】空 sel 被自动置为第一个班 c1', vm.runInContext('cdashSel', sb) === 'c1', JSON.stringify(vm.runInContext('cdashSel', sb)))
+  assert('★ 【v178】已无 value="" 的「全部班级」选中项', !/<option value="" selected>/.test(html))
 
   group('③ 单班模式（选中 c1）：只渲一个班 + KPI 卡齐全')
   setSel(sb, 'c1')
@@ -154,14 +159,19 @@ function mkDoc() {
   assert('★ 矩阵区不含 c2 的名字（c2 仅作为下拉选项出现）', !bodyOnly.includes('房务部 202609班'))
   assert('矩阵区不含 c2 的作业列（房务作业）', !bodyOnly.includes('房务作业'))
   assert('仍保留下拉（可切回）', (html.match(/<select/g) || []).length === 1)
-  assert('下拉 <option> 数仍为 3', (html.match(/<option/g) || []).length === 3, (html.match(/<option/g) || []).length)
+  assert('★ 【v178】下拉 <option> 数 = 2（不再是 3）', (html.match(/<option/g) || []).length === 2, (html.match(/<option/g) || []).length)
   assert('c1 项已 selected', html.includes('value="c1" selected'))
   assert('★ 渲染 KPI 卡', html.includes('dcs-kpi'))
   assert('★ KPI 含完成率环（SVG）', html.includes('dcs-ring') && html.includes('<svg'))
   assert('KPI 含环内百分比文字', html.includes('dcs-ring-txt') && html.includes('%'))
   assert('KPI 含「已完成」格数', html.includes('已完成') && html.includes('dcs-kpi-item'))
   assert('KPI 含「平均分」', html.includes('平均分'))
-  assert('KPI 含成员数 / 任务数', html.includes('人') && html.includes('个任务'))
+  // ★ 【v178 反证】KPI 卡内只剩 2 个数字块（成员/任务数已去掉 —— 卡头已有「👥N人·📋N任务」）
+  const kpiBlock = html.slice(html.indexOf('dcs-kpi'), html.indexOf('dcs-types'))
+  assert('★ 【v178 反证】KPI 数字块由 4 个减为 2 个',
+    (kpiBlock.match(/dcs-kpi-item/g) || []).length === 2, (kpiBlock.match(/dcs-kpi-item/g) || []).length)
+  assert('★ 【v178】KPI 卡内不再出现「个任务」（保留在卡头）',
+    !kpiBlock.includes('个任务'), kpiBlock.slice(0, 200))
   assert('★ KPI 含按任务类型的完成度小条', html.includes('dcs-type-row') && html.includes('dcs-type-bar-in'))
   assert('类型条覆盖 线下课/视频/作业/测评', ['线下课', '视频', '作业', '测评'].every(x => html.includes(x)))
   assert('★ KPI 的已完成格数与矩阵着色同源（6/8）', html.includes('6<em>/8</em>'), html.slice(html.indexOf('dcs-kpi-item'), html.indexOf('dcs-kpi-item') + 120))
@@ -200,12 +210,12 @@ function mkDoc() {
   assert('错题率数值在场（✗ xx%）', /✗ \d+%/.test(drillHtml))
   assert('错题率带 wrong/total 小字', /<span style="font-size:10px;color:#9ca3af"> \d+\/\d+<\/span>/.test(drillHtml))
 
-  group('⑤ 已删除的班级 → 静默回落总览（不崩、不空白）')
+  group('⑤ 【v178 反证】已删除的班级 → 回落「第一个班」（不再是总览）')
   setSel(sb, 'c_已删除')
   html = render(sb, doc)
-  assert('回落为总览：平铺 2 个班', (html.match(/🎓 /g) || []).length === 2, (html.match(/🎓 /g) || []).length)
-  assert('回落为总览：无 KPI 卡', !html.includes('dcs-kpi'))
-  assert('回落为总览：cdashSel 被置回 ""', vm.runInContext('cdashSel', sb) === '', JSON.stringify(vm.runInContext('cdashSel', sb)))
+  assert('★ 【v178】回落为第一个班：只渲 1 个班', (html.match(/🎓 /g) || []).length === 1, (html.match(/🎓 /g) || []).length)
+  assert('★ 【v178】回落时仍显示 KPI 卡（不空白）', html.includes('dcs-kpi'))
+  assert('★ 【v178】cdashSel 被置为第一个班 c1（不再是 ""）', vm.runInContext('cdashSel', sb) === 'c1', JSON.stringify(vm.runInContext('cdashSel', sb)))
 
   group('⑥ KPI 口径与页面顶部汇总同源（真实数据重算对照）')
   const c1 = doc.classes[0]

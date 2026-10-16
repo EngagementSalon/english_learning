@@ -3452,7 +3452,9 @@ function _userInfoMapFromRows(rows) {
   ;(rows || []).forEach(r => { if (r && r.username) map[r.username] = { name: r.name || '', dept: r.dept || '' } })
   return map
 }
-// v176：看板「线下课」标签的班级切换态。'' = 全部班级（总览平铺）；其余为 classId。
+// v178：看板「线下课」标签的班级切换态。一律为 classId —— 不再有「全部班级」总览态。
+//   ★ v176 时 '' = 全部班级平铺总览；v178 按用户要求去掉整体回顾（84 列平铺太臃肿），
+//     改为「直接选中某个班看该班数据」。'' 仅作为「尚未选班」的瞬间态，会被自动落到第一个班。
 //   ★ 单一状态源，切班只重渲染矩阵容器（#dashCourseMatrixBox），不动整页 —— 避免重算
 //     整个数据看板（含云端聚合），也避免页面滚动位置丢失。
 let dashCourseSel = ''
@@ -3545,26 +3547,30 @@ function _courseTypeBars(c) {
 }
 
 // v176：班级 KPI 卡 —— 完成率环 + 平均分 + 已完成格数 + 分类型完成度。
+// v178：横向瘦身 —— 原「4 个数字 + 右侧分类型条」在宽屏上要横铺 ~900px，观感臃肿。
+//   改法：① 去掉「成员数 / 任务数」两个数字（卡头已用「👥 N人 · 📋 N任务」表达，重复）
+//         ② 分类型条改为 2 列网格（宽屏）→ 宽度减半；③ 数值列改自适应收窄。
 function _courseKpiCard(c) {
   const st = _courseClassStat(c)
-  const R = 30, CIRC = 2 * Math.PI * R
+  const R = 26, CIRC = 2 * Math.PI * R
   const ring = `<div class="dcs-ring">
-      <svg viewBox="0 0 72 72" width="72" height="72" aria-hidden="true">
-        <circle cx="36" cy="36" r="${R}" fill="none" stroke="#e5e7eb" stroke-width="7"></circle>
-        <circle cx="36" cy="36" r="${R}" fill="none" stroke="var(--primary)" stroke-width="7" stroke-linecap="round"
+      <svg viewBox="0 0 64 64" width="64" height="64" aria-hidden="true">
+        <circle cx="32" cy="32" r="${R}" fill="none" stroke="#e5e7eb" stroke-width="6"></circle>
+        <circle cx="32" cy="32" r="${R}" fill="none" stroke="var(--primary)" stroke-width="6" stroke-linecap="round"
           stroke-dasharray="${CIRC.toFixed(1)}" stroke-dashoffset="${(CIRC * (1 - st.completion / 100)).toFixed(1)}"
-          transform="rotate(-90 36 36)"></circle>
+          transform="rotate(-90 32 32)"></circle>
       </svg>
       <span class="dcs-ring-txt">${st.completion}%</span>
     </div>`
   const avgTxt = st.avgScore == null ? '—' : st.avgScore + (LANG === 'en' ? '' : '分')
+  // v178：第一行（环 + 数字）裹进 .dcs-kpi-top，与第二行（分类型条）分成两个块级行
   return `<div class="dcs-kpi">
-    ${ring}
-    <div class="dcs-kpi-stats">
-      <div class="dcs-kpi-item"><b>${st.done}<em>/${st.cells}</em></b><span>${escHtml(t('dcsDoneCells'))}</span></div>
-      <div class="dcs-kpi-item"><b>${avgTxt}</b><span>${escHtml(t('dcsAvgScore'))}</span></div>
-      <div class="dcs-kpi-item"><b>${st.members}</b><span>${escHtml(t('courseMembersUnit'))}</span></div>
-      <div class="dcs-kpi-item"><b>${st.assigns}</b><span>${escHtml(t('courseAssignUnit'))}</span></div>
+    <div class="dcs-kpi-top">
+      ${ring}
+      <div class="dcs-kpi-stats">
+        <div class="dcs-kpi-item"><b>${st.done}<em>/${st.cells}</em></b><span>${escHtml(t('dcsDoneCells'))}</span></div>
+        <div class="dcs-kpi-item"><b>${avgTxt}</b><span>${escHtml(t('dcsAvgScore'))}</span></div>
+      </div>
     </div>
     <div class="dcs-types">${_courseTypeBars(c)}</div>
   </div>`
@@ -3578,9 +3584,9 @@ function dashCoursePick(v) {
 }
 
 // 每班级成绩矩阵 HTML（infoMap：用户名 → { name, dept }，用于成员列显示中文名+部门）
-// v176：加分班下拉（84 列全平铺太拖沓 → 一次看一个班）+ 班级 KPI 卡。
-//   · '' 全部班级 → 保留原平铺行为（总览，用于横向对比各班进度）
-//   · 指定 classId → 只渲该班，并显示 KPI 卡
+// v178：去掉「全部班级」平铺总览 —— 一律直出单个班（84 列平铺太臃肿）。
+//   · 下拉只列班级（无「全部班级」项），首次进入自动选中第一个班
+//   · 选中的班被删 / 未选 → 回落到第一个班（不再回落总览）
 //   ★ 下拉与 KPI 都只影响「视图」，不改任何统计口径与数据。
 function _courseMatrices(doc, infoMap) {
   const classes = (doc && doc.classes) || []
@@ -3589,13 +3595,13 @@ function _courseMatrices(doc, infoMap) {
   dashCourseDocCache = doc
   dashCourseInfoCache = infoMap
   if (!classes.length) return ''
-  // 选中班级已不存在（被删除）→ 回落「全部班级」
-  if (dashCourseSel && !classes.some(c => c.id === dashCourseSel)) dashCourseSel = ''
+  // v178：选中班级不存在（被删）或尚未选 → 回落到第一个班（v176 此处回落的是「总览」）
+  if (!dashCourseSel || !classes.some(c => c.id === dashCourseSel)) dashCourseSel = classes[0].id
 
+  // v178：下拉条简化 —— 只列班级，去掉「全部班级（总览）」项
   const selHtml = `<div class="dcs-bar">
     <label class="dcs-bar-lbl">${escHtml(t('dcsPickClass'))}</label>
     <select class="dcs-sel" onchange="dashCoursePick(this.value)">
-      <option value=""${dashCourseSel === '' ? ' selected' : ''}>${escHtml(t('dcsAllClasses'))}（${classes.length}）</option>
       ${classes.map(c => {
         const st = _courseClassStat(c)
         return `<option value="${escAttr(c.id)}"${dashCourseSel === c.id ? ' selected' : ''}>${escHtml(c.name)} · ${escHtml(t('courseProgressOf', st.done, st.cells))}</option>`
@@ -3603,7 +3609,8 @@ function _courseMatrices(doc, infoMap) {
     </select>
   </div>`
 
-  const shown = dashCourseSel ? classes.filter(c => c.id === dashCourseSel) : classes
+  // v178：只渲染选中的那一个班（不再有平铺总览分支）
+  const shown = classes.filter(c => c.id === dashCourseSel)
   const body = shown.map(c => {
     const members = c.members || []
     const assigns = c.assignments || []
@@ -3639,7 +3646,8 @@ function _courseMatrices(doc, infoMap) {
     }).join('') || `<tr><td colspan="${assigns.length + 1}" style="text-align:center;color:#9ca3af;padding:20px">${t('courseNoMembers')}</td></tr>`
     // v176：选中单个班级时，标题右侧补上 KPI 卡（完成率环 + 均分 + 分类型完成度），
     //   一眼看清「这个班到底进行到哪了」，不用去数矩阵格子。
-    const kpi = dashCourseSel ? _courseKpiCard(c) : ''
+    //   v178：现在恒为单班视图，KPI 卡恒显示。
+    const kpi = _courseKpiCard(c)
     return `<div class="card" style="margin-bottom:16px;padding:0;overflow-x:auto">
       <div style="padding:12px 16px;border-bottom:1px solid #e5e7eb"><strong>🎓 ${escHtml(c.name)}</strong>
         <span style="color:#6b7280;font-size:13px;margin-left:8px">👥 ${members.length}${t('courseMembersUnit')} · 📋 ${assigns.length}${t('courseAssignUnit')}</span>
@@ -3651,7 +3659,7 @@ function _courseMatrices(doc, infoMap) {
       </table>
     </div>`
   }).join('')
-  // v176：空态兜底 —— 全部班级都没任务时不至于渲染出一根孤零零的下拉条
+  // v178：选中的班存在但一个任务都没有 → 提示卡（有班级的情形在上面已保证 sel 有效）
   const inner = body || `<div class="card" style="padding:24px;text-align:center;color:#9ca3af">${escHtml(t('dashOfflineEmpty'))}</div>`
   return `<div id="dashCourseMatrixBox">${selHtml}${inner}</div>`
 }

@@ -7,7 +7,9 @@ let courseQuiz = null       // 进行中的作答会话
 let courseTimerId = null
 let courseDraft = null      // 新建作业的草稿（含题目预览）
 
-// v177：成绩看板（renderCourseDashboard）的班级切换态。'' = 全部班级（平铺总览）；其余为 classId。
+// v177：成绩看板（renderCourseDashboard）的班级切换态。一律为 classId —— 不再有「全部班级」总览态。
+//   ★ v177 时 '' = 全部班级平铺总览；v178 按用户要求去掉整体回顾，改为「直接选中某个班看该班数据」。
+//     '' 仅作为「尚未选班」的瞬间态，会被自动落到第一个班。
 //   ★ 与数据看板「线下课」标签的 dashCourseSel（app.js）是**两套独立状态** —— 两个页面各自
 //     记自己的选择，互不干扰。共用的只是 .dcs-* 样式与 _courseKpiCard 这套「视图组件」。
 let cdashSel = ''
@@ -2797,6 +2799,7 @@ function courseOpenDashboard() {
 
 // v177：成绩看板的班级下拉回调。切换后只重写 #cdashBox 的 innerHTML，不重算整页
 //   （与数据看板 dashCoursePick 同思路：避免重算云端聚合、避免页面滚动位置丢失）。
+//   v178：下拉不再有「全部班级」项，传进来的恒为 classId；但 '' 仍按「回落到第一个班」处理。
 function courseDashPick(v) {
   cdashSel = String(v == null ? '' : v)
   const el = document.getElementById('cdashBox')
@@ -2807,6 +2810,7 @@ function courseDashPick(v) {
 //   ★ 抽成独立函数是为了让 courseDashPick 能做局部重渲染，逻辑与首次渲染完全同源。
 //   ★ 口径与页面顶部汇总卡一致：草稿不计、video/offline 不进均分；单格「已完成」判据
 //     复用 app.js 的 _courseCellDone（与数据看板同源，防口径漂移）。
+// v178：去掉「全部班级」平铺总览 —— 一律直出单个班；下拉只列班级，首次自动选中第一个班。
 function courseDashMatrices(doc, infoMap) {
   const classes = (doc && doc.classes) || []
   infoMap = infoMap || {}
@@ -2816,13 +2820,13 @@ function courseDashMatrices(doc, infoMap) {
   if (!classes.length) {
     return `<div class="card" style="text-align:center;padding:30px;color:#9ca3af">${t('courseDashNoData')}</div>`
   }
-  // 选中班级已不存在（被删除）→ 回落「全部班级」
-  if (cdashSel && !classes.some(c => c.id === cdashSel)) cdashSel = ''
+  // v178：选中班级不存在（被删）或尚未选 → 回落到第一个班（v177 此处回落的是「总览」）
+  if (!cdashSel || !classes.some(c => c.id === cdashSel)) cdashSel = classes[0].id
 
+  // v178：下拉条简化 —— 只列班级，去掉「全部班级（总览）」项
   const selHtml = `<div class="dcs-bar">
     <label class="dcs-bar-lbl">${escHtml(t('dcsPickClass'))}</label>
     <select class="dcs-sel" onchange="courseDashPick(this.value)">
-      <option value=""${cdashSel === '' ? ' selected' : ''}>${escHtml(t('dcsAllClasses'))}（${classes.length}）</option>
       ${classes.map(c => {
         const st = _courseClassStat(c)
         return `<option value="${escAttr(c.id)}"${cdashSel === c.id ? ' selected' : ''}>${escHtml(c.name)} · ${escHtml(t('courseProgressOf', st.done, st.cells))}</option>`
@@ -2830,7 +2834,8 @@ function courseDashMatrices(doc, infoMap) {
     </select>
   </div>`
 
-  const shown = cdashSel ? classes.filter(c => c.id === cdashSel) : classes
+  // v178：只渲染选中的那一个班（不再有平铺总览分支）
+  const shown = classes.filter(c => c.id === cdashSel)
   const matrices = shown.map(c => {
     const members = c.members || []
     const assigns = (c.assignments || []).filter(a => a.status !== 'draft')   // 草稿不入矩阵
@@ -2892,7 +2897,8 @@ function courseDashMatrices(doc, infoMap) {
 
     // v177：选中单个班级时，标题下方补上 KPI 卡（完成率环 + 均分 + 分类型完成度），
     //   与数据看板「线下课」标签同一套组件，少翻表格也能看清班级整体进度。
-    const kpi = cdashSel ? _courseKpiCard(c) : ''
+    //   v178：现在恒为单班视图，KPI 卡恒显示。
+    const kpi = _courseKpiCard(c)
     return `<div class="card" style="margin-bottom:16px;padding:0;overflow-x:auto">
       <div style="padding:12px 16px;border-bottom:1px solid #e5e7eb"><strong>🎓 ${escHtml(c.name)}</strong>
         <span style="color:#6b7280;font-size:13px;margin-left:8px">👥 ${members.length}${t('courseMembersUnit')} · 📋 ${assigns.length}${t('courseAssignUnit')}</span>
@@ -2907,8 +2913,7 @@ function courseDashMatrices(doc, infoMap) {
     </div>`
   }).join('')
 
-  // v177：空态兜底 —— 有班级但全都没任务时不至于渲染出一根孤零零的下拉条
-  //   （无班级的情形已在上方 return 掉，那条走的是「无下拉、只给提示卡」的旧形态）
+  // v178：选中的班存在但一个任务都没有 → 提示卡（有班级的情形在上面已保证 sel 有效）
   const body = matrices || `<div class="card" style="text-align:center;padding:30px;color:#9ca3af">${t('courseDashNoData')}</div>`
   return `<div id="cdashBox">${selHtml}${body}</div>`
 }
