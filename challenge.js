@@ -239,13 +239,47 @@ function chBankDiffStats() {
 }
 
 // ====== v111：按营次区分难度档（第二期及以后「略难」）======
-// 判定口径与 chUserSeed 同源：chRoundSlug(chCurrentRound()) !== '第一期' 即视为进阶期。
+// ⚠️ v181 改口径：进阶期 = 「本营次在**它自己那个部门组**里的期号 > 1」。
+//   旧口径 `chRoundSlug(chCurrentRound()) !== '第一期'` 只把字面量 'r1' / '第一期' 当第一期，
+//   于是 r2/r3/r4/r5… **一律**被判为进阶期 —— 2026-10-16 实证：线上除标帜一期外所有营次都在跑
+//   CHALLENGE_DIFF_PLAN_HARD，包括本该是「基础缓坡」的艳中一期、客房送餐一期与新建的酒吧第一期。
+//   新口径与后台 / 归档的营次期号完全同源（cloud-store.js `_roundSeqOf`）：
+//     ① 营次带正整数 `seq` → 直接用它（v152 起新建的营次都有）；
+//     ② 存量期（v152 之前建的、字段缺失）→ 按**同部门组**在数组里的出现顺序现算。
+//   部门组键 = depts 排序后拼接；depts 为空 → '__all__'（全库组），与 _roundDeptGroupKey 同款。
+//   ⚠️ 必须「按部门组」而非「按全库条数」：标帜二期与酒吧一期各自的期号互不影响。
+//   ⚠️ 存量的 seq 缺省**绝不可被当成 0/第一期**（v152 铁律：补 seq:0 会让期号全塌）——
+//      所以「显式 seq 缺失」一律走 ② 现算，只有连部门组都算不出才回落兜底。
+//   兜底（拿不到营次列表 / 期号算不出 —— extractFn 沙箱、部分加载、旧缓存）→ 沿用旧口径。
 // 只读营次、不引入新依赖 → 可安全被 challengePool / challengeStratifiedDraw 调用。
-// 缺函数兜底（extractFn 沙箱 / 部分加载）→ 回落第一期基础档，行为与 v110 完全一致。
 function chIsHardRound() {
   try {
-    if (typeof chRoundSlug !== 'function') return false        // 沙箱缺函数 → 视作第一期（保守）
-    const rid = (typeof chCurrentRound === 'function') ? chCurrentRound() : '第一期'
+    const rid = (typeof chCurrentRound === 'function') ? chCurrentRound() : ''
+    if (!rid) return false                                     // 无当前营次 → 视作第一期（保守）
+    // ① 主路径：按「本部门组期号」判定
+    if (typeof CloudSync !== 'undefined' && CloudSync && Array.isArray(CloudSync._chRounds) && CloudSync._chRounds.length) {
+      const arr = CloudSync._chRounds
+      const rec = arr.find(r => r && String(r.id) === String(rid))
+      if (rec) {
+        let seq = Number(rec.seq) > 0 ? Math.floor(Number(rec.seq)) : 0
+        if (!seq) {
+          const keyOf = (r) => {
+            const l = (r && Array.isArray(r.depts)) ? r.depts.filter(x => typeof x === 'string' && x).slice().sort() : []
+            return l.length ? l.join('+') : '__all__'
+          }
+          const key = keyOf(rec)
+          let n = 0
+          for (const r of arr) {
+            if (keyOf(r) !== key) continue
+            n++
+            if (String(r.id) === String(rec.id)) { seq = n; break }
+          }
+        }
+        if (seq > 0) return seq > 1
+      }
+    }
+    // ② 兜底：无营次数据 / 期号算不出 → 旧口径。缺函数 → 保守回落第一期。
+    if (typeof chRoundSlug !== 'function') return false
     return chRoundSlug(rid) !== '第一期'
   } catch (e) { return false }
 }
@@ -270,12 +304,19 @@ function chTestPlan() {
 //      「你实际答到的难度」以内 → Day1 名义均值 1.00 时最好也只能评到 L1，Day5 才可能到 L3。
 //   ③ 只许**逐级**变化（每天最多升 1 级或降 1 级）→ 避免一次考试把 L1 直接弹到 L4。
 //
-// 阈值按「名义计划难度均值」标定（第一期 1.00/1.16/1.30/1.47/1.63/1.80/1.90，
-//   进阶期 2.00/2.13/2.23/2.36/2.47/2.60/2.67 —— 见 CHALLENGE_DIFF_PLAN[_HARD]）：
-//   ≥0.90 → L4（Day7 名义 1.90，说明高质量地完成了最高难度日）
-//   ≥0.60 → L3（Day5 名义 1.63）· ≥0.30 → L2（Day2 名义 1.16）· <0.30 → L1（Day1 名义 1.00）
-// 现状对照（2026-10-15 实测）：送餐一 Day1 名义 1.00 → 全班最高只能 L1；标帜二期名义 2.00 → 最高 L3。
-//   「送餐一有学员 9 个阶段全对却停在 L1」是**设计**，不是 bug —— 准确率 100% ≠ 能力 L4。
+// 档位按「基准名义难度均值」分（见 chLevelTierOfBench：<1.5→1 · <2.5→2 · <3.5→3 · ≥3.5→4）。
+// ★ v181 复算的真实名义均值（`_v181` 批次用真实 chPlanAllocate 逐日算出）：
+//   第一期 1.00/1.27/1.60/1.93/2.27/2.60/2.80 · 进阶期 2.00/2.03/2.33/2.57/2.67/2.70/3.00
+//   —— 见 CHALLENGE_DIFF_PLAN[_HARD]。
+//   ⚠️ 旧注释里的两串数字（1.00/1.16/1.30/1.47/1.63/1.80/1.90 与 2.00/2.13/…/2.67）是
+//     **v149 重调配比之前**的值，「≥0.90 → L4 / ≥0.60 → L3 / ≥0.30 → L2」是 **v165 的旧准确率阈值** ——
+//     两者自 v180 起均已作废，勿再引用（引用旧数字会误判「等级不对」）。
+// 另有两条压制（缺一会让全班涨到 L4）：① 等级不得高于当天/基准的计划难度档（cap）；
+//   ② 进 3 档另需「练到 Day7 且首答准确率 ≥95%」，否则退 2 档（chLevelCapOfBench）。
+// 现状对照（2026-10-16，v181 修「进阶期判定」bug 之后）：
+//   基础档 = 标帜一期 r1 · 艳中一期 r2 · 客房送餐一期 r4 · 酒吧一期 r5（Day1 名义 1.00 → 基准 <1.5 → 上限 L1）；
+//   进阶档 = 标帜二期 r3 · 艳中二期 r6 · 客房送餐二期 r7（Day1 名义 2.00 → 基准 2.0 档 → 上限 L2）。
+//   「基础档学员 9 个阶段全对却停在 L1」是**设计**，不是 bug —— 准确率 100% ≠ 能力 L4。
 //
 // ⚠️ 等级只从**练习阶段**推导（chLevelBench），不吃考试与补录成绩：
 //   · 只算 practice：学习测试（test，Day1/Day7）与期末考试不计入（它们是考试，不是练习进度）

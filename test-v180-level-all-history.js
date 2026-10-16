@@ -364,7 +364,8 @@ group('组十五：版本号与站点契约')
 {
   const vs = HTML.match(/\?v=(\d+)/g) || []
   assert('★ 版本号 12 处', vs.length === 12, vs.length)
-  assert('★ 版本号唯一（全部 180）', vs.every(v => v === '?v=180'), [...new Set(vs)].join(','))
+  // [v181 修正] 旧断言写死 `?v=180` → 每发一版必红。改为「12 处同号」+「≥ 下限」两条稳定契约。
+  assert('★ 版本号唯一（12 处同号，不写死具体数字）', new Set(vs).size === 1, [...new Set(vs)].join(','))
   assert('★ 版本号 >= 180（每发一版必变，写下限不写死）',
     vs.every(v => Number(v.slice(3)) >= 180))
 }

@@ -6,7 +6,9 @@
 //
 // 覆盖点：
 // ① 配比常量自洽：两套配比各自合计正确，且 HARD 版难度均值明显高于 BASE 版
-// ② chIsHardRound 判定：第一期 → false，其他营次 → true，缺函数/异常 → 保守回落 false
+// ② chIsHardRound 判定：第 1 期 → false，第 2 期及以后 → true，缺函数/异常 → 保守回落 false
+//    ★ v181 改口径：改按「本营次在其部门组内的期号」判定（旧口径只认 'r1'/'第一期'，
+//      导致 r2/r3/r4… 全被判为进阶期）。夹具中的 r2 一律显式带 `seq: 2`。
 // ③ chDiffPlan / chTestPlan 按营次取到正确配比；challengePool 实际题量/难度结构随营次变化
 // ④ challengeStratifiedDraw 用当期配比抽题（第二期难度1 更少、难度2/3 更多）
 // ⑤ chPrevRoundWrongQuestions：读**第一期存档键**（不是当前营次键）；跨阶段汇总 + qid 去重；
@@ -257,41 +259,122 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
   }
 
   // ================= ② chIsHardRound 判定 =================
-  console.log('\n[2] chIsHardRound：按营次判定难度档')
+  // ★ v181 改口径：进阶期 = 「本营次在**它自己那个部门组**里的期号 > 1」。
+  //   旧口径（只认 rid === 'r1'/'第一期'）把 r2/r3/r4… 一律当进阶期 —— 2026-10-16 实证：
+  //   线上除标帜一期外所有营次都在跑 CHALLENGE_DIFF_PLAN_HARD（含本该是基础缓坡的
+  //   艳中一期 r2、客房送餐一期 r4 与新建的酒吧第一期 r5）。
+  //   新口径与 cloud-store.js `_roundSeqOf` 同源：显式 seq 优先，存量期按同组数组顺序现算。
+  console.log('\n[2] chIsHardRound：按「本部门组期号」判定难度档')
   {
     // 无云端侧信道 → 第一期
     const sb1 = makeSb({ questions: BANK })
     assert('无营次信息 → 视作第一期（false）', call(sb1, 'chIsHardRound()') === false, '')
-    // 侧信道指向第二期
+    // 显式 seq = 2 → 进阶期
     const sb2 = makeSb({
-      questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], open: true }],
+      questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], seq: 2, open: true }],
       curId: 'r2',
     })
-    assert('侧信道指向第二期 → true', call(sb2, 'chIsHardRound()') === true, '')
-    // r1 归一
+    assert('侧信道指向第二期（显式 seq=2）→ true', call(sb2, 'chIsHardRound()') === true, '')
+    // r1：无 seq，但同组内排第 1 → 第一期
     const sb3 = makeSb({
       questions: BANK, rounds: [{ id: 'r1', name: '第一期', depts: ['dining/sig'], open: true }],
       curId: 'r1',
     })
-    assert("侧信道指向 r1 → 归一为第一期（false）", call(sb3, 'chIsHardRound()') === false, '')
-    // 缺 chRoundSlug → 保守回落 false（沙箱/部分加载健壮性）
-    const sb4 = makeSb({ questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'] }], curId: 'r2' })
-    const r4 = call(sb4, '(() => { const saved = chRoundSlug; let out; try { chRoundSlug = undefined; out = chIsHardRound() } finally { chRoundSlug = saved } return out })()')
-    assert('chRoundSlug 缺失 → 保守回落 false（不抛错）', r4 === false, String(r4))
-    // 缺 chCurrentRound → 回落 '第一期' → false
-    const r5 = call(sb4, '(() => { const saved = chCurrentRound; let out; try { chCurrentRound = undefined; out = chIsHardRound() } finally { chCurrentRound = saved } return out })()')
-    assert('chCurrentRound 缺失 → 回落第一期（false）', r5 === false, String(r5))
-    // 源码契约：typeof 守卫（v110 教训同款）
+    assert("侧信道指向 r1（无 seq，同组唯一 → 现算第 1 期）→ false",
+      call(sb3, 'chIsHardRound()') === false, '')
+    // ★ v181 核心：存量期无 seq 时按「同部门组数组顺序」现算（真实数据 = 艳中 r2 / r6 同组）
+    const ROUNDS_YAN = [
+      { id: 'r2', name: '艳中一期', depts: ['dining/yan'], open: false },
+      { id: 'r6', name: '艳中二期', depts: ['dining/yan'], open: true, seq: 2 },
+    ]
+    const sbOld = makeSb({ questions: BANK, dept: 'dining/yan', curId: 'r2', rounds: ROUNDS_YAN })
+    assert('存量期无 seq，同组第 1 期 → false（旧口径误判为 true 的正是此例）',
+      call(sbOld, 'chIsHardRound()') === false, '')
+    const sbOld2 = makeSb({ questions: BANK, dept: 'dining/yan', curId: 'r6', rounds: ROUNDS_YAN })
+    assert('同一部门组第 2 期 → true', call(sbOld2, 'chIsHardRound()') === true, '')
+    // ★ 期号必须「按部门组」而非「按全库条数」—— 标帜二期不得把酒吧第一期带成进阶期
+    const sbCross = makeSb({
+      questions: BANK, dept: 'dining/bar', curId: 'r5',
+      rounds: [
+        { id: 'r1', name: '标帜一期', depts: ['dining/sig'], open: false },
+        { id: 'r3', name: '标帜二期', depts: ['dining/sig'], open: true, seq: 2 },
+        { id: 'r5', name: '酒吧一期', depts: ['dining/bar'], open: true, seq: 1 },
+      ],
+    })
+    assert('跨部门组不串号：酒吧第一期（seq=1）→ false，尽管库里有标帜第二期',
+      call(sbCross, 'chIsHardRound()') === false, '')
+    // depts 为空的营次独占 '__all__' 组（与 _roundDeptGroupKey 同款）
+    const sbAll = makeSb({ questions: BANK })
+    call(sbAll, "CloudSync = { _chRounds: [ { id: 'rA', depts: [] }, { id: 'rB', depts: [] } ], _chRoundCurId: 'rB' }")
+    call(sbAll, "chCurrentRound = () => 'rB'")
+    assert("depts 为空的营次按 '__all__' 组独立计号 → 第 2 期（true）",
+      call(sbAll, 'chIsHardRound()') === true, '')
+    // ---- 兜底链（沙箱 / 部分加载 / 旧缓存）----
+    // 有侧信道 id 但没有营次列表 → 沿用旧口径（v111 行为，保证老缓存不炸）
+    const sbFallback = makeSb({ questions: BANK })
+    call(sbFallback, "CloudSync = { _chRounds: [], _chRoundCurId: 'r2' }")
+    assert('无营次列表 → 回落旧口径（r2 ≠ 第一期 → true）',
+      call(sbFallback, 'chIsHardRound()') === true, '')
+    const r4 = call(sbFallback, '(() => { const saved = chRoundSlug; let out; try { chRoundSlug = undefined; out = chIsHardRound() } finally { chRoundSlug = saved } return out })()')
+    assert('无营次列表且 chRoundSlug 缺失 → 保守回落 false（不抛错）', r4 === false, String(r4))
+    // 缺 chCurrentRound → 视作第一期 → false
+    const r5 = call(sb2, '(() => { const saved = chCurrentRound; let out; try { chCurrentRound = undefined; out = chIsHardRound() } finally { chCurrentRound = saved } return out })()')
+    assert('chCurrentRound 缺失 → 保守回落第一期（false）', r5 === false, String(r5))
+    // ---- ★ v181 口径一致性：与 cloud-store.js `_roundSeqOf` 对同一组数据必须同判 ----
+    {
+      const CS = fs.readFileSync(path.join(__dirname, 'cloud-store.js'), 'utf-8')
+      const ROUNDS = [
+        { id: 'r1', name: '标帜一期', depts: ['dining/sig'], open: false },
+        { id: 'r2', name: '艳中一期', depts: ['dining/yan'], open: false },
+        { id: 'r3', name: '标帜二期', depts: ['dining/sig'], open: true, seq: 2 },
+        { id: 'r4', name: '送餐一期', depts: ['dining/ird'], open: true, seq: 1 },
+        { id: 'r5', name: '酒吧一期', depts: ['dining/bar'], open: true, seq: 1 },
+        { id: 'r6', name: '艳中二期', depts: ['dining/yan'], open: true, seq: 2 },
+        { id: 'r7', name: '送餐二期', depts: ['dining/ird'], open: true, seq: 2 },
+        { id: 'r8', name: '全库一期', depts: [], open: true },
+        { id: 'r9', name: '全库二期', depts: [], open: true, seq: 2 },
+      ]
+      const sbCs = { console, JSON, Array, Object, String, Number, Math }
+      vm.createContext(sbCs)
+      // _roundDeptGroupKey 依赖模块常量 ROUND_DEPT_ALL_KEY（cloud-store.js 内声明）
+      vm.runInContext("const ROUND_DEPT_ALL_KEY = '__all__'", sbCs)
+      vm.runInContext(extractFn(CS, '_roundDeptGroupKey'), sbCs)
+      vm.runInContext(extractFn(CS, '_roundSeqOf'), sbCs)
+      sbCs.__arr = ROUNDS
+      const refOf = id => vm.runInContext('_roundSeqOf(__arr, ' + JSON.stringify(id) + ') > 1', sbCs)
+      const seen = []
+      let mismatch = 0
+      for (const r of ROUNDS) {
+        const sb = makeSb({ questions: BANK, rounds: ROUNDS, curId: r.id, dept: (r.depts[0] || 'dining/sig') })
+        vm.runInContext('chCurrentRound = () => ' + JSON.stringify(r.id), sb)
+        const mine = call(sb, 'chIsHardRound()')
+        const ref = refOf(r.id)
+        if (mine !== ref) mismatch++
+        seen.push(r.id + '=' + (ref ? '进阶' : '基础'))
+      }
+      assert('chIsHardRound 与云端 _roundSeqOf 对 9 个营次逐一同判（0 处不一致）',
+        mismatch === 0, seen.join(' '))
+      const real = ['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7'].map(id => refOf(id)).join(',')
+      assert('真实线上数据形态：r1基础 / r2基础 / r3进阶 / r4基础 / r5基础 / r6进阶 / r7进阶',
+        real === 'false,false,true,false,false,true,true', real)
+      assert("depts 为空的营次归 '__all__' 组：r8 基础 / r9 进阶",
+        refOf('r8') === false && refOf('r9') === true, refOf('r8') + ',' + refOf('r9'))
+    }
+    // 源码契约：typeof 守卫（v110 教训同款）+ v181 期号口径
     const fn = extractFn(CH, 'chIsHardRound')
     assert('chIsHardRound 源码含 typeof 守卫（不裸调用）',
       /typeof chRoundSlug !== 'function'/.test(fn) && /typeof chCurrentRound === 'function'/.test(fn), fn)
+    assert('chIsHardRound 源码按「部门组期号」判定（seq 优先 + 同组顺序现算 + __all__ 键）',
+      /CloudSync\._chRounds/.test(fn) && /Number\(rec\.seq\) > 0/.test(fn) && /'__all__'/.test(fn), fn)
+    assert('chIsHardRound 声明在 chRoundSlug / chRoundRecForDept 之前（v165 TDZ 教训：函数声明可提升，但不得改成 const）',
+      /^function chIsHardRound\(\)/m.test(CH), '')
   }
 
   // ================= ③ chDiffPlan / chTestPlan 与 challengePool =================
   console.log('\n[3] 配比选取与练习序列按营次变化')
   {
     const sb1 = makeSb({ questions: BANK })
-    const sb2 = makeSb({ questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], open: true }], curId: 'r2' })
+    const sb2 = makeSb({ questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], seq: 2, open: true }], curId: 'r2' })
     // [v149 反转] 旧断言写死「Day1 = 7/3/0」与「结构 82/82/6 / 37/127/6」。
     //   v149 重调难度分工后逐档数字全变，且实际抽取构成还要经 chPlanAllocate 与题库容量对齐
     //   → 改为断「两期配比确实不同 + 进阶期整体更难」这两条稳定契约。
@@ -334,7 +417,7 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
   console.log('\n[4] 分层抽题按当期配比')
   {
     const sb1 = makeSb({ questions: BANK })
-    const sb2 = makeSb({ questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], open: true }], curId: 'r2' })
+    const sb2 = makeSb({ questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], seq: 2, open: true }], curId: 'r2' })
     const draw = sb => JSON.parse(call(sb, 'JSON.stringify(challengeStratifiedDraw(Store.getQuestions(), 20).map(q => q.difficulty))'))
     const a = draw(sb1), b = draw(sb2)
     assert('第一期抽 20 题：10/7/3', a.length === 20 && attr(a, 1) === 10 && attr(a, 2) === 7 && attr(a, 3) === 3, JSON.stringify(count(a)))
@@ -348,7 +431,7 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
     //   v149 起改由 chDrawWithBackfill 从相邻档回填 → 考试恒为 20 题（题源总量够时），
     //   稀缺档用满自己的库存（2 题）。这让考试题量稳定，明显优于「静默变短」。
     const thin = mkQs('t1', 50, 1, 100).concat(mkQs('t2', 50, 2, 200)).concat(mkQs('t3', 2, 3, 300))
-    const sb3 = makeSb({ questions: thin, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], open: true }], curId: 'r2' })
+    const sb3 = makeSb({ questions: thin, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], seq: 2, open: true }], curId: 'r2' })
     const out3 = JSON.parse(call(sb3, 'JSON.stringify(challengeStratifiedDraw(Store.getQuestions(), 20).map(q => q.difficulty))'))
     assert('[v149 反转] 难度3 库存不足 → 从相邻档回填，考试仍为 20 题',
       out3.length === 20, out3.length + '/' + JSON.stringify(count(out3)))
@@ -374,7 +457,7 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
     const secondState = { uid: 'alice', days: { 1: { stages: { 1: { done: true, correct: 8, total: 10, wrong: [9999] } } } } }
     const sb = makeSb({
       questions: BANK,
-      rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], open: true }],
+      rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], seq: 2, open: true }],
       curId: 'r2',
       lsStore: {
         'eq_challenge_v2': JSON.stringify(firstState),          // 第一期存档键
@@ -398,15 +481,15 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
     assert('返回的题经过 shuffleOptions（非题库原对象引用）', sameRef === false, '仍是同一引用')
 
     // 存档缺失 / 无 wrong 字段 → 空数组，不抛错
-    const sbNone = makeSb({ questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'] }], curId: 'r2' })
+    const sbNone = makeSb({ questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], seq: 2 }], curId: 'r2' })
     assert('无第一期存档 → 空数组（不抛错）', call(sbNone, 'chPrevRoundWrongQuestions().length') === 0, '')
     const sbNoWrong = makeSb({
-      questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'] }], curId: 'r2',
+      questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], seq: 2 }], curId: 'r2',
       lsStore: { 'eq_challenge_v2': JSON.stringify({ uid: 'alice', days: { 1: { stages: { 0: { done: true, correct: 20, total: 20 } } } } }) },
     })
     assert('旧存档无 wrong 字段（v71 及更早）→ 空数组', call(sbNoWrong, 'chPrevRoundWrongQuestions().length') === 0, '')
     const sbBroken = makeSb({
-      questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'] }], curId: 'r2',
+      questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], seq: 2 }], curId: 'r2',
       lsStore: { 'eq_challenge_v2': '{不是合法 JSON' },
     })
     assert('第一期存档损坏（非法 JSON）→ 空数组且不抛错', call(sbBroken, 'chPrevRoundWrongQuestions().length') === 0, '')
@@ -415,7 +498,7 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
     const withOther = BANK.concat([{ id: 7777, category_id: 12, dept: 'dining/bar', type: 'single', difficulty: 2, question: 'x', options: ['A', 'B'], answer: [0] }])
     const sbF = makeSb({
       questions: withOther, dept: 'dining/sig',
-      rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'] }], curId: 'r2',
+      rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], seq: 2 }], curId: 'r2',
       lsStore: { 'eq_challenge_v2': JSON.stringify({ uid: 'alice', days: { 1: { stages: { 0: { done: true, wrong: [1001, 7777] } } } } }) },
     })
     const fIds = JSON.parse(call(sbF, 'JSON.stringify(chPrevRoundWrongQuestions().map(q => Number(q.id)))'))
@@ -434,7 +517,7 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
     // 错题 3 道（<20）→ 前置 + 补齐到 20
     const sb = makeSb({
       questions: BANK,
-      rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'] }], curId: 'r2',
+      rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], seq: 2 }], curId: 'r2',
       lsStore: {
         'eq_challenge_v2': JSON.stringify({ uid: 'alice', days: { 1: { stages: { 0: { done: true, wrong: [1001, 1002, 1003] } } } } }),
       },
@@ -449,7 +532,7 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
     const manyWrong = []
     for (let i = 0; i < 30; i++) manyWrong.push(1000 + i)
     const sb2 = makeSb({
-      questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'] }], curId: 'r2',
+      questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], seq: 2 }], curId: 'r2',
       lsStore: { 'eq_challenge_v2': JSON.stringify({ uid: 'alice', days: { 1: { stages: { 0: { done: true, wrong: manyWrong } } } } }) },
     })
     const got2 = JSON.parse(call(sb2, 'JSON.stringify(challengeTestWithWrongQuestions(Store.getQuestions(), 20).map(q => Number(q.id)))'))
@@ -457,7 +540,7 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
       got2.length === 20 && got2.every(id => id >= 1000 && id < 1030), JSON.stringify(got2.slice(0, 3)) + '...' + got2.length)
 
     // 无错题 → 退化为纯分层随机（难度结构符合第二期配比）
-    const sb3 = makeSb({ questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'] }], curId: 'r2' })
+    const sb3 = makeSb({ questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], seq: 2 }], curId: 'r2' })
     const got3 = JSON.parse(call(sb3, 'JSON.stringify(challengeTestWithWrongQuestions(Store.getQuestions(), 20).map(q => q.difficulty))'))
     assert('无第一期错题 → 退化为 20 题分层随机（5/10/5）',
       got3.length === 20 && attr(got3, 1) === 5 && attr(got3, 2) === 10 && attr(got3, 3) === 5, JSON.stringify(count(got3)))
@@ -466,7 +549,7 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
     // 造一份「三难度齐全」的小题库，并让 wrong 里放两道**属于题库**的题号 → 补齐时必然撞题
     const smallBank = mkQs('s1', 30, 1, 300).concat(mkQs('s2', 30, 2, 400)).concat(mkQs('s3', 30, 3, 500))
     const sb4 = makeSb({
-      questions: smallBank, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'] }], curId: 'r2',
+      questions: smallBank, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], seq: 2 }], curId: 'r2',
       lsStore: { 'eq_challenge_v2': JSON.stringify({ uid: 'alice', days: { 1: { stages: { 0: { done: true, wrong: [300, 401] } } } } }) },
     })
     const got4 = JSON.parse(call(sb4, 'JSON.stringify(challengeTestWithWrongQuestions(Store.getQuestions(), 20).map(q => Number(q.id)))'))
@@ -512,7 +595,7 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
       },
     }
     const sb2 = makeSb({
-      questions: FULL, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'] }], curId: 'r2',
+      questions: FULL, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], seq: 2 }], curId: 'r2',
       username: FIXED_UID, state: doneState,
       lsStore: { 'eq_challenge_v2': JSON.stringify({ uid: FIXED_UID, days: { 1: { stages: { 0: { done: true, wrong: wrongIds } } } } }) },
     })
@@ -554,7 +637,7 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
     const sb1 = makeSb({ questions: BANK })
     assert('第一期 → 不渲染提示卡（老界面零变化）', call(sb1, 'chHardRoundHtml()') === '', call(sb1, 'chHardRoundHtml()'))
     const sb2 = makeSb({
-      questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'] }], curId: 'r2',
+      questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], seq: 2 }], curId: 'r2',
       lsStore: { 'eq_challenge_v2': JSON.stringify({ uid: 'alice', days: { 1: { stages: { 0: { done: true, wrong: [1001, 1002, 1003] } } } } }) },
     })
     const html = call(sb2, 'chHardRoundHtml()')
@@ -562,7 +645,7 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
     assert('提示卡显示第一期错题条数（3 题）', /3/.test(html), html.slice(0, 300))
     assert('提示卡含当期营次名（第二期）', /第二期/.test(html), html.slice(0, 200))
     // 无错题时仍渲染（只隐藏条数那一行）
-    const sb3 = makeSb({ questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'] }], curId: 'r2' })
+    const sb3 = makeSb({ questions: BANK, rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], seq: 2 }], curId: 'r2' })
     const html3 = call(sb3, 'chHardRoundHtml()')
     assert('第二期无错题 → 仍渲染难度说明（不因缺错题而消失）', /🔥/.test(html3), html3.slice(0, 120))
     assert('renderChallenge 接入 chHardRoundHtml（位置在营次列表卡之后）',
