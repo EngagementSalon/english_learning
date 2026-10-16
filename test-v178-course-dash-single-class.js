@@ -114,6 +114,8 @@ function buildCtx(withDoc) {
   const appFns = [
     'function _courseClassStat', 'function _courseCellDone', 'function _courseKpiCard',
     'function _courseTypeBars',
+    // v179：表头按章节分组的两个新依赖
+    'function _courseChapterGroups', 'function _courseHeaderRows',
   ].map(m => grab(APP, m)).join('\n')
   // 成绩看板的本地依赖
   const caFns = [
@@ -302,9 +304,14 @@ group('⑩ 切班只重渲染自己的锚点（不重算整页）')
 }
 
 // ================= ⑪ 版本号 =================
-group('⑪ 版本号 v178')
+// 【v179 反证】v178 上线时断言「?v=178 恰 12 处」；v179 已把版本再上一级
+//   → 改为「版本号 ≥ 178 且 12 处唯一、?v=177 已消失」，历史意图仍可追溯。
+group('⑪ 版本号（v179 反证：≥178）')
 {
-  assert('index.html 中 ?v=178 恰 12 处', (HTML.match(/\?v=178/g) || []).length === 12, (HTML.match(/\?v=178/g) || []).length)
+  const vNow = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.match(/\d+/)[0]))
+  assert('index.html 中 ?v=N 恰 12 处', vNow.length === 12, vNow.length)
+  assert('★ 版本号唯一（不留混版）', new Set(vNow).size === 1, [...new Set(vNow)])
+  assert('★ 版本号 ≥ 178（v178 曾断言 ===178）', vNow[0] >= 178, vNow[0])
   assert('★ 旧版本号 ?v=177 已消失', (HTML.match(/\?v=177/g) || []).length === 0, (HTML.match(/\?v=177/g) || []).length)
 }
 

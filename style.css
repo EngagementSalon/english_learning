@@ -864,6 +864,23 @@ select { min-width: 120px; }
 .dash-table th { white-space: nowrap; }
 .dash-table td { white-space: nowrap; padding: 8px 10px; }
 .dash-table tbody tr:hover { background: #f9fafb; }
+/* v179：任务列按章节分组 —— 章节名跨列大表头（表头第一行）。
+   区分于任务列（第二行）：章节行用浅色底 + 下边框，形成「分组带」观感；
+   任务行保持原样，两行之间用 1px 分隔线暗示归属。
+   ★ 只给章节单元格描边，不碰 .dash-th，避免影响任务列的既有紧凑排版。 */
+.dash-table thead th.dash-ch {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 6px 10px;
+  background: #f6f7f9;
+  border-bottom: 1px solid var(--border);
+  border-left: 2px solid var(--card-bg);
+}
+.dash-table thead th.dash-ch + th.dash-ch { border-left-color: var(--border); }
+/* 章节行的学员列（rowspan=2）由首列 sticky 规则统一接管，这里只补底边框延续分组带 */
+.dash-table thead tr:first-child > th:first-child[rowspan] { border-bottom: 1px solid var(--border); }
 /* 成绩看板：学员名列固定 —— 矩阵超宽横向滚动时姓名列吸附左缘，不随滑动条滚出视野
    （sticky 需 border-collapse:separate 才可靠；显式不透明背景避免内容透过；hover 同步底色）
    用 :first-child 同时覆盖成绩看板矩阵与账号页在线矩阵（首列均为学员名列；tfoot 汇总行标签列同固定） */

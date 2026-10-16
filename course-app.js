@@ -2841,10 +2841,14 @@ function courseDashMatrices(doc, infoMap) {
     const assigns = (c.assignments || []).filter(a => a.status !== 'draft')   // 草稿不入矩阵
     if (!assigns.length) return ''
 
-    const headerCells = assigns.map(a => {
-      // 任务列固定宽度：保证看板列宽稳定不挤压，超宽时横向滚动
-      return `<th class="dash-th" style="min-width:110px">${courseTaskIcon(a)} ${escHtml(a.title)}</th>`
-    }).join('')
+    // v179：任务列按章节分组（章节名作跨列大表头，无章节归「未分章节」）
+    //   ★ 任务列固定宽度：保证看板列宽稳定不挤压，超宽时横向滚动
+    const headRows = _courseHeaderRows(assigns, cdashSel, {
+      firstTh: `<th class="dash-student-th" style="min-width:130px">${t('courseMatrixStudent')}</th>`,
+      cellFn: a => `${courseTaskIcon(a)} ${escHtml(a.title)}`,
+      thCls: 'dash-th',
+      thStyle: 'min-width:110px',   // v41 锁定：成绩看板任务列固定宽度
+    })
 
     const rows = (members.length ? members : []).map(u => {
       const cells = assigns.map(a => {
@@ -2906,7 +2910,7 @@ function courseDashMatrices(doc, infoMap) {
       ${kpi}
       <!-- width:auto + min-width:100%：列宽由内容/最小宽度决定不被压缩，超出容器时卡片横向滚动 -->
       <table class="admin-table dash-table" style="width:auto;min-width:100%">
-        <thead><tr><th class="dash-student-th" style="min-width:130px">${t('courseMatrixStudent')}</th>${headerCells}</tr></thead>
+        <thead>${headRows}</thead>
         <tbody>${rows}</tbody>
         <tfoot><tr><td class="dash-lbl-cell">✗ ${t('courseDashWrongRate')}</td>${footCells}</tr></tfoot>
       </table>

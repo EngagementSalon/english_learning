@@ -32,12 +32,20 @@ assert('右缘分隔线', /border-right:\s*1px solid var\(--border\)/.test(stick
 // 3) hover 时 sticky 列同步底色（否则行悬停时姓名列保持纯白不一致）
 assert('hover 同步规则存在', /\.dash-table tbody tr:hover td:first-child\s*{[^}]*background:\s*#f9fafb/.test(css))
 
-// 4) 成绩看板矩阵（course-app.js）：学员名列是表格第一列（表头 dash-student-th 先于任务列 headerCells）
-assert('成绩看板 thead 首列为学员名', /<thead><tr><th class="dash-student-th"[\s\S]{0,200}\$\{headerCells\}/.test(courseJs))
+// 4) 成绩看板矩阵（course-app.js）：学员名列是表格第一列
+// 【v179 反证】v179 起表头改两行（章节行 + 任务行），原断言
+//   「<thead><tr><th class="dash-student-th"…${headerCells}」已不成立。
+//   新契约：学员列仍居首列，但改为 rowspan="2" 跨章节行与任务行；
+//   任务列改由 _courseHeaderRows（app.js）统一渲染 —— rowspan 逻辑在 app.js，故查 appJs。
+assert('成绩看板 thead 学员列由 _courseHeaderRows 渲染（v179 反证）',
+  /firstTh:\s*`<th class="dash-student-th"[^>]*>\$\{t\('courseMatrixStudent'\)\}<\/th>`/.test(courseJs) && /_courseHeaderRows\(assigns/.test(courseJs))
+assert('学员列 rowspan=2 逻辑在 app.js（两页共用）', /<th rowspan="2"/.test(appJs))
 assert('成绩看板行首列为学员名', /<tr><td class="dash-student">\$\{courseMemberCell\(u, infoMap\)\}<\/td>\$\{cells\}<\/tr>/.test(courseJs))
 
 // 5) 账号页在线矩阵（app.js）：同样学员列在首列
-assert('在线矩阵 thead 首列为学员名', /<thead><tr><th style="min-width:80px">\$\{t\('courseMatrixStudent'\)\}<\/th>\$\{headerCells\}/.test(appJs))
+// 【v179 反证】同 4)，改为校验「学员列作为 firstTh 传给 _courseHeaderRows」，
+//   且带 rowspan="2"（章节行存在时跨两行）。
+assert('在线矩阵 thead 学员列由 _courseHeaderRows 渲染（v179 反证）', /firstTh:\s*`<th class="dash-student-th"[\s\S]{0,120}courseMatrixStudent[\s\S]{0,40}<\/th>`/.test(appJs))
 assert('在线矩阵行首列为学员名', /<tr><td class="dash-student">\$\{courseMemberCell\(u, infoMap\)\}<\/td>\$\{cells\}<\/tr>/.test(appJs))
 
 console.log(`\n===== v49 测试：通过 ${pass} 项，失败 ${fail} 项 =====`)

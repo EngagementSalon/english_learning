@@ -80,6 +80,9 @@ function makeSandbox() {
     + grab(APP, 'function _courseClassStat') + '\n'
     + grab(APP, 'function _courseCellDone') + '\n'
     + grab(APP, 'function _courseTypeBars') + '\n'
+    // v179：表头按章节分组
+    + grab(APP, 'function _courseChapterGroups') + '\n'
+    + grab(APP, 'function _courseHeaderRows') + '\n'
     + grab(APP, 'function _courseKpiCard') + '\n'
     + grab(COURSE_APP, 'function courseMemberCell') + '\n'
     + grab(COURSE_APP, 'function courseTaskIcon') + '\n'

@@ -3514,6 +3514,54 @@ function _courseCellDone(a, r) {
   return true
 }
 
+// v179：任务列按「章节」分组 —— 成绩矩阵列头的横排太长，按老师录入的章节切段更易读。
+//   ★ 语义与学员端进度页完全一致（course-app.js 进度流同款）：章节是「一段连续区间」，
+//     相邻同章的任务自动归为一组；章节名变化处开新组。
+//   ★ 无章节（空串 / 未录）的任务**不丢弃、不合并**，归到「未分章节」组 ——
+//     实测线上 202609 两班 17/18 与 18/18 个任务都没录章节，必须给兜底组，
+//     否则这两个班会退化成「一组都没有」。
+//   ★ 兜底组的显示名 = 该组第一个任务的章节名（空 → courseChapterNone），
+//     与学员端「章节未命名」文案同源，避免新增 i18n 键。
+//   返回 [{ name, items:[assign] }]，items 保持原顺序，便于表头 colspan 与 tfoot 对齐。
+function _courseChapterGroups(assigns) {
+  const groups = []
+  ;(assigns || []).forEach(a => {
+    const ch = String(a && a.chapter == null ? '' : a.chapter).trim()
+    const last = groups.length ? groups[groups.length - 1] : null
+    if (!last || last.ch !== ch) groups.push({ ch, items: [] })
+    groups[groups.length - 1].items.push(a)
+  })
+  return groups
+}
+
+// v179：矩阵表头两行渲染（第一行 = 章节名，第二行 = 任务名）。
+//   ★ 只在「确有章节」（至少一组有非空章节名）时才输出章节行 ——
+//     否则整班都没录章节时，凭空多出一行全宽的「未分章节」纯属噪音。
+//   ★ 表头与数据列数必须严格对齐：章节行 colspan = 该组任务数，合计 = assigns.length。
+//   ★ 首列（学员 / 学生）也要占位：无章节行时首列 rowspan=1 单行；
+//     有章节行时首列 rowspan=2，否则表头会错位一格。
+function _courseHeaderRows(assigns, sel, opt) {
+  opt = opt || {}
+  const cellFn = opt.cellFn || (a => escHtml(a.title))
+  const firstTh = opt.firstTh || ''            // 首列表头 HTML（学员列）
+  const thCls = opt.thCls || 'dash-th'
+  const chapterCls = opt.chapterCls || 'dash-ch'
+  // ★ v179：任务列宽度约束必须保留 —— v41 锁定「任务列 min-width:110px」（成绩看板）+
+  //   数据看板用 90px。重构表头时若丢掉这个 style，列宽会被内容挤压抖动。
+  const thStyle = opt.thStyle ? ` style="${opt.thStyle}"` : ''
+  const groups = _courseChapterGroups(assigns)
+  const hasChapter = groups.some(g => g.ch)
+  const taskTh = a => `<th class="${thCls}"${thStyle}>${cellFn(a)}</th>`
+  const bodyRow = `<tr>${firstTh}${assigns.map(taskTh).join('')}</tr>`
+  if (!hasChapter) return bodyRow
+  const chCells = groups.map(g =>
+    `<th class="${chapterCls}" colspan="${g.items.length}">${escHtml(g.ch || t('courseChapterNone'))}</th>`
+  ).join('')
+  // 首列跨两行：学员列在章节行与任务行都居中占据同一列
+  const firstWithRowspan = firstTh.replace(/^<th\b/, '<th rowspan="2"')
+  return `<tr>${firstWithRowspan}${chCells}</tr>` + `<tr>${assigns.map(taskTh).join('')}</tr>`
+}
+
 // v176：按任务类型的完成度小条（让老师一眼看出「卡在视频还是卡在作业」）。
 function _courseTypeBars(c) {
   const members = (c && c.members) || []
@@ -3615,10 +3663,14 @@ function _courseMatrices(doc, infoMap) {
     const members = c.members || []
     const assigns = c.assignments || []
     if (!assigns.length) return ''
-    const headerCells = assigns.map(a => {
-      const icon = a.type === 'offline' ? '📅' : (a.type === 'video' ? '🎬' : (a.type === 'exam' ? '🧪' : '📝'))
-      return `<th class="dash-th">${icon} ${escHtml(a.title)}</th>`
-    }).join('')
+    // v179：任务列按章节分组（章节名作跨列大表头，无章节归「未分章节」）
+    const headRows = _courseHeaderRows(assigns, dashCourseSel, {
+      firstTh: `<th class="dash-student-th" style="min-width:80px">${t('courseMatrixStudent')}</th>`,
+      cellFn: a => {
+        const icon = a.type === 'offline' ? '📅' : (a.type === 'video' ? '🎬' : (a.type === 'exam' ? '🧪' : '📝'))
+        return `${icon} ${escHtml(a.title)}`
+      },
+    })
     const rows = (members.length ? members : []).map(u => {
       const cells = assigns.map(a => {
         const r = (a.results || {})[u]
@@ -3654,7 +3706,7 @@ function _courseMatrices(doc, infoMap) {
       </div>
       ${kpi}
       <table class="admin-table dash-table">
-        <thead><tr><th style="min-width:80px">${t('courseMatrixStudent')}</th>${headerCells}</tr></thead>
+        <thead>${headRows}</thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`
