@@ -7,6 +7,14 @@ let courseQuiz = null       // 进行中的作答会话
 let courseTimerId = null
 let courseDraft = null      // 新建作业的草稿（含题目预览）
 
+// v177：成绩看板（renderCourseDashboard）的班级切换态。'' = 全部班级（平铺总览）；其余为 classId。
+//   ★ 与数据看板「线下课」标签的 dashCourseSel（app.js）是**两套独立状态** —— 两个页面各自
+//     记自己的选择，互不干扰。共用的只是 .dcs-* 样式与 _courseKpiCard 这套「视图组件」。
+let cdashSel = ''
+// v177：下拉切换时的局部重渲染数据源（由 renderCourseDashboard 每次调用刷新）。
+//   ★ 不挂到 window 上；与 cdashSel 一起声明在 renderCourseDashboard 之前，避免 TDZ。
+let cdashInfoCache = null
+
 // ====== 工具 ======
 function courseUser() { const s = Store.getSession(); return s ? s.username : '' }
 function courseUserName() { const s = Store.getSession(); return s ? (s.name || s.username) : '' }
@@ -2787,35 +2795,43 @@ function courseOpenDashboard() {
   renderCourseDashboard()
 }
 
-async function renderCourseDashboard() {
-  const el = document.getElementById('page-course')
-  const classes = courseState.doc.classes || []
-  const infoMap = await courseUserInfoMap()
+// v177：成绩看板的班级下拉回调。切换后只重写 #cdashBox 的 innerHTML，不重算整页
+//   （与数据看板 dashCoursePick 同思路：避免重算云端聚合、避免页面滚动位置丢失）。
+function courseDashPick(v) {
+  cdashSel = String(v == null ? '' : v)
+  const el = document.getElementById('cdashBox')
+  if (el) el.innerHTML = courseDashMatrices(courseState.doc, cdashInfoCache)
+}
 
-  // 汇总
-  let totalStudents = 0, totalAssigns = 0, totalDone = 0, allScores = []
-  const studentSet = new Set()
-  classes.forEach(c => {
-    (c.members || []).forEach(m => studentSet.add(m))
-    const assigns = (c.assignments || []).filter(a => a.status !== 'draft')   // 草稿不计入看板
-    totalAssigns += assigns.length
-    assigns.forEach(a => {
-      const results = a.results || {}
-      ;(c.members || []).forEach(m => {
-        if (results[m]) {
-          totalDone++
-          // 视频 / 线下课无分数，不计入均分
-          if (a.type !== 'video' && a.type !== 'offline') allScores.push(results[m].score || 0)
-        }
-      })
-    })
-  })
-  totalStudents = studentSet.size
-  const completionRate = totalStudents * totalAssigns > 0 ? Math.round(totalDone / (totalStudents * totalAssigns) * 100) : 0
-  const avgScore = allScores.length ? Math.round(allScores.reduce((s, x) => s + x, 0) / allScores.length) : 0
+// v177：成绩看板的下拉条 + 班级矩阵（含单班 KPI 卡）。
+//   ★ 抽成独立函数是为了让 courseDashPick 能做局部重渲染，逻辑与首次渲染完全同源。
+//   ★ 口径与页面顶部汇总卡一致：草稿不计、video/offline 不进均分；单格「已完成」判据
+//     复用 app.js 的 _courseCellDone（与数据看板同源，防口径漂移）。
+function courseDashMatrices(doc, infoMap) {
+  const classes = (doc && doc.classes) || []
+  infoMap = infoMap || {}
+  // ★ 无班级时**不能返回空串** —— 本页与数据看板「线下课」标签不同：
+  //   成绩看板历来在无数据时给一块「暂无班级或作业数据」提示卡（v41 起就有测试锁定），
+  //   返回空串会让整块区域变空白。故这里仍输出空态卡（只是不渲染下拉条）。
+  if (!classes.length) {
+    return `<div class="card" style="text-align:center;padding:30px;color:#9ca3af">${t('courseDashNoData')}</div>`
+  }
+  // 选中班级已不存在（被删除）→ 回落「全部班级」
+  if (cdashSel && !classes.some(c => c.id === cdashSel)) cdashSel = ''
 
-  // 每个班级的成绩矩阵
-  const matrices = classes.map(c => {
+  const selHtml = `<div class="dcs-bar">
+    <label class="dcs-bar-lbl">${escHtml(t('dcsPickClass'))}</label>
+    <select class="dcs-sel" onchange="courseDashPick(this.value)">
+      <option value=""${cdashSel === '' ? ' selected' : ''}>${escHtml(t('dcsAllClasses'))}（${classes.length}）</option>
+      ${classes.map(c => {
+        const st = _courseClassStat(c)
+        return `<option value="${escAttr(c.id)}"${cdashSel === c.id ? ' selected' : ''}>${escHtml(c.name)} · ${escHtml(t('courseProgressOf', st.done, st.cells))}</option>`
+      }).join('')}
+    </select>
+  </div>`
+
+  const shown = cdashSel ? classes.filter(c => c.id === cdashSel) : classes
+  const matrices = shown.map(c => {
     const members = c.members || []
     const assigns = (c.assignments || []).filter(a => a.status !== 'draft')   // 草稿不入矩阵
     if (!assigns.length) return ''
@@ -2874,10 +2890,14 @@ async function renderCourseDashboard() {
       return `<td class="dash-cell ${courseWrongRateCls(wr.rate)}">${txt}<span style="font-size:10px;color:#9ca3af"> ${wr.wrong}/${wr.total}</span></td>`
     }).join('')
 
+    // v177：选中单个班级时，标题下方补上 KPI 卡（完成率环 + 均分 + 分类型完成度），
+    //   与数据看板「线下课」标签同一套组件，少翻表格也能看清班级整体进度。
+    const kpi = cdashSel ? _courseKpiCard(c) : ''
     return `<div class="card" style="margin-bottom:16px;padding:0;overflow-x:auto">
       <div style="padding:12px 16px;border-bottom:1px solid #e5e7eb"><strong>🎓 ${escHtml(c.name)}</strong>
         <span style="color:#6b7280;font-size:13px;margin-left:8px">👥 ${members.length}${t('courseMembersUnit')} · 📋 ${assigns.length}${t('courseAssignUnit')}</span>
       </div>
+      ${kpi}
       <!-- width:auto + min-width:100%：列宽由内容/最小宽度决定不被压缩，超出容器时卡片横向滚动 -->
       <table class="admin-table dash-table" style="width:auto;min-width:100%">
         <thead><tr><th class="dash-student-th" style="min-width:130px">${t('courseMatrixStudent')}</th>${headerCells}</tr></thead>
@@ -2886,6 +2906,41 @@ async function renderCourseDashboard() {
       </table>
     </div>`
   }).join('')
+
+  // v177：空态兜底 —— 有班级但全都没任务时不至于渲染出一根孤零零的下拉条
+  //   （无班级的情形已在上方 return 掉，那条走的是「无下拉、只给提示卡」的旧形态）
+  const body = matrices || `<div class="card" style="text-align:center;padding:30px;color:#9ca3af">${t('courseDashNoData')}</div>`
+  return `<div id="cdashBox">${selHtml}${body}</div>`
+}
+
+async function renderCourseDashboard() {
+  const el = document.getElementById('page-course')
+  const classes = courseState.doc.classes || []
+  const infoMap = await courseUserInfoMap()
+  // v177：缓存供下拉局部重渲染使用
+  cdashInfoCache = infoMap
+
+  // 汇总
+  let totalStudents = 0, totalAssigns = 0, totalDone = 0, allScores = []
+  const studentSet = new Set()
+  classes.forEach(c => {
+    (c.members || []).forEach(m => studentSet.add(m))
+    const assigns = (c.assignments || []).filter(a => a.status !== 'draft')   // 草稿不计入看板
+    totalAssigns += assigns.length
+    assigns.forEach(a => {
+      const results = a.results || {}
+      ;(c.members || []).forEach(m => {
+        if (results[m]) {
+          totalDone++
+          // 视频 / 线下课无分数，不计入均分
+          if (a.type !== 'video' && a.type !== 'offline') allScores.push(results[m].score || 0)
+        }
+      })
+    })
+  })
+  totalStudents = studentSet.size
+  const completionRate = totalStudents * totalAssigns > 0 ? Math.round(totalDone / (totalStudents * totalAssigns) * 100) : 0
+  const avgScore = allScores.length ? Math.round(allScores.reduce((s, x) => s + x, 0) / allScores.length) : 0
 
   el.innerHTML = `
     <div class="course-back"><a onclick="courseBackAdmin()">← ${t('courseBackAdmin')}</a></div>
@@ -2899,7 +2954,7 @@ async function renderCourseDashboard() {
       <div class="dash-stat"><div class="dash-val">${completionRate}%</div><div class="dash-lbl">${t('courseDashCompletion')}</div></div>
       <div class="dash-stat"><div class="dash-val">${avgScore}${LANG === 'en' ? '' : '分'}</div><div class="dash-lbl">${t('courseDashAvgScore')}</div></div>
     </div>
-    <div style="margin-top:20px">${matrices || `<div class="card" style="text-align:center;padding:30px;color:#9ca3af">${t('courseDashNoData')}</div>`}</div>
+    <div style="margin-top:20px">${courseDashMatrices(courseState.doc, infoMap)}</div>
     <p class="form-hint" style="margin-top:12px">${t('courseAdminHint')}</p>`
 }
 

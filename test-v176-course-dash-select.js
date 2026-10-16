@@ -238,8 +238,13 @@ function mkDoc() {
     !/function _courseMatrices[\s\S]{0,3000}?return classes\.map/.test(codeOnly(APP)))
   assert('★ 未引入第二个班级下拉类名（courseClassSel/dashClassSel 均不存在）',
     !codeOnly(APP).includes('courseClassSel') && !codeOnly(APP).includes('dashClassSel'))
-  assert('★ course-app.js 的成绩看板未被动过（本版只改 app.js 主看板）',
-    !codeOnly(COURSE_APP).includes('dcs-sel') && !codeOnly(COURSE_APP).includes('dashCourseSel'))
+  // ★ v177 已推翻本条的原始形态：v176 当时「只改 app.js 主看板」，但 v177 按用户要求把同一套
+  //   下拉 + KPI 卡也搬到了 course-app.js 的成绩看板。按项目铁律（改口径后旧断言必须翻成**反证**
+  //   而非删掉），这里改为锁定「v176 在这边**没有**留下的东西」——即两套状态必须仍然隔离。
+  assert('★ course-app.js 未引入 v176 的 dashCourseSel（两页状态隔离；v177 用的是 cdashSel）',
+    !codeOnly(COURSE_APP).includes('dashCourseSel'))
+  assert('★ course-app.js 未调用 v176 的 dashCoursePick（各自独立回调）',
+    !codeOnly(COURSE_APP).includes('dashCoursePick'))
 
   console.log('\n' + '='.repeat(60))
   console.log('PASS ' + pass + ' / FAIL ' + fail)

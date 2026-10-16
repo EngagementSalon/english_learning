@@ -609,11 +609,16 @@ group('组八：源码级护栏')
     renderFn.indexOf('${chLevelCardHtml()}') >= 0,
     'grabFn len=' + renderFn.length)
 
-  // 只读存档、不写云端：等级不得进 chy 事件（否则看板口径被污染）
+  // 只读存档、不写云端：等级不得混进 chy 事件的**计分字段**
   const reportFn = codeOnly(grabFn(CH, 'chRecordStage'))
-  assert('★★ 等级不混进云端上报（reportChallengeStage 仍是原 7 参）',
+  assert('★★ 等级不混进云端上报（reportChallengeStage 仍是原 7 参，v166 也未改动）',
     reportFn.indexOf('Store.reportChallengeStage(chs.day, chs.si, chs.kind, correct, total, usedSec, chCurrentRound())') >= 0)
-  assert('★★ 源码里没有「把 lv 塞进 chy」的写法', CH.indexOf('lv: ') < 0 || CH.indexOf("ty: 'chy'") < 0)
+  // ★ v166 口径更新：等级改为走**独立的 chlevel 事件**（Store.reportChallengeLevel），
+  //   不再从 chRecordStage 里传。原断言「源码里没有把 lv 塞进 chy」已随 v166 变更 ——
+  //   现在 chy 事件里会带一个 lv 快照字段（cloud-store 侧），那是**历史轨迹**，不是计分依据。
+  //   这里改为锁新契约：chRecordStage 里不得出现任何 chy 事件的构造（ty: 'chy'）。
+  assert('★★ chRecordStage 内不直接构造 chy 事件（统一走 Store.reportChallengeStage）',
+    reportFn.indexOf("ty: 'chy'") < 0)
 
   // 计数类断言一律 codeOnly（本项目六连撞）
   // ★ 期望值必须**实测回填**：定义 1 处 + chRecordStage 内调用 1 处 = 恰好 2 处。

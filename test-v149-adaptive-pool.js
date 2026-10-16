@@ -504,12 +504,27 @@ group('组十一：i18n 新增键')
   assert('中英键数相等（无单侧漏写）', Object.keys(L.zh).length === Object.keys(L.en).length,
     Object.keys(L.zh).length + ' vs ' + Object.keys(L.en).length)
 
-  // challenge.js 里用到的所有 t('key') 都必须在两侧存在（防新增键漏配）
-  const used = [...new Set([...CH.matchAll(/t\('([A-Za-z0-9_]+)'/g)].map(m => m[1]))]
+  // challenge.js 里用到的所有**静态** t('key') 都必须在两侧存在（防新增键漏配）
+  //   ★ v165 起必须排除动态拼接（`t('chLevelName' + k)`）——正则会截到半截键名 'chLevelName'，
+  //     它本来就不该在词典里（词典里是 chLevelName1..4）→ 会报假「缺失」。
+  const used = [...new Set(
+    [...CH.matchAll(/t\('([A-Za-z0-9_]+)'(\s*\+)?/g)]
+      .filter(m => !m[2])            // 后面紧跟 + 的是动态拼接，跳过
+      .map(m => m[1])
+  )]
   const missZh = used.filter(k => !(k in L.zh))
   const missEn = used.filter(k => !(k in L.en))
-  assert('challenge.js 用到的键 zh 侧齐全', missZh.length === 0, missZh.join(','))
-  assert('challenge.js 用到的键 en 侧齐全', missEn.length === 0, missEn.join(','))
+  assert('challenge.js 用到的静态键 zh 侧齐全（n=' + used.length + '）', missZh.length === 0, missZh.join(','))
+  assert('challenge.js 用到的静态键 en 侧齐全', missEn.length === 0, missEn.join(','))
+  // ★ 动态拼接键必须能被「展开」后仍是齐全的（v165：chLevelName1..4）
+  const dynBase = [...new Set(
+    [...CH.matchAll(/t\('([A-Za-z0-9_]+)'\s*\+\s*[A-Za-z_$]/g)].map(m => m[1])
+  )]
+  const dynFull = []
+  dynBase.forEach(b => { if (b === 'chLevelName') [1, 2, 3, 4].forEach(i => dynFull.push(b + i)) })
+  const dynMiss = dynFull.filter(k => !(k in L.zh) || !(k in L.en))
+  assert('★ 动态拼接键展开后中英齐全（' + (dynBase.join(',') || '无') + ' → ' + dynFull.length + ' 个）',
+    dynMiss.length === 0, dynMiss.join(','))
 }
 
 // ================= 组十二：版本号（弹性化，不写死） =================
