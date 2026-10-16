@@ -303,7 +303,7 @@ function makeLvSandbox(opts) {
   //   （本套件第一版「本机无等级 + 云端 L3 → 吸收」三条假红的真因，与上面同一类坑）。
   vm.runInContext(extractFn(CH, 'challengeUid'), sb)
   // ★ v166 新增 chLevelFloor，且 chLevelOf 依赖它 → 必须注入（漏注入会走 typeof 守卫 → 静默回落 1）
-  ;['chPlanDayAvg', 'chLevelBench', 'chLevelAcc', 'chLevelFloor', 'chLevelOf', 'chLevel'].forEach(n => {
+  ;['chPlanDayAvg', 'chLevelMaxDay', 'chLevelTierOfBench', 'chLevelBench', 'chLevelAcc', 'chLevelFloor', 'chLevelOf', 'chLevelCapOfBench', 'chLevel'].forEach(n => {
     vm.runInContext(extractFn(CH, n), sb)
   })
   // v166：云端等级回放 + 上报（chLevelApply 里会调 Store.reportChallengeLevel）

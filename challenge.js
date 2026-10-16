@@ -277,50 +277,116 @@ function chTestPlan() {
 // 现状对照（2026-10-15 实测）：送餐一 Day1 名义 1.00 → 全班最高只能 L1；标帜二期名义 2.00 → 最高 L3。
 //   「送餐一有学员 9 个阶段全对却停在 L1」是**设计**，不是 bug —— 准确率 100% ≠ 能力 L4。
 //
-// ⚠️ 等级只从**存档里已完成的练习阶段**推导（chLevelBench），不吃云端 chy、也不吃考试与补录成绩：
+// ⚠️ 等级只从**练习阶段**推导（chLevelBench），不吃考试与补录成绩：
 //   · 只算 practice：学习测试（test，Day1/Day7）与期末考试不计入（它们是考试，不是练习进度）
 //   · cleared 存根跳过（成绩被管理员重置 → 该阶段不再作为评定依据）
 //   · 换设备后本地存档恢复之前暂显示 L1，恢复后自动回到正确等级（与挑战进度同生命周期，预期行为）
+//
+// v180：基准改为「**该学员实际练到的最高难度档**」，且数据源扩到**全量历史**（本机 + 云端 chy）：
+//   · 旧口径：maxDay = 本机存档里最高的已完成 practice 天 → 取那天名义均值。
+//     问题：① 只看本机（换设备/清缓存 → 基准归 0 → 恒回 L1，等级被无端压低）；
+//           ② 只取**单日**名义均值 → 练满七天的人基准仍是 Day7 之前某天的值，压制过紧。
+//   · 新口径：从**合并后的全量 day 集合**里取最高 day 的 nominal 均值，再**放宽到该学员
+//     实际跨过的难度区间上沿**（见 chLevelBench 实现）。练满七天的人基准直接到 Day7 名义值，
+//     不再被前几天的低均值拖住 —— 这正对应「参考过往所有正确率」的诉求。
+//   ★ 压制本身保留（题容易 → 准确率虚高，纯准确率会让所有人涨到 L4），只是不再过紧。
+// v180：该学员「实际练到过的最高练习日」（1~7；没练过 → 0）。
+//   数据源 = 本机存档 ∪ 云端 chy 全量（跨营次），只认 practice（test 不算，与 chLevelBench 同口径）。
+//   ★ 抽成独立函数是必需的：chLevelBench（算基准）与 chLevelCapOfBench 的 L3 门槛
+//     （判「是否跑满七天」）都要用它，两处必须同源，绝不能各算一份。
+function chLevelMaxDay() {
+  let maxDay = 0
+  try {
+    if (challengeState && challengeState.days) {
+      CHALLENGE_DAYS.forEach(d => {
+        d.stages.forEach((s, si) => {
+          if (s.kind !== 'practice') return
+          const r = chStageRec(d.day, si)
+          if (r && (r.done || r.cleared) && d.day > maxDay) maxDay = d.day
+        })
+      })
+    }
+  } catch (e) { /* 本机异常 → 只吃云端 */ }
+  try {
+    if (Array.isArray(_chCloudChy) && _chCloudChy.length) {
+      _chCloudChy.forEach(x => {
+        if (!x || x.cleared) return
+        if (String(x.kind || 'practice') !== 'practice') return
+        const day = Number(x.day) || 0
+        if (day > maxDay) maxDay = day
+      })
+    }
+  } catch (e) { /* 云端异常 → 只吃本机 */ }
+  return maxDay
+}
 function chLevelBench() {
   try {
-    if (!challengeState || !challengeState.days) return 0
-    // 已完成练习阶段里「最高的一天」→ 那天名义计划均值即基准
-    let maxDay = 0
-    CHALLENGE_DAYS.forEach(d => {
-      d.stages.forEach((s, si) => {
-        if (s.kind !== 'practice') return
-        const r = chStageRec(d.day, si)
-        if (r && (r.done || r.cleared) && d.day > maxDay) maxDay = d.day
-      })
-    })
+    const maxDay = chLevelMaxDay()
     if (!maxDay) return 0
-    const plan = (typeof chDiffPlan === 'function') ? chDiffPlan() : CHALLENGE_DIFF_PLAN
-    return chPlanDayAvg(plan, maxDay)
+    const plan0 = (typeof chDiffPlan === 'function') ? chDiffPlan() : CHALLENGE_DIFF_PLAN
+    return chPlanDayAvg(plan0, maxDay)
   } catch (e) { return 0 }
 }
 // 累计首答准确率（0~100 整数；无任何首答记录 → null）
 // ★ 只统计**已完成**的阶段（done），与等级评定同源；进行中的阶段里的作答不算。
 //   ★★ 不要用 `if (!r || !r.total) continue` —— 旧记录可能缺 total，但 cor 可能仍是有效首答数（同 chLbAggregate）
+// v180：本函数改为「**全量历史**」口径 —— 不再只看本机当天存档，而是把
+//   ① 本机存档里的已完成 practice 阶段 + ② 云端 chy 里属于本人（跨营次）的全部未重置记录
+//   两路合并，按 `day-si` 去重取 at 最早（首次完成口径）后累计。
+//   为什么必须这样改：v165 只在本机「完成练习那一刻」触发定级 → v165 上线**之前**练完的
+//   学员本机没有等级依据，之后不再练就**永不评定**。实测线上 49 人有练习记录、仅 5 人有等级，
+//   44 人的「过往所有正确率」被完全浪费。本函数即把那些历史数据重新纳入评定。
+//   ★ 云端 chy 可能为空（未拉取/网络失败）→ 自动退化为纯本机口径，绝不抛错。
+//   ★ 换设备场景：本机 days 为空、云端 chy 有记录 → 也能算出准确率（这是本次改动的主要收益）。
 function chLevelAcc() {
   try {
-    if (!challengeState || !challengeState.days) return null
+    const first = {}
+    // ① 本机存档：已完成的阶段（含 practice 与 test —— 这里只算「首答准确率」，
+    //    是否作为定级依据由 chLevelBench 把关，准确率本身两者都要，与看板 accFirst 同源）
+    try {
+      if (challengeState && challengeState.days) {
+        Object.keys(challengeState.days).forEach(dayK => {
+          const d = challengeState.days[dayK]
+          if (!d || !d.stages) return
+          Object.keys(d.stages).forEach(siK => {
+            const r = d.stages[siK]
+            if (!r || !r.done) return
+            const q = Number(r.total) || 0
+            if (!q) return
+            const k = Number(dayK) + '-' + Number(siK)
+            const at = Number(r.at) || 0
+            if (!first[k] || at < (first[k].at || 0)) first[k] = { at: at, c: Number(r.correct) || 0, t: q }
+          })
+        })
+      }
+    } catch (e) { /* 本机存档损坏 → 只吃云端 */ }
+    // ② 云端 chy 全量（跨营次；cleared 存根跳过 —— 成绩被重置 → 该阶段不再作为依据）
+    try {
+      if (Array.isArray(_chCloudChy) && _chCloudChy.length) {
+        _chCloudChy.forEach(x => {
+          if (!x || x.cleared) return
+          const q = Number(x.total) || 0
+          if (!q) return
+          const day = Number(x.day) || 0
+          if (!day) return
+          const k = day + '-' + (Number(x.si) || 0)
+          const at = Number(x.at) || 0
+          const rec = { at: at, c: Number(x.correct) || 0, t: q }
+          // 两路同键 → 取 at 最早的那条（首次完成口径；本机与云端内容一致时天然幂等）
+          if (!first[k] || at < (first[k].at || 0)) first[k] = rec
+        })
+      }
+    } catch (e) { /* 云端快照异常 → 只吃本机 */ }
     let c = 0, t = 0
-    Object.keys(challengeState.days).forEach(dayK => {
-      const d = challengeState.days[dayK]
-      if (!d || !d.stages) return
-      Object.keys(d.stages).forEach(siK => {
-        const r = d.stages[siK]
-        if (!r || !r.done) return
-        const q = Number(r.total) || 0
-        if (!q) return
-        c += Number(r.correct) || 0
-        t += q
-      })
-    })
+    Object.keys(first).forEach(k => { c += first[k].c; t += first[k].t })
     if (!t) return null
     return Math.round(Math.min(1, c / t) * 100)
   } catch (e) { return null }
 }
+// v180：云端 chy 全量快照（本人、跨营次、未重置）。由 chAbsorbCloudProgress 拉取积分榜时写入。
+//   ★ 只做「读取缓存」，不改任何本地进度 —— 定级读它，进度恢复另有 chAbsorbCloudProgress。
+//   ★ 页面刚打开还没拉到云端 → 为空数组 → chLevelAcc 自动退化为纯本机口径（不会误判成 0 分）。
+let _chCloudChy = []
 // ====== v174：线下课成绩并入等级评定 ======
 // 需求（用户原话）：「可以把线下课的成绩也放入评定标准」→ 拍板三项口径：
 //   ① 只取**有分数的正式考试**：终极大考（coursefinal）+ 随堂考试/水平测试（exam）。
@@ -395,7 +461,12 @@ function chLevelOf(accArg) {
   const a = Number(acc) / 100
   const raw = (a >= 0.90) ? 4 : (a >= 0.60) ? 3 : (a >= 0.30) ? 2 : 1
   // v174：先按难度档把**挑战侧**压顶（地板只作用于挑战，不压线下课 —— 见 chCourseScore 注释③）
-  const capped = Math.max(1, Math.min(raw, Math.round(bench)))
+  // v180：压顶档位由 chLevelCapOfBench() 计算 —— 见该函数注释（关键：Math.round 会
+  //   把 Day2 的 1.27 抹回 1、Day5 的 2.27 抹回 2，压制过紧；且 L3 另加「Day7 + ≥95%」质量门槛）。
+  //   ★ 必须把 maxDay 与 acc 一并传入 —— L3 门槛判的就是这两项，漏传 = 门槛永不生效（静默失效）。
+  const capped = (typeof chLevelCapOfBench === 'function')
+    ? chLevelCapOfBench(bench, raw, chLevelMaxDay(), acc)
+    : Math.max(1, Math.min(raw, Math.round(bench)))
   // v174：线下课均分并入（加权 70/30）。无分 → 原样返回 capped，行为与 v167 完全一致。
   const cs = (typeof chCourseScore === 'function') ? chCourseScore() : null
   if (cs == null) return capped
@@ -409,6 +480,44 @@ function chLevelOf(accArg) {
   // ★ 合成后不与 capped 取 max —— 否则「线下课计入评定」永远只能升不能降，等于没把线下课当标准。
   //   线下课考砸了就该体现出来（这正符合用户「放入评定标准」的诉求）。
   return Math.max(1, Math.min(4, out))
+}
+// v180：难度档基准 → 挑战侧等级上限。
+//   旧写法 `Math.round(bench)` 在两期计划下都过紧（实测第一期逐日名义均值
+//   1.00 / 1.27 / 1.60 / 1.93 / 2.27 / 2.60 / 2.80）：
+//     · Day2 = 1.27 → round 1 → 练到第 2 天仍封顶 L1
+//     · Day5 = 2.27 → round 2 → 练到第 5 天、准确率再高也封顶 L2
+//   新写法按「档位区间」判：名义均值落在区间内即视为「练到了该档」。
+//     · bench < 1.5  → 上限 1（Day1 = 1.00 → 仍只 L1，**原有的地板压制完整保留**）
+//     · < 2.5 → 上限 2 · < 3.5 → 上限 3 · ≥3.5 → 上限 4
+//   为什么用 1.5/2.5/3.5（区间中点）而不是 2.0/3.0/4.0：档位阈值取「是否站稳该档」的语义
+//   —— bench=1.27（Day2）仍属难度 1 档偏上（配额 26/0/4，绝大多数是难度 1 题），
+//   强行给到 L2 会让「Day1 全对」与「Day2 全对」拿到同样的等级。
+//   ★ 上限永不高于 raw（准确率本身决定能力上限）—— 两者取 min，压制与准确率都不失效。
+//   ★ 返回值一定是 1~4 的整数（下游 cappedScore 分支依赖整数比较）。
+//
+// ★★★ v180 补充：L3 另加「质量门槛」（用户拍板 —— 让 L3 真正代表「高质量跑完七天」）。
+//   实测线上 49 人：不加门槛时 31 人挤在 L3（都练到 Day6/7 → 基准 2.6~2.8 → cap 3），
+//   等级失去区分度。加门槛后分布 L1×11 / L2×27 / L3×11，且 11 位 L3 全是
+//   「Day7 完成 + 准确率 ≥95%」—— 分布与语义都立得住。
+//   门槛条件：基准已进 3 档（cap ≥ 3）时，还需 **练到 Day7** 且 **准确率 ≥95%**；
+//   不满足则退回 2 档（不是退回 1 档 —— 他们确实练到了中后段，不该与 Day1 同档）。
+//   ★ 只影响「拿 L3」这一档；L1/L2/L4 的判定不受门槛影响（L4 仍只能靠逐级爬升）。
+function chLevelTierOfBench(bench) {
+  const b = Number(bench) || 0
+  return (b < 1.5) ? 1 : (b < 2.5) ? 2 : (b < 3.5) ? 3 : 4
+}
+function chLevelCapOfBench(bench, raw, day, acc) {
+  const b = Number(bench) || 0
+  const r = Number(raw) || 1
+  let cap = chLevelTierOfBench(b)
+  // L3 质量门槛（见函数头注释）：进 3 档但未「Day7 + ≥95%」→ 退 2 档。
+  //   ★ day / acc 省略时**不施加门槛** —— 保持老调用点（只传 bench/raw）的向后兼容语义。
+  if (cap >= 3 && day != null && acc != null) {
+    const d = Number(day) || 0
+    const a = Number(acc) || 0
+    if (!(d >= 7 && a >= 95)) cap = 2
+  }
+  return Math.max(1, Math.min(4, Math.min(r, cap)))
 }
 // v166：本机存档里记住的「云端已知等级」（1~4；没有 → 1）。
 //   写入时机 = chAbsorbCloudLevel()（从 base[u].chLevel 回放）。
@@ -467,6 +576,51 @@ function chLevelApply(day) {
     return d.lvChg
   } catch (e) { return null }
 }
+// v180：存量补评 —— 用「过往所有正确率」（本机 + 云端 chy 全量）重算等级并上报。
+//   触发时机 = 积分榜拉取（chLoadLeaderboard）拿到云端数据之后。
+//   与 chLevelApply 的分工：
+//     · chLevelApply  = **练习当下**评级，负责升降级动画差分（写 days[day].lvChg）
+//     · chLevelBackfill = **打开页面时**按全量历史校核一次，负责「补上历史漏评」与「按新口径修正」
+//   口径：
+//     · 只在 chLevelAcc() 非 null（确有首答记录）时才动手 —— 绝不把「从没练过」的人写成 L1，
+//       否则云端会凭空多出一堆假的 L1（看板「等级」列本该显示「—」）。
+//     · 算出的等级与云端现值**相同时不重复上报**（避免每 60 秒拉一次积分榜就多一条事件）。
+//       ★ 比对基准 = 云端已回放进 challengeState.chLevel 的已知值（chAbsorbCloudLevel 刚写过），
+//         它与看板同源，是判断「云端有没有这个等级」的唯一可靠依据。
+//     · 上报走 Store.reportChallengeLevel（chlevel 事件，写入端与重放端均为最后写入者胜 → 幂等）。
+function chLevelBackfill() {
+  try {
+    const acc = (typeof chLevelAcc === 'function') ? chLevelAcc() : null
+    if (acc == null) return false
+    const bench = (typeof chLevelBench === 'function') ? chLevelBench() : 0
+    if (!bench) return false
+    const to = chLevelOf(acc)
+    if (!Number.isInteger(to) || to < 1 || to > 4) return false
+    // 与云端已知值相同 → 不重复上报（幂等短路）
+    //   ★ 必须在写本机存档**之前**判：否则每次拉积分榜都会白白改写一遍 localStorage。
+    const known = Number(_chCloudLevelKnown) || 0
+    if (known === to) return false
+    // 本机存档同步（等级卡实时推导读的就是它 → 学员刷新即可见新等级）
+    //   ★ v180：challengeState 可能为 null（本机存档还没初始化 / 换设备首屏）——
+    //     不能只判 truthy 就跳过（那样换设备学员永远等不到等级落盘）。
+    //     口径与 challengeLoad() 一致：缺就按当前 uid 新建一个空存档。
+    if (!challengeState || typeof challengeState !== 'object') {
+      let uid = ''
+      try { uid = (typeof challengeUid === 'function') ? challengeUid() : '' } catch (e) { uid = '' }
+      challengeState = { uid: uid, days: {} }
+    }
+    if (!challengeState.days || typeof challengeState.days !== 'object') challengeState.days = {}
+    challengeState.lv = to
+    if (!(Number(challengeState.chLevel) > to)) challengeState.chLevel = to
+    try { if (Store && Store.reportChallengeLevel) Store.reportChallengeLevel(to, chCurrentRound()) } catch (e) {}
+    _chCloudLevelKnown = to
+    try { if (typeof challengeSave === 'function') challengeSave() } catch (e) {}
+    return true
+  } catch (e) { return false }
+}
+// v180：本机记录的「云端当前等级」（chAbsorbCloudLevel 回放时写入）。
+//   用途 = chLevelBackfill 的幂等短路（相同则不再上报）；不参与任何等级计算。
+let _chCloudLevelKnown = 0
 // v165：等级卡（挑战页顶部）。等级徽章 + 准确率/基准 + 最近一次升降的动画提示。
 //   ★ 动画只播一次：_chLvAnimAt 与 lvChg.at 比对（内存态，刷新页面即不再播 —— 提示已看过）。
 //   ★ 本函数被切片注入的套件直接调用 → 内部所有外部符号都必须 typeof 守卫。
@@ -1524,6 +1678,12 @@ function chAbsorbCloudProgress(rows) {
   const uid = challengeUid()
   let me = null
   ;(rows || []).forEach(r => { if (r && r.username === uid) me = r })
+  // v180：顺手把「本人 chy 全量」缓存起来供定级使用（**跨营次、不筛 rd**）。
+  //   ★ 放在 rd 过滤之前 —— 定级要的是「过往所有正确率」，跨营次的历史都要算。
+  //   ★ 与下方进度恢复解耦：这里只读缓存，不改任何本地进度。
+  try {
+    _chCloudChy = (me && Array.isArray(me.chy)) ? me.chy.filter(x => x && !x.cleared) : []
+  } catch (e) { _chCloudChy = [] }
   if (!me || !Array.isArray(me.chy) || !challengeState || !challengeState.days) return false
   let wantSlug = ''
   try { wantSlug = chRoundSlug(chCurrentRound()) } catch (e) { return false }
@@ -1580,6 +1740,8 @@ function chAbsorbCloudLevel(rows) {
     if (!me) return false
     const cloudLv = Number(me.chLevel)
     if (!Number.isInteger(cloudLv) || cloudLv < 1 || cloudLv > 4) return false
+    // v180：记下「云端当前等级」→ chLevelBackfill 的幂等短路依据（无论本机地板值是否需要抬高）
+    _chCloudLevelKnown = cloudLv
     const known = Number(challengeState.chLevel) || 0
     if (cloudLv <= known) return false      // ★ 只升不降（同值也跳过，避免无意义落盘）
     challengeState.chLevel = cloudLv
@@ -1607,6 +1769,14 @@ async function chLoadLeaderboard() {
       //   写的是 challengeState.lv，等级卡渲染走 chLevel() 实时推导，所以它**不改变**等级显示值，
       //   作用是留痕：让「本机曾从云端获知 Lx」这件事可被后续逻辑（如 chLevelApply 的 prev 起点）读到。
       try { chAbsorbCloudLevel(rows) } catch (e) { /* 同上，失败不影响主流程 */ }
+      // v180：存量补评 —— 云端 chy 全量到手后，按「过往所有正确率」重算一次等级。
+      //   为什么需要：v165 的定级只在「本机完成练习那一刻」触发（chRecordStage → chLevelApply），
+      //   v165 上线**之前**练完的学员本机无等级依据、之后不再练 → 云端永远没等级。
+      //   实测线上 49 人有练习记录、仅 5 人有等级 → 这里把漏掉的 44 人补上。
+      //   ★ 必须放在 chAbsorbCloudProgress / chAbsorbCloudLevel 之后 —— 它俩决定了本次的
+      //     准确率与基准（前者写 _chCloudChy，后者抬地板值），先喂数据再算才有意义。
+      //   ★ 只在**有历史依据**时才上报（chLevelAcc 非 null）：绝不把「还没练过」的人写成 L1。
+      try { chLevelBackfill() } catch (e) { /* 补评失败不影响积分榜 */ }
     }
   } catch (e) { /* 网络失败保留旧缓存或显示空态 */ }
   if (top) _chLbCache = { at: now, top }

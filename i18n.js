@@ -783,6 +783,12 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     // 用户管理/数据看板
     dashTotalUsers: '总用户数', dashStudents: '学员', dashPlaced: '已评定等级',
     dashTotalPractice: '练习总次数', dashTotalExams: '考试总次数', dashExamAvg: '考试平均分',
+    // v180：按历史数据重算等级（按钮 + 提示 + 运行中 + 结果）
+    dashLvRebuildBtn: '重算历史等级',
+    dashLvRebuildHint: '按每位学员「过往全部练习的正确率」重新评定等级（含换过设备、清过缓存的历史数据）。已在更高等级的人不会被降级。',
+    dashLvRebuildRunning: '重算中…',
+    dashLvRebuildDone: (n, s) => `已按历史数据重算等级：更新 ${n} 人，跳过 ${s} 人（无练习记录 / 已达标）。`,
+    dashLvRebuildFail: '拉取云端数据失败，请稍后重试。',
     usersPageTitle: '账号管理',
     usersPageHint: '在此新建 / 重置密码 / 改名 / 删除学员账号；完整学习数据请查看「数据看板」页。',
     dashDetailTitle: '学员数据明细',
@@ -1820,6 +1826,12 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
 
     dashTotalUsers: 'Total Users', dashStudents: 'Students', dashPlaced: 'Level rated',
     dashTotalPractice: 'Total Practice', dashTotalExams: 'Total Exams', dashExamAvg: 'Avg Exam Score',
+    // v180：rebuild levels from history
+    dashLvRebuildBtn: 'Rebuild levels',
+    dashLvRebuildHint: 'Re-evaluate each student level from their full practice accuracy history (including data from other devices). Students already at a higher level are never downgraded.',
+    dashLvRebuildRunning: 'Rebuilding…',
+    dashLvRebuildDone: (n, s) => `Levels rebuilt from history: ${n} updated, ${s} skipped (no practice records / already higher).`,
+    dashLvRebuildFail: 'Failed to fetch cloud data. Please retry later.',
     usersPageTitle: 'Account Management',
     usersPageHint: 'Create / reset / rename / delete student accounts here. Full learning data is on the Dashboard page.',
     dashDetailTitle: 'Student Data Details',

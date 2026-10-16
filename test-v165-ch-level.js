@@ -157,9 +157,14 @@ function makeLvSandbox(opts) {
   ;['chStageRec', 'chStageCounted'].forEach(n => {
     vm.runInContext(extractFn(CH, n), sb)
   })
-  ;['chPlanDayAvg', 'chLevelBench', 'chLevelAcc', 'chLevelOf', 'chLevel', 'chLevelApply'].forEach(n => {
+  ;['chPlanDayAvg', 'chLevelMaxDay', 'chLevelTierOfBench', 'chLevelBench', 'chLevelAcc', 'chLevelOf', 'chLevelCapOfBench', 'chLevel', 'chLevelApply'].forEach(n => {
     vm.runInContext(extractFn(CH, n), sb)
   })
+  // v180：_chCloudChy 是模块级 `let` —— 沙箱里必须用 runInContext 赋初值
+  //   （不能 `sb._chCloudChy = []`：`let` 在脚本词法作用域，赋值只会新建沙箱同名属性，
+  //     真变量不动 → chLevelBench/chLevelAcc 读到 undefined，走 typeof/Array.isArray 分支仍安全，
+  //     但语义上不干净。本项目铁律：`let` 一律用 runInContext 赋值。）
+  vm.runInContext('_chCloudChy = []\n', sb)
   // 存档装填（chLevel* 直接读 challengeState）
   // ★ 走 JSON 往返，保证 days 的键是字符串（与线上 localStorage 读回后一致）
   vm.runInContext('let challengeState = ' + stateJson, sb)
@@ -223,7 +228,7 @@ group('组一：chPlanDayAvg —— 每日名义计划难度均值')
 //     第一期  [1,1,2,2,2,3,3]   进阶期 [2,2,2,3,3,3,3]
 group('组二：★ 准确率天花板（等级被难度基准压住）')
 {
-  // Day1-3 全对：准确率 100%，但 Day3 名义 1.60 → round = 2 → 最高只能 L2
+  // Day1-3 全对：准确率 100%，但 Day3 名义 1.60 → v180 档位区间（<2.5 → cap 2）→ 最高只能 L2
   const sb = makeLvSandbox({
     days: { 1: { stages: { 0: stg(20, 20), 1: stg(10, 10) } }, 2: { stages: { 0: stg(30, 30) } }, 3: { stages: { 0: stg(30, 30) } } },
   })
@@ -232,59 +237,83 @@ group('组二：★ 准确率天花板（等级被难度基准压住）')
   assert('  准确率确实是 100（排除「算错了准确率」的误判）', run(sb, 'chLevelAcc()') === 100, run(sb, 'chLevelAcc()'))
   assert('  基准 = 1.60', Math.abs(run(sb, 'chLevelBench()') - 1.60) < 1e-9, run(sb, 'chLevelBench()'))
 
-  // ★ Day1 单独完成：基准 1.00 → round = 1 → 全班最高只能 L1（这是「9 阶段全对还是 L1」的物理原因）
+  // ★ Day1 单独完成：基准 1.00 → cap 1 → 全班最高只能 L1（这是「9 阶段全对还是 L1」的物理原因）
   const sbD1 = makeLvSandbox({ days: { 1: { stages: { 0: stg(10, 10), 1: stg(10, 10) } } } })
   assert('★★ Day1 全对（100%）仍只评 L1 —— 基准 1.00 压死', run(sbD1, 'chLevel()') === 1, run(sbD1, 'chLevel()'))
 
-  // Day5（名义 2.27）+ 准确率 100% → L2（天花板 round(2.27) = 2）
+  // Day5（名义 2.27）+ 准确率 100% → L2（v180 档位区间：2.2667 < 2.5 → cap 2）
   const sb5 = makeLvSandbox({ days: { 5: { stages: { 0: stg(30, 30) } } } })
-  assert('★ Day5 全对 → L2（基准 2.27 → 天花板 2）', run(sb5, 'chLevel()') === 2, run(sb5, 'chLevel()'))
+  assert('★ Day5 全对 → L2（基准 2.2667 → 天花板 2）', run(sb5, 'chLevel()') === 2, run(sb5, 'chLevel()'))
 
-  // Day7（名义 2.80）+ 准确率 100% → L3（天花板 round(2.80) = 3）
+  // Day7（名义 2.80）+ 准确率 100% → L3（v180 档位区间：2.5 ≤ 2.80 < 3.5 → cap 3）
   const sb7 = makeLvSandbox({ days: { 7: { stages: { 0: stg(10, 10), 1: stg(20, 20) } } } })
   const l7 = run(sb7, 'chLevel()')
   assert('★ Day7 全对 → L3（基准 2.80 → 天花板 3；第一期永远到不了 L4）', l7 === 3, l7)
   assert('  —— 即「第一期跑满七天 + 全对」上限就是 L3，L4 只能靠进阶期/逐级爬升',
     run(sb7, 'chLevelBench()') >= 2.8)
 
-  // 进阶期 Day7（名义 3.00）+ 准确率 100% → L3（天花板 round(3.00) = 3；raw 4 仍被压到 3）
+  // 进阶期 Day7（名义 3.00）+ 准确率 100% → L3（v180 档位区间：2.5 ≤ 3.00 < 3.5 → cap 3；raw 4 被压）
   const sbH = makeLvSandbox({ hard: true, days: { 7: { stages: { 0: stg(10, 10), 1: stg(20, 20) } } } })
   assert('★ 进阶期 Day7 全对 → L3（基准 3.00 → 天花板 3，raw 4 仍被压）',
     run(sbH, 'chLevel()') === 3, run(sbH, 'chLevel()'))
 
-  // 天花板用 round 而非 floor：1.60 → 2（floor 会给 1）
+  // 天花板按「档位区间」判（v180）：1.60 与 2.27 都落在 [1.5, 2.5) → 都给 2；
+  //   而旧写法 Math.round 对 1.60 给 2、对 2.27 也给 2（此处恰好一致），
+  //   真正的差别在 Day2（1.2667）：round 给 1，区间给 1 —— 见下一条专门断言。
   const sbDay3 = makeLvSandbox({ days: { 3: { stages: { 0: stg(30, 30) } } } })
-  assert('  天花板 clamp 用 round 而非 floor（1.60 → 2、不是 1）',
+  assert('  天花板按档位区间判（1.60 与 2.27 同在 [1.5,2.5) → 都是 2）',
     run(sb5, 'chLevelOf(100)') === 2 && run(sbDay3, 'chLevelOf(100)') === 2,
     run(sb5, 'chLevelOf(100)') + '/' + run(sbDay3, 'chLevelOf(100)'))
 }
 
 // ================= 组三：准确率阈值查表 =================
-group('组三：准确率 → 等级查表（阈值 90/60/30）')
+group('组三：准确率 → 等级查表（阈值 90/60/30 + v180 的 L3 质量门槛）')
 {
-  // 基准给足（进阶期 Day7，round(3.00) = 3）→ 天花板 3，观察纯阈值行为
-  //   注：天花板 3 → raw 4（准确率 ≥90）会被压成 3，这是设计（L4 只能逐级爬升）
+  // ★★★ v180 语义变更：进 3 档（cap ≥ 3）**另需「Day7 完成 + 准确率 ≥95%」质量门槛**，
+  //   不满足则退 **2 档**（不是 1 档）。用户拍板原话：「L3 加准确率门槛」。
+  //   物理后果：本组沙箱都跑到了 Day7（maxDay = 7），所以 `day ≥ 7` 这一半恒成立，
+  //   观察的就是**准确率 95 这条线**；「只练到 Day6 不给 L3」另用专门沙箱验（见下）。
+  //   注意退 2 档不是「raw 降 1」：cap 3 被门槛打回 2 后，与 raw 取 min →
+  //   准确率 94/90/60/59/30 全部落在 L2（这正是设计：L3 必须「高质量跑满七天」）。
+  //
+  // 基准：进阶期 Day7 → bench 3.00 → 档位区间 [2.5,3.5) → cap 3
   const sb = makeLvSandbox({ hard: true, days: { 7: { stages: { 0: stg(10, 10) } } } })
   assert('★ 基准（进阶期 Day7）确为 3.00', Math.abs(run(sb, 'chLevelBench()') - 3) < 1e-9, run(sb, 'chLevelBench()'))
-  assert('准确率 100 → raw 4 → 被天花板压成 L3', lv(sb, 100) === 3, lv(sb, 100))
-  assert('准确率 90 → raw 4 → 仍被压成 L3（90 整算达标）', lv(sb, 90) === 3, lv(sb, 90))
-  assert('准确率 89 → raw 3 → L3', lv(sb, 89) === 3, lv(sb, 89))
-  assert('准确率 60 → raw 3 → L3（60 整算达标）', lv(sb, 60) === 3, lv(sb, 60))
-  assert('准确率 59 → raw 2 → L2', lv(sb, 59) === 2, lv(sb, 59))
-  assert('准确率 30 → raw 2 → L2（30 整算达标）', lv(sb, 30) === 2, lv(sb, 30))
-  assert('准确率 29 → raw 1 → L1', lv(sb, 29) === 1, lv(sb, 29))
+  assert('★ 最高已完成天数 = 7（门槛的 day 侧依据）', run(sb, 'chLevelMaxDay()') === 7, run(sb, 'chLevelMaxDay()'))
+  assert('★ 准确率 100 → raw 4 → 被 cap 3 压成 L3（且满门槛）', lv(sb, 100) === 3, lv(sb, 100))
+  assert('★ v180：准确率 95（门槛含等号）→ L3', lv(sb, 95) === 3, lv(sb, 95))
+  assert('★★ v180：准确率 94（差 1 分）→ 退 L2（质量门槛生效）', lv(sb, 94) === 2, lv(sb, 94))
+  assert('★★ v180：准确率 90 → raw 4 但未过 95 线 → L2（**不是** L3）', lv(sb, 90) === 2, lv(sb, 90))
+  assert('★★ v180：准确率 60/59 → 原 raw 3/2，被门槛统一拉到 L2', lv(sb, 60) === 2 && lv(sb, 59) === 2,
+    lv(sb, 60) + ',' + lv(sb, 59))
+  // 门槛只管「进 3 档」这一段：2 档以下（准确率 <60）的阈值行为**不受影响**
+  assert('★ 阈值 30/29 未被门槛波及：30 → L2，29 → L1', lv(sb, 30) === 2 && lv(sb, 29) === 1,
+    lv(sb, 30) + ',' + lv(sb, 29))
   assert('准确率 0 → L1', lv(sb, 0) === 1, lv(sb, 0))
 
-  // 门槛的「整数边界」必须吃在阈值那侧（>= 而不是 >）
-  //   注意此处天花板 = 3，所以 90 与 89 都被压到 3（看不出区别）；
-  //   要验证「含等号」必须把天花板放开 → 用第一期 Day7（天花板 3）比对 60/59 与 30/29 这两组。
-  const sb7d = makeLvSandbox({ days: { 7: { stages: { 0: stg(20, 20) } } } })  // 基准 2.80 → 天花板 3
-  assert('★ 阈值边界含等号：60 → L3，59 → L2', lv(sb7d, 60) === 3 && lv(sb7d, 59) === 2,
-    lv(sb7d, 60) + ',' + lv(sb7d, 59))
-  assert('★ 阈值边界含等号：30 → L2，29 → L1', lv(sb7d, 30) === 2 && lv(sb7d, 29) === 1,
-    lv(sb7d, 30) + ',' + lv(sb7d, 29))
-  assert('★ 阈值边界含等号：90 → raw 4（被天花板 3 压成 3），89 → 3 —— 等号侧不降级',
-    lv(sb7d, 90) === 3 && lv(sb7d, 89) === 3, lv(sb7d, 90) + ',' + lv(sb7d, 89))
+  // 门槛的「整数边界」必须吃在阈值那侧（>= 而不是 >）：95 给 L3、94 不给
+  // ★ 用第一期 Day7 再验一遍（bench 2.80 也落 [2.5,3.5) → cap 3，与进阶期同档）
+  const sb7d = makeLvSandbox({ days: { 7: { stages: { 0: stg(20, 20) } } } })  // 基准 2.80 → cap 3
+  assert('★ 第一期 Day7 也到 3 档（bench 2.80 ∈ [2.5,3.5)）', run(sb7d, 'chLevelTierOfBench(chLevelBench())') === 3,
+    run(sb7d, 'chLevelTierOfBench(chLevelBench())'))
+  assert('★ v180 门槛边界含等号：95 → L3，94 → L2', lv(sb7d, 95) === 3 && lv(sb7d, 94) === 2,
+    lv(sb7d, 95) + ',' + lv(sb7d, 94))
+  assert('★ v180 门槛边界：100 → L3，96 → L3（95 以上都过线）',
+    lv(sb7d, 100) === 3 && lv(sb7d, 96) === 3, lv(sb7d, 100) + ',' + lv(sb7d, 96))
+
+  // ★★★ v180「必须跑满七天」的另一半：准确率 100% 但只练到 Day6 → 不给 L3
+  const sb6 = makeLvSandbox({ hard: true, days: { 6: { stages: { 0: stg(10, 10) } } } })
+  assert('★ Day6 的 bench = 2.70，仍在 3 档区间（cap 3）', Math.abs(run(sb6, 'chLevelBench()') - 2.7) < 1e-9,
+    run(sb6, 'chLevelBench()'))
+  assert('★ 最高已完成天数 = 6', run(sb6, 'chLevelMaxDay()') === 6, run(sb6, 'chLevelMaxDay()'))
+  assert('★★★ v180：准确率 100% 但只练到 Day6 → 不给 L3（退 L2）—— 「必须跑满七天」生效',
+    lv(sb6, 100) === 2, lv(sb6, 100))
+  assert('★★★ v180：同上，准确率 95% 也因 day=6 落回 L2（day 侧不过关）', lv(sb6, 95) === 2, lv(sb6, 95))
+
+  // 2 档沙箱（第一期 Day5 → bench 1.63 ∈ [1.5,2.5) → cap 2）：门槛不参与，行为与 v179 相同
+  const sb5 = makeLvSandbox({ days: { 5: { stages: { 0: stg(30, 30) } } } })
+  assert('★ 2 档沙箱（Day5，cap 2）：准确率再高也封 L2，且不受 L3 门槛影响',
+    lv(sb5, 100) === 2 && lv(sb5, 95) === 2, lv(sb5, 100) + ',' + lv(sb5, 95))
 
   // 无数据
   assert('★ 准确率 null（还没做过首答）→ L1', lv(sb, null) === 1, lv(sb, null))
@@ -478,11 +507,15 @@ group('组七：chLevelCardHtml 渲染')
   assert('  徽章配色类跟随等级（ch-lv-lv2）', html.indexOf('ch-lv-lv2') >= 0)
 
   // ── 用例 2：基准够时 → 提示「准确率达标即可升级」
-  //   进阶期 Day7：基准 3.00 → 天花板 3；准确率 18/20 = 90 → raw 4 → 被压成 3 → L3；need = 0.90，bench 3.00 ≥ 0.90 → canRise
-  const sb2 = mkCardSandbox({ hard: true, days: { 7: { stages: { 0: stg(18, 20) } } } })
+  //   进阶期 Day7：基准 3.00 → cap 3；★★ v180 起 L3 还要过「Day7 + ≥95%」质量门槛 →
+  //   旧夹具 18/20 = 90 已**掉到 L2**（不再是 L3），必须换成 19/20 = 95 才能真正站在 L3。
+  //   这正是 v180「L3 加准确率门槛」的界面侧证据：need = 0.90，bench 3.00 ≥ 0.90 → canRise。
+  const sb2 = mkCardSandbox({ hard: true, days: { 7: { stages: { 0: stg(19, 20) } } } })
   const html2 = run(sb2, 'chLevelCardHtml()')
   assert('★ 基准够（进阶 Day7 = 3.00）时提示需准确率', html2.indexOf('NEEDACC') >= 0, html2.slice(0, 300))
-  assert('  L3 徽章 class 正确', html2.indexOf('ch-lv-lv3') >= 0, html2.slice(0, 150))
+  assert('  L3 徽章 class 正确（v180：需 19/20 = 95% 才够 L3）', html2.indexOf('ch-lv-lv3') >= 0, html2.slice(0, 150))
+  assert('★ v180 界面侧反证：18/20 = 90% 同一夹具现在只能拿 L2（门槛生效）',
+    run(mkCardSandbox({ hard: true, days: { 7: { stages: { 0: stg(18, 20) } } } }), 'chLevelCardHtml()').indexOf('ch-lv-lv3') < 0)
 
   // ── 用例 3：Day1 全对 → 天花板 1 → L1（这是「全对仍 L1」的界面证据）
   //   ★★ 注意 Day1 的阶段索引：`stages[0] = test（摸底）`、`stages[1] = practice（巩固练习）`。

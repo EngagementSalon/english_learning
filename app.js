@@ -4507,6 +4507,91 @@ function dashChSetDept(k) {
   dashChDept = String(k || 'all')
   renderDashChallengeBlock(_perQLastRows || [])
 }
+// v180：管理后台「按历史数据重算全体等级」。
+//   背景：v165 的定级只在本机「完成练习那一刻」触发（chRecordStage → chLevelApply），
+//   v165 上线**之前**练完的学员本机无依据、之后不再练 → 云端永远没有等级。
+//   实测线上 49 人有练习记录、仅 5 人有等级 → 这里一次把漏掉的人按「过往所有正确率」补上。
+//   口径（与 chLevelAcc / chLevelBench 完全同源，绝不另起一套）：
+//     · 准确率 = 云端 chy 全量（跨营次、按 day-si 去重取 at 最早、cleared 跳过）累计首答准确率
+//     · 基准   = 该学员练到过的**最高 day** 的名义计划均值（进阶期用 HARD 计划）
+//     · 等级   = 阈值 0.90/0.60/0.30 + 难度档压顶（chLevelCapOfBench），与学员端逐字一致
+//     · 线下课 30% 加权**不参与**（后台无 courseState.doc → 与学员端「未加载」时同口径）
+//   安全：只对「确有首答记录」的人写等级；从没练过的人一律跳过（绝不写假 L1）。
+//   ★ 上报走 Store.reportChallengeLevel → chlevel 事件（最后写入者胜，天然幂等）。
+//   ★ 不覆盖更高的既有等级：云端现值更高时保留（等级只升不降 —— 与 chAbsorbCloudLevel 同纪律）。
+async function dashRebuildLevels() {
+  if (!Store.isAdmin()) return
+  const btn = document.getElementById('dashLvRebuildBtn')
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ ' + t('dashLvRebuildRunning') }
+  try {
+    let rows = []
+    try {
+      rows = (typeof CloudSync !== 'undefined' && CloudSync.getDashboardData) ? await CloudSync.getDashboardData() : []
+    } catch (e) { rows = [] }
+    if (!rows.length) { alert(t('dashLvRebuildFail')); return }
+    // 营次集合：本轮次列表全部营次（判基准用 HARD 计划与否）
+    const hardSet = {}
+    try {
+      const list = (typeof chRoundListForView === 'function') ? chRoundListForView() : []
+      list.forEach(r => { hardSet[String(r.id || '')] = true })
+    } catch (e) { /* 无营次信息 → 全按第一期计划 */ }
+    const planFor = (slug) => {
+      try {
+        if (typeof CHALLENGE_DIFF_PLAN_HARD === 'undefined') return CHALLENGE_DIFF_PLAN
+        return hardSet[slug] ? CHALLENGE_DIFF_PLAN_HARD : CHALLENGE_DIFF_PLAN
+      } catch (e) { return CHALLENGE_DIFF_PLAN }
+    }
+    const slugOf = s => { try { return (typeof chRoundSlug === 'function') ? chRoundSlug(String(s || '')) : String(s || '') } catch (e) { return String(s || '') } }
+    let done = 0, skipped = 0
+    rows.forEach(r => {
+      if (!r || r.role === 'admin' || !r.username) return
+      const chy = Array.isArray(r.chy) ? r.chy : []
+      if (!chy.length) { skipped++; return }
+      // ① 首次完成去重 + 累计准确率 + 最高 day（同 chLevelAcc / chLevelBench 口径）
+      const first = {}
+      let maxDay = 0
+      chy.forEach(x => {
+        if (!x || x.cleared) return
+        const q = Number(x.total) || 0
+        const day = Number(x.day) || 0
+        if (!q || !day) return
+        const k = day + '-' + (Number(x.si) || 0)
+        const at = Number(x.at) || 0
+        if (!first[k] || at < (first[k].at || 0)) first[k] = { at: at, c: Number(x.correct) || 0, t: q }
+        if (String(x.kind || 'practice') === 'practice' && day > maxDay) maxDay = day
+      })
+      let c = 0, tq = 0
+      Object.keys(first).forEach(k => { c += first[k].c; tq += first[k].t })
+      if (!tq) { skipped++; return }
+      // ② 基准 = 最高 day 的名义均值（用该营次的计划；查不到营次就用第一期）
+      const acc = Math.round(Math.min(1, c / tq) * 100)
+      const raw = acc >= 90 ? 4 : acc >= 60 ? 3 : acc >= 30 ? 2 : 1
+      let bench = 0
+      if (maxDay) {
+        const rd = (chy.find(x => x && !x.cleared && (Number(x.day) || 0) === maxDay) || {}).rd
+        bench = chPlanDayAvg(planFor(slugOf(rd)), maxDay)
+      }
+      if (!bench) { skipped++; return }
+      // ③ 难度档压顶（与 chLevelOf 同一函数，绝不重写阈值）
+      //   ★ v180：必须把 maxDay 与 acc 一并传入 —— L3 的「Day7 + ≥95%」质量门槛
+      //     判的就是这两项，漏传 = 门槛永不生效（静默失效，与沙箱漏注入同款陷阱）。
+      const lv = Math.max(1, Math.min(4, (typeof chLevelCapOfBench === 'function')
+        ? chLevelCapOfBench(bench, raw, maxDay, acc)
+        : Math.min(raw, Math.round(bench))))
+      // ④ 只升不降：云端现值更高则保留
+      const cloudLv = Number(r.chLevel) || 0
+      if (cloudLv >= lv) { skipped++; return }
+      try { Store.reportChallengeLevel(lv, r.username) } catch (e) { /* 单条失败不影响其余 */ }
+      done++
+    })
+    alert(t('dashLvRebuildDone', done, skipped))
+    // 重新拉数刷新看板（等级列与「已评定」计数随之更新）
+    try { await renderDashboard() } catch (e) { /* 刷新失败不影响已写入的数据 */ }
+  } finally {
+    const b2 = document.getElementById('dashLvRebuildBtn')
+    if (b2) { b2.disabled = false; b2.textContent = '🔁 ' + t('dashLvRebuildBtn') }
+  }
+}
 // ====== v163：全站统一的准确率配色（唯一口径） ======
 // 产品口径（用户拍板）：>90% 绿 · 80–90% 粉 rgb(237,57,151) · ≤80% 红 rgb(221,61,0)。
 // ★ 90 整算「粉」（「90以上」与「90及以下」在 90 处重叠 → 用户明确选「90 算粉」）。
@@ -5140,6 +5225,9 @@ function renderDashChallengeBlock(rows) {
   const deptBar = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
       <span style="font-size:12px;color:#6b7280">${t('dashChDeptFilterLabel')}：</span>
       ${deptBarOptions.map(k => `<button class="btn btn-sm ${dashChDept === k ? 'btn-primary' : 'btn-ghost'}" style="padding:3px 10px;font-size:12px" onclick="dashChSetDept('${escAttr(k)}')">${escHtml(deptLabelOf(k))}</button>`).join('')}
+      <span style="flex:1"></span>
+      <button class="btn btn-sm btn-ghost" style="padding:3px 10px;font-size:12px" id="dashLvRebuildBtn"
+        onclick="dashRebuildLevels()" title="${escAttr(t('dashLvRebuildHint'))}">🔁 ${t('dashLvRebuildBtn')}</button>
     </div>`
   // 营次名（rdList 已按部门过滤，见函数开头 v94 段）
   const rdName = (rdList.find(r => r.id === want) || {}).name || (want === 'r1' ? '第一期' : want)

@@ -142,8 +142,8 @@ function makeLvSandbox(opts) {
   //   漏注入 → 被 typeof 守卫吃掉 → 恒返回 null → **静默退化为纯挑战口径**（与 v165 漏注入同款假绿陷阱）
   vm.runInContext(extractFn(CH, 'challengeUid'), sb)
   // ★ 声明顺序 = 源码顺序：chCourseScore / chCourseAvg 在 chLevelOf 之上
-  ;['chPlanDayAvg', 'chLevelBench', 'chLevelAcc', 'chCourseScore', 'chCourseAvg',
-    'chLevelOf', 'chLevelFloor', 'chLevel', 'chLevelApply'].forEach(n => {
+  ;['chPlanDayAvg', 'chLevelMaxDay', 'chLevelTierOfBench', 'chLevelBench', 'chLevelAcc', 'chCourseScore', 'chCourseAvg',
+    'chLevelOf', 'chLevelCapOfBench', 'chLevelFloor', 'chLevel', 'chLevelApply'].forEach(n => {
     vm.runInContext(extractFn(CH, n), sb)
   })
   // ★ 渲染入口：chLevelCardHtml 读 `_chLvAnimAt`（内存态，challenge.js 顶层的 let）→
@@ -317,17 +317,24 @@ group('组二：★ 无线下课分 → 与 v167 逐值一致（回归护栏）'
   assert('★★ 无 courseState / doc=null / 只有无分作业 —— 三种「无分」情形等级均与 v167 恒等',
     same, detail.join(' | '))
 
-  // 逐阈值抽查（第一期 Day7，基准 2.80 → 天花板 3）
+  // 逐阈值抽查（第一期 Day7，基准 2.80 → 档位 [2.5,3.5) → cap 3）
+  // ★★★ v180 语义变更：L3 另需「Day7 完成 + 准确率 ≥95%」质量门槛，不满足则退 2 档。
+  //   本沙箱 maxDay = 7（day 侧恒过），所以观察的就是 95 这条线：
+  //   100 → L3（过线）；90 / 89 / 60 / 59 → 一律 L2（门槛把 cap 3 打回 2，**不是** L3）。
+  //   旧断言「100/90/89/60 → 3」是 v179 口径，v180 起已失效 → 改为反证 + 新期望。
   const sbOld = makeLvSandbox({ days: { 7: { stages: { 0: stg(20, 20) } } } })
   const sbNew = makeLvSandbox({ days: { 7: { stages: { 0: stg(20, 20) } } }, courses: { doc: mkDoc({}) } })
   const tabOld = [100, 90, 89, 60, 59, 30, 29, 0].map(a => lv(sbOld, a))
   const tabNew = [100, 90, 89, 60, 59, 30, 29, 0].map(a => lv(sbNew, a))
   assert('★★ 阈值表逐值一致 [' + tabOld.join(',') + ']', JSON.stringify(tabOld) === JSON.stringify(tabNew),
     JSON.stringify(tabNew))
-  assert('  且数值本身正确（天花板 3 压住 raw 4）：100/90/89/60 → 3',
-    tabOld.slice(0, 4).every(v => v === 3), tabOld.join(','))
-  assert('  59/30 → 2，29/0 → 1', tabOld[4] === 2 && tabOld[5] === 2 && tabOld[6] === 1 && tabOld[7] === 1,
+  assert('★★ v180：准确率 100 过 95 线 → L3（cap 3 压住 raw 4）', tabOld[0] === 3, tabOld.join(','))
+  assert('★★ v180：90/89 未过 95 门槛 → 退 L2（L3 质量门槛生效，**旧口径曾为 3**）',
+    tabOld[1] === 2 && tabOld[2] === 2, tabOld.join(','))
+  assert('★★ v180：60/59 原判 3/2，被门槛统一拉到 L2', tabOld[3] === 2 && tabOld[4] === 2, tabOld.join(','))
+  assert('  阈值 30/29 未被门槛波及：30 → 2，29 → 1', tabOld[5] === 2 && tabOld[6] === 1,
     tabOld.join(','))
+  assert('  准确率 0 → L1', tabOld[7] === 1, tabOld.join(','))
 
   // ★ 空 classes / 空 assignments 同样不得改变行为
   const base = run(makeLvSandbox({ days: { 7: { stages: { 0: stg(20, 20) } } } }), 'chLevelOf(100)')
