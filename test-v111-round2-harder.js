@@ -158,7 +158,8 @@ function makeSb(opts) {
     'chRoundRecForCurrent', 'chRoundBankQuestions',
     'chBankCount', 'chBankIdSet',
     'chRoundSlug', 'chRoundRecForDept', 'chRoundViewSlugs', 'chRoundListForView',
-    'chRoundViewKey', 'chCurrentRound', 'chIsHardRound', 'chDiffPlan', 'chTestPlan',
+    'chRoundViewKey', 'chCurrentRound', 'chIsHardRound', 'chRoundIsHard',
+    'chDiffPlan', 'chTestPlan',
     'challengeRng', 'chUserSeed',
     // v149：challengePool 新增依赖（归桶缩放 + 自适应回填 + 全局配额求解）
     'chDiffBucketOf', 'chBankMaxDiff', 'chDrawWithBackfill', 'chPlanAllocate',
@@ -366,8 +367,44 @@ const meanDiff = (arr) => arr.length ? arr.reduce((s, q) => s + (Number(q.diffic
       /typeof chRoundSlug !== 'function'/.test(fn) && /typeof chCurrentRound === 'function'/.test(fn), fn)
     assert('chIsHardRound 源码按「部门组期号」判定（seq 优先 + 同组顺序现算 + __all__ 键）',
       /CloudSync\._chRounds/.test(fn) && /Number\(rec\.seq\) > 0/.test(fn) && /'__all__'/.test(fn), fn)
-    assert('chIsHardRound 声明在 chRoundSlug / chRoundRecForDept 之前（v165 TDZ 教训：函数声明可提升，但不得改成 const）',
-      /^function chIsHardRound\(\)/m.test(CH), '')
+    // ★ v182：签名增加了**可选**参数 ridArg（管理员跨营次重算要用），断言不能再写死空参数列表。
+    //   要守的约束是三条：① 用 function 声明（不得改成 const —— v165 TDZ；函数声明才可提升）
+    //   ② 位置在 chRoundSlug / chRoundRecForDept 之前 ③ 不传参调用时行为与旧版完全一致（下面单测）。
+    const declIdx = CH.search(/^function chIsHardRound\s*\(/m)
+    const slugIdx = CH.search(/^function chRoundSlug\s*\(/m)
+    const recIdx = CH.search(/^function chRoundRecForDept\s*\(/m)
+    assert('chIsHardRound 用 function 声明（非 const，v165 TDZ 教训）',
+      declIdx >= 0 && !/^(const|let|var)\s+chIsHardRound/m.test(CH), declIdx)
+    assert('chIsHardRound 声明在 chRoundSlug / chRoundRecForDept 之前',
+      declIdx > 0 && slugIdx > declIdx && recIdx > declIdx, declIdx + ' / ' + slugIdx + ' / ' + recIdx)
+    assert('★ 无参调用语义不变：函数体内仍有「缺 ridArg → 取 chCurrentRound()」的回落',
+      /ridArg !== undefined/.test(fn) && /chCurrentRound\(\)/.test(fn), '')
+    // ★★ v182 运行期等价性：chIsHardRound() 必须 === chIsHardRound(当前营次)。
+    //    为什么必测：管理员重算走显式传参路径，挑战页走无参路径 —— 两条路径若判不同，
+    //    就会出现「挑战页说第一期缓坡、重算却按进阶档算等级」的口径分裂（正是本次事故的同类）。
+    {
+      const cases = [
+        { rounds: [{ id: 'r1', name: '第一期', depts: ['dining/sig'], seq: 1 }], curId: 'r1', want: false },
+        { rounds: [{ id: 'r2', name: '第二期', depts: ['dining/sig'], seq: 2 }], curId: 'r2', want: true },
+        {
+          rounds: [
+            { id: 'r4', name: '第1期', depts: ['dining/ird'], seq: 1 },
+            { id: 'r7', name: '第二期', depts: ['dining/ird'], seq: 2 },
+          ], curId: 'r4', want: false,
+        },
+      ]
+      let mismatch = 0, seen = []
+      cases.forEach(c => {
+        const sb = makeSb({ questions: BANK, rounds: c.rounds, curId: c.curId })
+        const noArg = call(sb, 'chIsHardRound()')
+        const withArg = call(sb, 'chIsHardRound(' + JSON.stringify(c.curId) + ')')
+        const ref = call(sb, 'chRoundIsHard(' + JSON.stringify(c.curId) + ')')
+        if (noArg !== withArg || noArg !== ref || noArg !== c.want) mismatch++
+        seen.push(c.curId + ':' + noArg + '/' + withArg + '/ref' + ref + '/want' + c.want)
+      })
+      assert('★★ 无参 ≡ 显式传当前营次 ≡ chRoundIsHard(rid)（0 处不一致）',
+        mismatch === 0, seen.join(' '))
+    }
   }
 
   // ================= ③ chDiffPlan / chTestPlan 与 challengePool =================

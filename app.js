@@ -4529,16 +4529,18 @@ async function dashRebuildLevels() {
       rows = (typeof CloudSync !== 'undefined' && CloudSync.getDashboardData) ? await CloudSync.getDashboardData() : []
     } catch (e) { rows = [] }
     if (!rows.length) { alert(t('dashLvRebuildFail')); return }
-    // 营次集合：本轮次列表全部营次（判基准用 HARD 计划与否）
-    const hardSet = {}
-    try {
-      const list = (typeof chRoundListForView === 'function') ? chRoundListForView() : []
-      list.forEach(r => { hardSet[String(r.id || '')] = true })
-    } catch (e) { /* 无营次信息 → 全按第一期计划 */ }
+    // ===== v182：基准所需「该营次属于进阶期吗」=====
+    // ★★★ 旧实现是错的（用户实测踩到）：`list.forEach(r => hardSet[r.id] = true)` 把**每一个**营次
+    //   都标成进阶期 → planFor 恒返回 CHALLENGE_DIFF_PLAN_HARD → 第一期学员的 bench 被抬到硬档
+    //   → 重算出的等级偏高（本该 L1 的被抬成 L2）。
+    //   ★ 修法：**不在这里另写期号推导**，直接调 challenge.js 的 chRoundIsHard(rid)（唯一真相源，
+    //     与挑战页 chIsHardRound 同一口径：seq 优先 / 存量期按部门组顺序现算 / 空 depts → '__all__'）。
+    //     缺函数 → 保守回落第一期计划（宁可偏松，不可偏紧）。
     const planFor = (slug) => {
       try {
         if (typeof CHALLENGE_DIFF_PLAN_HARD === 'undefined') return CHALLENGE_DIFF_PLAN
-        return hardSet[slug] ? CHALLENGE_DIFF_PLAN_HARD : CHALLENGE_DIFF_PLAN
+        const hard = (typeof chRoundIsHard === 'function') ? chRoundIsHard(slug) === true : false
+        return hard ? CHALLENGE_DIFF_PLAN_HARD : CHALLENGE_DIFF_PLAN
       } catch (e) { return CHALLENGE_DIFF_PLAN }
     }
     const slugOf = s => { try { return (typeof chRoundSlug === 'function') ? chRoundSlug(String(s || '')) : String(s || '') } catch (e) { return String(s || '') } }
@@ -4581,8 +4583,20 @@ async function dashRebuildLevels() {
       // ④ 只升不降：云端现值更高则保留
       const cloudLv = Number(r.chLevel) || 0
       if (cloudLv >= lv) { skipped++; return }
-      try { Store.reportChallengeLevel(lv, r.username) } catch (e) { /* 单条失败不影响其余 */ }
-      done++
+      // ★★★ v182 修复：必须走 reportChallengeLevelFor(username, lv) —— **指定上报对象**。
+      //   旧写法 `reportChallengeLevel(lv, r.username)` 把「用户名」塞进了「营次」参数位，
+      //   而该方法的 u 恒取 getSession() → 99 名学员的等级事件全挂到 admin 名下，
+      //   学员 chLevel 从未写入 → 用户实测「点了重算，账号管理仍全员未评定」。
+      //   且旧代码无条件 done++ → 「成功 N 人」的提示是**假数**（实际 0 人成功）。
+      //   → 现在按返回值计数，done 必须等于云端真被写入的人数。
+      let okWrite = false
+      try {
+        okWrite = (typeof Store.reportChallengeLevelFor === 'function')
+          ? Store.reportChallengeLevelFor(r.username, lv) === true
+          : false
+      } catch (e) { okWrite = false }
+      if (okWrite) done++
+      else skipped++
     })
     alert(t('dashLvRebuildDone', done, skipped))
     // 重新拉数刷新看板（等级列与「已评定」计数随之更新）

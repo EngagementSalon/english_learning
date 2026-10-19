@@ -1568,6 +1568,38 @@ const Store = {
     CloudSync.enqueue({ u: s.username, n: s.name || '', ty: 'chlevel', d: { lv: n, rd: rd } })
   },
 
+  // v182：**代他人**上报能力等级 —— 管理员「🔁 重算历史等级」专用。
+  //   ★★★ 为什么必须单独开一个方法（v181 真 bug，用户实测「点了重算全员仍显示未评定」）：
+  //     reportChallengeLevel 的 `u` 恒取 getSession()（当前登录人），第二参是**营次**不是用户名。
+  //     旧调用写成 `reportChallengeLevel(lv, r.username)` → 用户名被当成营次塞进 d.rd，
+  //     而 99 名学员的等级事件全部挂到了 **admin** 名下 → 学员 chLevel 从未被写入。
+  //     这不只是「没生效」：admin 的 r.chLevel 被反复改写（虽因 _chLevelCell 对 admin 显示 '—' 而未暴露），
+  //     且每点一次重算就往云端队列灌几十条错归属事件。
+  //   ★ 与上面方法的语义差异（不可合并）：
+  //     · 上报对象 = 入参 username（不再读会话）→ 必须校验该用户真实存在且**不是管理员**；
+  //     · 营次 rd 仍从 chCurrentRound() 取（重算场景下 rd 只用于溯源，不参与定级计算）。
+  //   ★ 绝不 relaxed 成「任意人可改任意人」：调用方 dashRebuildLevels 本身已 Store.isAdmin() 守卫，
+  //     这里再加一道「目标用户必须存在」的守门，避免拼错用户名凭空造出幽灵账号。
+  reportChallengeLevelFor(username, lv) {
+    const n = Number(lv)
+    if (!Number.isInteger(n) || n < 1 || n > 4) return false
+    const uname = String(username == null ? '' : username)
+    if (!uname) return false
+    if (typeof CloudSync === 'undefined' || !CloudSync.enqueue) return false
+    // 目标用户必须在本机账号表里真实存在（拼错/已删除 → 不写，防止造幽灵）
+    let target = null
+    try {
+      const users = JSON.parse(localStorage.getItem('eq_users') || '[]')
+      target = (Array.isArray(users) ? users : []).find(x => x && String(x.username) === uname) || null
+    } catch (e) { target = null }
+    if (!target) return false
+    // 管理员不参与七天挑战定级（_chLevelCell 对 admin 恒显示 '—'）→ 不写
+    if (target.role === 'admin') return false
+    const rd = (typeof chCurrentRound === 'function') ? String(chCurrentRound() || '') : ''
+    CloudSync.enqueue({ u: uname, n: target.name || '', ty: 'chlevel', d: { lv: n, rd: rd } })
+    return true
+  },
+
   // v38：看字选音发音修复的分数修正（一次性迁移，由 init 调用，见 init 内说明）
   // fixTs = 修复基准时间；此前提交的 voicematch 错答视为无效题（安卓本地 TTS 静音、无法听音作答）
   _fixVoicematchScores(fixTs) {

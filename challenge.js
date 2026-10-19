@@ -252,9 +252,19 @@ function chBankDiffStats() {
 //      所以「显式 seq 缺失」一律走 ② 现算，只有连部门组都算不出才回落兜底。
 //   兜底（拿不到营次列表 / 期号算不出 —— extractFn 沙箱、部分加载、旧缓存）→ 沿用旧口径。
 // 只读营次、不引入新依赖 → 可安全被 challengePool / challengeStratifiedDraw 调用。
-function chIsHardRound() {
+// v182：进阶期判定的**唯一真相源** —— 带**可选**参数 rid。
+//   ★ 为什么加参数：管理员「🔁 重算历史等级」要跨营次逐条判（每个学员历史 chy 自带 rd），
+//     旧版重算里另写了一套「全部营次都算进阶」的简化逻辑 → 第一期学员基准被抬到 HARD → 等级偏高。
+//   ★★★ 为什么是「默认参数」而不是拆成两个函数（v182 实撞）：既有套件（v111 / v149 / v181）
+//     都用 `extractFn(src,'chIsHardRound')` **只注入这一个函数体** → 若它内部再调 chRoundIsHard，
+//     沙箱里不存在 → typeof 守卫静默 return false → 9 个套件假红。
+//     「函数跑了 ≠ 算对了」的反向版本：**我亲手造出的新依赖**同样会静默降级。
+//     → 保持单函数自包含：chIsHardRound() 与 chIsHardRound(rid) 两种调用都走同一份推导。
+function chIsHardRound(ridArg) {
   try {
-    const rid = (typeof chCurrentRound === 'function') ? chCurrentRound() : ''
+    const rid = (ridArg !== undefined && ridArg !== null && ridArg !== '')
+      ? String(ridArg)
+      : ((typeof chCurrentRound === 'function') ? String(chCurrentRound() || '') : '')
     if (!rid) return false                                     // 无当前营次 → 视作第一期（保守）
     // ① 主路径：按「本部门组期号」判定
     if (typeof CloudSync !== 'undefined' && CloudSync && Array.isArray(CloudSync._chRounds) && CloudSync._chRounds.length) {
@@ -283,6 +293,13 @@ function chIsHardRound() {
     return chRoundSlug(rid) !== '第一期'
   } catch (e) { return false }
 }
+
+// v182：跨营次判定（管理员重算用）—— 显式转发到同一实现，避免调用方误用「当前营次」语义。
+//   ★ 存在意义：让 app.js 的调用**自解释**（传 rid），又不必复制推导逻辑；仍是同一真相源。
+function chRoundIsHard(rid) {
+  return chIsHardRound(rid)
+}
+
 // v111：练习序列难度配比（按营次取）
 function chDiffPlan() {
   return chIsHardRound() ? CHALLENGE_DIFF_PLAN_HARD : CHALLENGE_DIFF_PLAN
