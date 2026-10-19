@@ -1376,8 +1376,12 @@ function chDayUnlocked(day) {
     > new Date(done.getFullYear(), done.getMonth(), done.getDate()).getTime()
 }
 // 阶段解锁：首阶段随天解锁；后续阶段需前一阶段完成
+// v183：改用 chStageCounted（= done || cleared）—— 与上方 chStageCounted 的注释口径一致
+//   （「进度/解锁判定用……保证重置考试成绩不会影响当日打卡、进度条与次日解锁链」）。
+//   旧实现用 chStageDone（只认 done），一旦前一阶段是「成绩已重置」的 cleared 存根，
+//   后续阶段就永久锁死：界面亮锁、点击静默 return → 学员报「无法参加考试」。
 function chStageUnlocked(day, si) {
-  return si === 0 ? chDayUnlocked(day) : chStageDone(day, si - 1)
+  return si === 0 ? chDayUnlocked(day) : chStageCounted(day, si - 1)
 }
 
 // ====== v107：七天挑战的适用部门（白名单）======
@@ -1553,13 +1557,23 @@ function chStartStage(day, si) {
   }
   // v99：期末考试开关开启时，未走完 Day1-6 的学员也可直接参加第七天期末考试（豁免天锁/阶段锁）
   const examEarly = chIsFinalExam(day, si) && !chStageDone(day, si) && chExamEarlyOpen()
-  if (!chStageUnlocked(day, si) && !examEarly) return
+  // v183：未解锁不再静默 return（旧行为 = 学员点「开始」毫无反应，无从判断；与 v149「空题」同一教训）。
+  //   典型现场：换设备/清缓存后本机 challengeState 无前置记录 → chStageUnlocked=false →
+  //   界面入口也显示锁，学员只会报「无法参加」，运维却看不到任何报错。
+  if (!chStageUnlocked(day, si) && !examEarly) {
+    alert(t('chStageLocked'))
+    return
+  }
   // v76：期末考试需管理员开启（入口已锁，此处二次拦截防控制台/旧 DOM 调用）
   if (chIsFinalExam(day, si) && !chStageDone(day, si) && chFinalExamLocked()) {
     alert(t('chExamLockedAlert'))
     return
   }
-  if (challengeKindOf(day, si) === 'test' && chStageDone(day, si)) return // 水平测试仅一次
+  // v183：水平测试仅一次 —— 原本静默 return，现给出提示（避免二次点击无反应）
+  if (challengeKindOf(day, si) === 'test' && chStageDone(day, si)) {
+    alert(t('chOnceOnly'))
+    return
+  }
   const qs = challengeStageQuestions(day, si)
   // v149：抽不到题时给出明确提示，不再静默 return（旧行为 = 学员点「开始」毫无反应，无从判断）
   if (!qs.length) {

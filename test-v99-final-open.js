@@ -144,7 +144,14 @@ const day1RowStageJson = () => run(`JSON.stringify(CHALLENGE_DAYS.find(d => d.da
   const alertsBefore = sandbox.__alerts.length
   run(`chStartStage(7, 1)`)
   assert('考试关 → chs 不建立（未走到 Day7 被拦）', run('chs') === null || run('chs') === undefined, JSON.stringify(run('chs')))
-  assert('考试关 → 未触发考试锁 alert（走的是阶段锁静默 return）', sandbox.__alerts.length === alertsBefore)
+  // v183：该路径由「静默 return」改为「弹阶段锁提示」—— 旧断言断「不 alert」，
+  //   正是学员「点了没反应」的成因。新契约：必须 alert，且文案是阶段锁（引导完成上方环节），
+  //   而不是考试锁（chExamLockedAlert）—— 二者提示语不同，运维据此定位是「没走到」还是「管理员没开」。
+  assert('v183 考试关+未走到Day7 → 有提示（不再静默）', sandbox.__alerts.length === alertsBefore + 1,
+    'alert 数 ' + sandbox.__alerts.length + ' vs 期望 ' + (alertsBefore + 1))
+  const lockMsg = String(sandbox.__alerts[sandbox.__alerts.length - 1] || '')
+  assert('v183 该提示是「阶段锁」文案，不是考试锁文案',
+    /完成上方环节|Finish the step above/.test(lockMsg) && !/考试未开放|exam/i.test(lockMsg), lockMsg)
   feedCloud(true)
   run(`chStartStage(7, 1)`)
   const sess = run('JSON.stringify(chs && { day: chs.day, si: chs.si, kind: chs.kind })')

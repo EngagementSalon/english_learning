@@ -43,6 +43,9 @@ function makeSandbox(pre) {
     window: { scrollTo() {} },
     document: { addEventListener() {}, getElementById() { return null } },
     confirm() { return true },
+    // v183：chStartStage 的拦截分支改为「一律给提示」（不再静默 return）→ 沙箱需有 alert 桩，
+    //   并把文案记进 window.__alerts 供断言（旧代码在这些路径上从不 alert，故此前无需该桩）。
+    alert(m) { (sb.window.__alerts = sb.window.__alerts || []).push(String(m)) },
   }
   // 防作弊 mock（记录 start/stop 调用与配置）
   sb.AntiCheat = {
