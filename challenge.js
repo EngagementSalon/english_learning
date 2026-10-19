@@ -1757,8 +1757,45 @@ function chAbsorbCloudProgress(rows) {
     _chCloudChy = (me && Array.isArray(me.chy)) ? me.chy.filter(x => x && !x.cleared) : []
   } catch (e) { _chCloudChy = [] }
   if (!me || !Array.isArray(me.chy) || !challengeState || !challengeState.days) return false
+  // ★v186 吸收锚点 = **当前装载的存档营次**（_chRoundLoaded），绝不实时调 chCurrentRound()：
+  //   本函数由积分榜拉取的**异步回调**触发 —— 回调瞬间营次解析可能已经翻转（云文档刷新、
+  //   部门切片切换、_chRounds 瞬时为空回落 '第一期'），而 challengeState 还是上一个营次的存档。
+  //   错位窗口里 chRoundSlug(实时值) 恰好匹配上期记录 → 把**上期成绩灌进本期存档**。
+  //   10-19 实锤：杨宇航第二期（r6）页面显示第一期的前测 90 分与 Day2-5 打卡 —— 云端 r6 里
+  //   他从没考过前测（只有当天 17:04 的一次 Day1 练习上报）。
+  //   _chRoundLoaded 为空（尚未装载过任何存档）→ 直接不吸收，宁可不恢复也不冒险。
+  //   ★ typeof 守卫：extractFn 切片沙箱只注入本函数时盒外没有 _chRoundLoaded（v161 同款教训）。
+  if (typeof _chRoundLoaded === 'undefined' || !_chRoundLoaded) return false
   let wantSlug = ''
-  try { wantSlug = chRoundSlug(chCurrentRound()) } catch (e) { return false }
+  try { wantSlug = chRoundSlug(_chRoundLoaded) } catch (e) { return false }
+  // ★v186 跨期污染自愈：存档里凡带 restored:true（云端恢复标记）的阶段记录，若在本期云端
+  //   记录中找不到同 day/si 的未重置来源，即为上述错位窗口灌进来的脏数据 → 删除。
+  //   已被污染的设备刷新页面即自动洗净，无需人工清缓存。三类记录永不触碰：
+  //     · 无 restored 标记的（学员本机真实作答，含上传失败的本地真成绩）
+  //     · manual:true 的（管理员补录，走 chyfix 同步语义）
+  //     · cleared 存根（管理员重置语义优先）
+  //   ★ 只在本人云端数据确实拉到时执行（上面已有 me.chy 数组守卫）；云端拉不到绝不清洗。
+  let healed = false
+  try {
+    const own = new Set()
+    me.chy.forEach(x => {
+      if (!x || x.cleared) return
+      if (chRoundSlug(String((x && x.rd) || '')) !== wantSlug) return
+      own.add((Number(x.day) || 0) + '-' + (Number(x.si) || 0))
+    })
+    Object.keys(challengeState.days).forEach(dayK => {
+      const d = challengeState.days[dayK]
+      if (!d || !d.stages) return
+      Object.keys(d.stages).forEach(siK => {
+        const r = d.stages[siK]
+        if (!r || !r.restored || r.manual) return
+        if (own.has(Number(dayK) + '-' + Number(siK))) return
+        delete d.stages[siK]
+        healed = true
+      })
+    })
+    if (healed) challengeSave()
+  } catch (e) { /* 清洗失败不阻断恢复主流程 */ }
   let changed = false
   me.chy.forEach(x => {
     if (!x || x.cleared) return
@@ -1782,7 +1819,7 @@ function chAbsorbCloudProgress(rows) {
     }
     changed = true
   })
-  if (!changed) return false
+  if (!changed && !healed) return false
   challengeSave()
   // 仅在非答题会话时重渲染（renderChallenge 对 quiz 会话另有保护，仍显式跳过更稳）
   try { if (!chs || chs.phase !== 'quiz') renderChallenge() } catch (e) { /* ignore */ }
