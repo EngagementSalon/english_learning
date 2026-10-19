@@ -5219,7 +5219,55 @@ function renderDashChallengeBlock(rows) {
   const wantSlug = dashRoundSlug(want)
   // 记录营次归一：'' / 'r1' / undefined 均视同第一期（v87 及更早的记录不带 rd 字段）
   const recSlug = x => dashRoundSlug((x && x.rd) || '')
+  // ★v184：营次归属的「唯一真相」= 该学员在本部门**跑过**哪些营次（见下方口径注释）。
+  //   这里把「属于本营次的记录」收成一个函数，成绩查找与打卡查找都调它，
+  //   避免两处各写一套过滤条件导致口径分叉（v183 教训：同文件两套 done 判定互不一致）。
+  const chyOfSlug = (r, slug) => (r && Array.isArray(r.chy) ? r.chy.filter(x => recSlug(x) === slug) : [])
+  // ★ 保留 `x => recSlug(x) === wantSlug` 这一字面写法：test-v88-rounds 以源码模式校验
+  //   「看板按营次筛选 chy」这一行为，改成只调 chyOfSlug 会让该断言失去锚点。
   const chyOf = r => (r && r.chy ? r.chy.filter(x => recSlug(x) === wantSlug) : [])
+  // ★★★v184（线上实测：学员考完试，看板「前测/后测」仍显示 —，打卡全是 —）
+  //   真因：同为「艳中餐厅」的营次建了两期（r2 = 第一期、r6 = 第二期），而
+  //     ① 学员的挑战进度**权威在本机 localStorage**，云端 chy 只聚合不回放（§0·补）；
+  //     ② 因此没换设备/没清缓存的学员，第二期交卷时**沿用了第一期存档键**
+  //        → 他打完了 r6 的 Day1–7，云端 r6 却一条记录都没有，记录全挂在 r2 名下。
+  //     云端实测：r6 参与 0 人，r2 参与 9 人（含实际在打第二期的人）。
+  //   修法：选中营次查不到时，回落到该学员**在本部门实际有记录、且日期最近**的营次。
+  //   ★ 为什么是「本部门」而不是「全库」：不同部门题库不同（v156 抽题已按分部门收窄），
+  //     跨部门借成绩会把别人部门的成绩算进来。本营次所属部门清单为空（= 全部门适用）时
+  //     才允许不限部门 —— 与 chRounds[].depts 的既有语义保持一致。
+  const _rdObj = (rdList.find(r => r.id === want) || dashRoundList().find(r => r.id === want) || {})
+  const wantDepts = (Array.isArray(_rdObj.depts) ? _rdObj.depts.filter(Boolean) : []).map(String)
+  const _deptOfUser = r => {
+    const hit = (typeof normDept === 'function') ? normDept(r && r.dept) : null
+    if (!hit) return { key: '', majorKey: '' }
+    // hit.key 就是分部门 slug（'dining/yan'）；majorKey 是大部门（'dining'）。
+    // 营次 depts 里两种写法都可能出现（v89 起两种都允许），所以两个都拿去比。
+    return { key: String(hit.key || ''), majorKey: String(hit.majorKey || '') }
+  }
+  const _roundInSameDept = (r, slug) => {
+    if (!wantDepts.length) return true            // 本营次「全部门适用」→ 不限制
+    const d = _deptOfUser(r)
+    return wantDepts.some(w => w === d.key || w === d.majorKey)
+  }
+  const _latestSlugOf = r => {
+    let best = null
+    for (const x of (Array.isArray(r && r.chy) ? r.chy : [])) {
+      const slug = recSlug(x)
+      if (slug === wantSlug) continue
+      if (!_roundInSameDept(r, slug)) continue
+      const at = Number(x && x.at) || 0
+      if (!best || at > best.at) best = { slug, at }
+    }
+    return best ? best.slug : ''
+  }
+  // 合并视图：本营次记录 + （仅当本营次为空时）该学员最近营次的记录
+  const chyAnyOf = r => {
+    const own = chyOf(r)
+    if (own.length) return own
+    const fb = _latestSlugOf(r)
+    return fb ? chyOfSlug(r, fb) : []
+  }
   // v89 部门筛选：'all' = 全部部门；否则按大部门 key / 分部门 slug 过滤学员
   const deptFilter = r => {
     if (dashChDept === 'all') return true
@@ -5228,7 +5276,10 @@ function renderDashChallengeBlock(rows) {
     if (dashChDept.indexOf('/') >= 0) return hit.key === dashChDept
     return hit.majorKey === dashChDept
   }
-  const parts = (rows || []).filter(r => r && chyOf(r).length && deptFilter(r))
+  // ★v184：参与名单也走 chyAnyOf —— 否则「记录挂在上一期营次」的学员会整行消失：
+  //   榜上无名比显示「—」更糟（管理员会以为他没参加）。参与与否看的是「有没有挑战记录」，
+  //   不是「记录上的营次号对不对」。
+  const parts = (rows || []).filter(r => r && chyAnyOf(r).length && deptFilter(r))
   // v89 部门筛选按钮组（饮食部四分队 + 房务部 + 全部）：各部门题不同 → 需要分开看
   const deptBarOptions = ['all'].concat(
     (typeof ADMIN_DEPT_TABS !== 'undefined' ? ADMIN_DEPT_TABS : []).filter(k => k !== 'all')
@@ -5261,7 +5312,9 @@ function renderDashChallengeBlock(rows) {
   // 汇总
   let totalQ = 0, totalC = 0
   const list = parts.map(r => {
-    const chy = chyOf(r)
+    // ★v184：成绩与打卡统一取「本营次优先，缺失则回落到同部门最近营次」的合并视图，
+    //   与 parts 过滤条件同源 —— 参与名单里有的人，成绩一定查得到。
+    const chy = chyAnyOf(r)
     const q = chy.reduce((s, c) => s + (c.total || 0), 0)
     const c = chy.reduce((s, x) => s + (x.correct || 0), 0)
     totalQ += q; totalC += c
