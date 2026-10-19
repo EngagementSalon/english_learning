@@ -61,6 +61,37 @@ const CHALLENGE_TEST_PLAN = [10, 7, 3]
 // 合计 20 题不变（考试题量恒定，只调难度结构）。
 const CHALLENGE_TEST_PLAN_HARD = [5, 10, 5]
 
+// ====== v188：新天结构（只对带 chPlan:'v2' 的营次生效）======
+// 用户口径（2026-10-19）：「不要做 9 天了，只做 7 天，第一天第七天考试」。
+//   → 考试独占一天、一天只有一个环节 → 打卡不会再出现「半圆」。
+//     旧结构 Day1/Day7 各有两个环节（10 题热身 + 20 题考试），学员经「期末考试提前开放」直考、
+//     跳过 10 题热身，于是 D1/D7 永远是 ◐ —— 这就是 r3 那一期「全员 D7 半圆」的根。
+//   · Day1：水平测试 20 题（前测，仅一次）
+//   · Day2-6：每日练习 30 题 × 5 天 = 150 题
+//   · Day7：水平测试 20 题（后测 / 期末，仅一次）
+// ★ 两套结构**按营次**选，不按时间：营次记录带 chPlan:'v2' 走新结构，字段缺省走旧结构。
+//   存量营次（r1–r7）的云端记录语义保持原样，绝不迁移、不重算、不改天号。
+const CHALLENGE_DAYS_V2 = [
+  { day: 1, stages: [ { kind: 'test', count: 20 } ] },
+  { day: 2, stages: [ { kind: 'practice', count: 30 } ] },
+  { day: 3, stages: [ { kind: 'practice', count: 30 } ] },
+  { day: 4, stages: [ { kind: 'practice', count: 30 } ] },
+  { day: 5, stages: [ { kind: 'practice', count: 30 } ] },
+  { day: 6, stages: [ { kind: 'practice', count: 30 } ] },
+  { day: 7, stages: [ { kind: 'test', count: 20 } ] },
+]
+// 新结构总题量（进度条分母）：20 + 150 + 20 = 190（旧结构 210，差额正是被去掉的两次 10 题热身）
+const CHALLENGE_TOTAL_V2 = CHALLENGE_DAYS_V2.reduce((s, d) => s + d.stages.reduce((x, y) => x + y.count, 0), 0)
+// 练习配比仍**按 day 索引**（chPlanDayAvg 用 day-1 取），故 Day1/Day7 留空行 [0,0,0]。
+//   取旧配比中间五天的形态（低档 26→6 递减、高档 4→24 递增），梯度单调：Day2 均值 1.27 → Day6 均值 2.60。
+const CHALLENGE_DIFF_PLAN_V2 = [
+  [0, 0, 0], [26, 0, 4], [21, 0, 9], [16, 0, 14], [11, 0, 19], [6, 0, 24], [0, 0, 0],
+]
+// 进阶期（第二期及以后）口径：均值 2.13 → 2.93，逐日都高于基础档同一天。
+const CHALLENGE_DIFF_PLAN_HARD_V2 = [
+  [0, 0, 0], [13, 3, 14], [8, 4, 18], [4, 5, 21], [2, 6, 22], [1, 7, 22], [0, 0, 0],
+]
+
 // v89：当前学员所属分部门（'dining/bar' 等 slug）；管理员/其他部门返回 ''（=不限部门，看全库）
 // v97：管理员跟随练习页「题目部门」切片 —— 切艳中即以艳中视角看挑战（标题/题库/营次/进度整体切换），
 //      切「全部部门」= 全库视角（与旧行为一致）。非管理员仍按本人 session 部门，切片对其无效。
@@ -301,7 +332,46 @@ function chRoundIsHard(rid) {
 }
 
 // v111：练习序列难度配比（按营次取）
+// v188：本营次天结构是否为「考试独占一天」新版（营次记录带 chPlan:'v2'）。
+//   ★ 缺省一律 false = 旧结构。存量营次、云端没拉到营次、沙箱里没有 CloudSync —— 全部走旧结构，
+//     所以既有 145 个套件（沙箱只注入旧 CHALLENGE_DAYS）行为完全不变。
+function chPlanIsV2() {
+  try {
+    let rec = null
+    if (typeof chRoundRecForDept === 'function') rec = chRoundRecForDept()
+    // 主路径拿不到（或该记录没带字段）时，按当前营次 id 直接查侧信道
+    if ((!rec || !rec.chPlan) && typeof CloudSync !== 'undefined' && Array.isArray(CloudSync._chRounds)) {
+      const id = (typeof chCurrentRound === 'function') ? String(chCurrentRound() || '') : ''
+      const hit = CloudSync._chRounds.find(r => r && String(r.id || '') === id)
+      if (hit) rec = hit
+    }
+    return !!(rec && rec.chPlan === 'v2')
+  } catch (e) { return false }
+}
+// 天结构与总题量（按营次取）。★ 各消费点必须写成
+//   `(typeof chDays === 'function') ? chDays() : CHALLENGE_DAYS` —— extractFn 沙箱只注入被抽到的函数，
+//   直接调用会在既有套件里抛 ReferenceError（v182 拆函数破注入契约的同类坑）。
+function chDays() {
+  const v2 = (typeof chPlanIsV2 === 'function') ? chPlanIsV2() : false
+  return v2 ? CHALLENGE_DAYS_V2 : CHALLENGE_DAYS
+}
+// 最后一个**练习**日（旧结构 7，新结构 6）。凡是要判「是否跑满全程练习」的地方都必须用它，
+//   绝不能像 v180 那样写死 7 —— 新结构 Day7 只有考试，写死会让学员永远达不到门槛（v188）。
+function chLastPracticeDay() {
+  const days = (typeof chDays === 'function') ? chDays() : CHALLENGE_DAYS
+  let last = 0
+  for (const d of days) {
+    if (d && Array.isArray(d.stages) && d.stages.some(s => s && s.kind === 'practice')) last = d.day
+  }
+  return last || 7
+}
+function chTotal() {
+  const v2 = (typeof chPlanIsV2 === 'function') ? chPlanIsV2() : false
+  return v2 ? CHALLENGE_TOTAL_V2 : CHALLENGE_TOTAL
+}
 function chDiffPlan() {
+  const v2 = (typeof chPlanIsV2 === 'function') ? chPlanIsV2() : false
+  if (v2) return chIsHardRound() ? CHALLENGE_DIFF_PLAN_HARD_V2 : CHALLENGE_DIFF_PLAN_V2
   return chIsHardRound() ? CHALLENGE_DIFF_PLAN_HARD : CHALLENGE_DIFF_PLAN
 }
 // v111：考试（水平测试 / 期末考试）分层配比（按营次取）
@@ -356,7 +426,9 @@ function chLevelMaxDay() {
   let maxDay = 0
   try {
     if (challengeState && challengeState.days) {
-      CHALLENGE_DAYS.forEach(d => {
+      // v188：天结构按营次取（新营次 Day1/Day7 只有考试）；沙箱里没有 chDays 时回落旧常量
+      const _days = (typeof chDays === 'function') ? chDays() : CHALLENGE_DAYS
+      _days.forEach(d => {
         d.stages.forEach((s, si) => {
           if (s.kind !== 'practice') return
           const r = chStageRec(d.day, si)
@@ -568,12 +640,15 @@ function chLevelCapOfBench(bench, raw, day, acc) {
   const b = Number(bench) || 0
   const r = Number(raw) || 1
   let cap = chLevelTierOfBench(b)
-  // L3 质量门槛（见函数头注释）：进 3 档但未「Day7 + ≥95%」→ 退 2 档。
+  // L3 质量门槛（见函数头注释）：进 3 档但未「跑满最后一个练习日 + ≥95%」→ 退 2 档。
   //   ★ day / acc 省略时**不施加门槛** —— 保持老调用点（只传 bench/raw）的向后兼容语义。
+  //   ★★★ v188：门槛里的「7」不能写死 —— 新营次的天结构里 Day1/Day7 只考试，
+  //     最后一个**练习**日是 Day6。写死 7 会让新营次的学员**永远进不了 L3**。
   if (cap >= 3 && day != null && acc != null) {
     const d = Number(day) || 0
     const a = Number(acc) || 0
-    if (!(d >= 7 && a >= 95)) cap = 2
+    const needDay = (typeof chLastPracticeDay === 'function') ? chLastPracticeDay() : 7
+    if (!(d >= needDay && a >= 95)) cap = 2
   }
   return Math.max(1, Math.min(4, Math.min(r, cap)))
 }
@@ -1068,7 +1143,8 @@ function chPlanAllocate(plan, buckets) {
 function challengeStageMeta() {
   let start = 0
   const out = []
-  for (const d of CHALLENGE_DAYS) {
+  const _daysMeta = (typeof chDays === 'function') ? chDays() : CHALLENGE_DAYS
+  for (const d of _daysMeta) {
     d.stages.forEach((s, si) => {
       out.push({ day: d.day, si, kind: s.kind, count: s.count, start })
       if (s.kind === 'practice') start += s.count
@@ -1141,7 +1217,7 @@ function challengeTestQuestions() {
 // 旧进度记录无 wrong 字段时返回空数组（兼容 v71 及更早的已完成阶段）。
 // v89：只取本部门题库内的题——学员换部门后，旧部门错题不再复现。
 function chPrevDayWrongQuestions(prevDay) {
-  const cfg = CHALLENGE_DAYS.find(x => x.day === prevDay)
+  const cfg = ((typeof chDays === 'function') ? chDays() : CHALLENGE_DAYS).find(x => x.day === prevDay)
   if (!cfg) return []
   const bankIds = chBankIdSet()
   const seen = new Set()
@@ -1280,7 +1356,8 @@ function chResetNoticeIsExam() {
 function chClearExamStageRecs() {
   let n = 0
   if (!challengeState || !challengeState.days) return 0
-  CHALLENGE_DAYS.forEach(d => {
+  const _daysClear = (typeof chDays === 'function') ? chDays() : CHALLENGE_DAYS
+  _daysClear.forEach(d => {
     const rec = challengeState.days[d.day]
     if (!rec || !rec.stages) return
     d.stages.forEach((s, si) => {
@@ -1349,12 +1426,12 @@ function chStageCounted(day, si) {
 }
 // 一天完成 = 当天全部阶段完成（或被重置过）
 function chDayDone(day) {
-  const cfg = CHALLENGE_DAYS.find(x => x.day === day)
+  const cfg = ((typeof chDays === 'function') ? chDays() : CHALLENGE_DAYS).find(x => x.day === day)
   return !!cfg && cfg.stages.every((_, si) => chStageCounted(day, si))
 }
 // 某天全部完成的时间（当天各阶段完成时间的最大值；未完成返回 0）
 function chDayLastDoneAt(day) {
-  const cfg = CHALLENGE_DAYS.find(x => x.day === day)
+  const cfg = ((typeof chDays === 'function') ? chDays() : CHALLENGE_DAYS).find(x => x.day === day)
   if (!cfg) return 0
   let t = 0
   cfg.stages.forEach((_, si) => {
@@ -1528,7 +1605,7 @@ function chStageScore(day, si) {
 }
 // 当天合并正确率（报告条形图用）
 function chDayScore(day) {
-  const cfg = CHALLENGE_DAYS.find(x => x.day === day)
+  const cfg = ((typeof chDays === 'function') ? chDays() : CHALLENGE_DAYS).find(x => x.day === day)
   if (!cfg) return null
   let c = 0, t = 0
   cfg.stages.forEach((_, si) => {
@@ -1539,7 +1616,7 @@ function chDayScore(day) {
 }
 // 某天水平测试的正确率（进步报告对比用；无测试的天返回 null）
 function chTestScoreOfDay(day) {
-  const cfg = CHALLENGE_DAYS.find(x => x.day === day)
+  const cfg = ((typeof chDays === 'function') ? chDays() : CHALLENGE_DAYS).find(x => x.day === day)
   if (!cfg) return null
   const si = cfg.stages.findIndex(s => s.kind === 'test')
   return si >= 0 ? chStageScore(day, si) : null
@@ -1634,8 +1711,8 @@ function chProgressHtml() {
   // v84：被重置成绩的测试阶段仍计入进度（chStageCounted），避免「只重置考试成绩」影响进度显示
   const doneStages = meta.filter(m => chStageCounted(m.day, m.si)).length
   const doneQ = meta.reduce((s, m) => chStageCounted(m.day, m.si) ? s + m.count : s, 0)
-  const pct = Math.round(doneQ / CHALLENGE_TOTAL * 100)
-  const cells = CHALLENGE_DAYS.map(d => {
+  const pct = Math.round(doneQ / ((typeof chTotal === 'function') ? chTotal() : CHALLENGE_TOTAL) * 100)
+  const cells = ((typeof chDays === 'function') ? chDays() : CHALLENGE_DAYS).map(d => {
     const done = chDayDone(d.day)
     const unlocked = chDayUnlocked(d.day)
     const examOpenCell = d.day === 7 && !done && !unlocked && chExamEarlyOpen()   // v99：期末考试已开放给未走到的学员
@@ -1651,7 +1728,7 @@ function chProgressHtml() {
     <div class="card" style="border:2px solid #f59e0b;margin-bottom:16px">
       <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px">
         <h3 style="margin:0">🎯 ${t('chProgressTitle')}</h3>
-        <span style="font-size:13px;color:#6b7280">${t('chProgressStages', doneStages)} · ${t('chProgressQ', doneQ)}</span>
+        <span style="font-size:13px;color:#6b7280">${t('chProgressStages', doneStages)} · ${t('chProgressQ', doneQ, (typeof chTotal === 'function') ? chTotal() : CHALLENGE_TOTAL)}</span>
       </div>
       <div style="display:flex;gap:6px;margin-bottom:12px">${cells}</div>
       <div style="height:10px;background:#e5e7eb;border-radius:5px;overflow:hidden">
@@ -2023,7 +2100,7 @@ function renderChallenge() {
   }
   // v89：题源/标题按本部门题库（各分部门一套题、各自上传）
   const bankN = chBankCount()
-  const rows = CHALLENGE_DAYS.map(d => chDayBlockHtml(d)).join('')
+  const rows = ((typeof chDays === 'function') ? chDays() : CHALLENGE_DAYS).map(d => chDayBlockHtml(d)).join('')
   // v77 挑战未开放/已结束横幅（进度/积分榜/报告仍可查看）；v88 三态 + 营次名与起止时间
   const st = chRoundOpenState()
   const rName = chRoundName()
@@ -2092,8 +2169,8 @@ function renderChallenge() {
     ${chReportHtml()}
     <div class="card">
       <h3>${escHtml(chTitleText())}</h3>
-      <p class="form-hint" style="margin-bottom:8px">${t('chIntro')}</p>
-      <p style="font-size:12px;color:#9ca3af;margin-bottom:12px">${t('chPoolInfo', bankN)}</p>
+      <p class="form-hint" style="margin-bottom:8px">${t((typeof chPlanIsV2 === 'function' && chPlanIsV2()) ? 'chIntroV2' : 'chIntro')}</p>
+      <p style="font-size:12px;color:#9ca3af;margin-bottom:12px">${t('chPoolInfo', bankN, (typeof chTotal === 'function') ? chTotal() : CHALLENGE_TOTAL)}</p>
       ${chBankShort() ? `<div class="feedback" style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:12px;margin-bottom:10px">⚠️ ${t('chBankShortWarn', bankN, CHALLENGE_MIN_BANK)}</div>` : ''}
       ${chBankDiffGap() ? `<div class="feedback" style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:12px;margin-bottom:10px">⚠️ ${t('chBankDiffWarn', chBankDiffGap())}</div>` : ''}
       ${Store.isAdmin() ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
@@ -2285,7 +2362,7 @@ function chReportHtml() {
   if (!challengeState) return ''
   const s1 = chTestScoreOfDay(1), s7 = chTestScoreOfDay(7)
   if (s1 == null || s7 == null) return ''
-  const bars = CHALLENGE_DAYS.map(({ day }) => {
+  const bars = ((typeof chDays === 'function') ? chDays() : CHALLENGE_DAYS).map(({ day }) => {
     const s = chDayScore(day)
     if (s == null) return ''
     const color = s >= 80 ? '#059669' : s >= 60 ? '#d97706' : '#dc2626'

@@ -130,6 +130,10 @@ function _roundsNorm(doc) {
       endAt: Number(r.endAt) || 0,
       at: Number(r.at) || 0,
     }
+    // v188：天结构标记（'v2' = Day1/Day7 只考试、Day2-6 每天 30 题练习，总 190 题）。
+    //   ★ 只在原记录明确是 'v2' 时才保留 —— 存量营次不带该字段 = 旧结构（Day1/Day7 两天各两环节，总 210）。
+    //     绝不能无条件补默认值，否则存量营次会被判成新结构，学员进度与看板打卡口径全错。
+    if (r.chPlan === 'v2') rec.chPlan = 'v2'
     // ★★ v152 关键：seq **只在原记录确实带正整数 seq 时才加上**。
     //   绝不能无条件写 `seq: 0` —— _roundSeqOf 是靠「seq 字段缺失」来识别
     //   「存量期、改按同组数组顺序现算」的。一旦给存量期补上 0，
@@ -1066,6 +1070,9 @@ const CloudSync = {
         examStartAt: Number(o.examStartAt) || 0,
         examEndAt: Number(o.examEndAt) || 0,
         startAt, endAt,
+        // v188：新建营次一律用「考试独占一天」的新天结构（Day1 前测 / Day2-6 刷题 / Day7 期末考）。
+        //   用户口径：「从以后的营次生效」—— 存量营次不补写此字段，继续按旧结构解释。
+        chPlan: 'v2',
         at: manual ? Date.now() : 0,
       })
       // ★★ v152 关键：存量营次**原样保留，绝不补写 seq**。

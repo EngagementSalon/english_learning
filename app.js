@@ -4310,8 +4310,13 @@ function dashRoundsPanelHtml() {
     const seqTag = dseq > 0
       ? ` <span title="${escAttr(t('dashRoundSeqTitle'))}" style="font-size:11px;font-weight:800;color:#7c3aed;background:#f3e8ff;border-radius:10px;padding:2px 8px">#${dseq}</span>`
       : ''
+    // v188：天结构徽章 —— Day1/Day7 只考试的新结构（chPlan:'v2'）与老结构并存时，
+    //   管理员必须能一眼分辨哪一期是哪种，否则会拿新口径去质问老数据。
+    const planTag = (r.chPlan === 'v2')
+      ? ` <span title="${escAttr(t('dashRoundPlanV2Title'))}" style="font-size:11px;font-weight:800;color:#047857;background:#d1fae5;border-radius:10px;padding:2px 8px">${t('dashRoundPlanV2Tag')}</span>`
+      : ''
     return `<tr${viewed ? ' style="background:#eff6ff"' : ''}>
-      <td style="white-space:nowrap">${escHtml(r.name)}${seqTag}${isCur ? ` <span style="font-size:11px;font-weight:800;color:#2563eb;background:#dbeafe;border-radius:10px;padding:2px 8px">${t('dashRoundCurrent')}</span>` : ''}</td>
+      <td style="white-space:nowrap">${escHtml(r.name)}${seqTag}${planTag}${isCur ? ` <span style="font-size:11px;font-weight:800;color:#2563eb;background:#dbeafe;border-radius:10px;padding:2px 8px">${t('dashRoundCurrent')}</span>` : ''}</td>
       <td style="white-space:nowrap">${dashRoundStateTag(st)}</td>
       <td>${dashRoundDeptText(r)}</td>
       <td style="white-space:nowrap;font-size:12px;color:#6b7280">${dashRoundWindowText(r)}</td>
@@ -5294,7 +5299,12 @@ function renderDashChallengeBlock(rows) {
         onclick="dashRebuildLevels()" title="${escAttr(t('dashLvRebuildHint'))}">🔁 ${t('dashLvRebuildBtn')}</button>
     </div>`
   // 营次名（rdList 已按部门过滤，见函数开头 v94 段）
-  const rdName = (rdList.find(r => r.id === want) || {}).name || (want === 'r1' ? '第一期' : want)
+  const rdObj = rdList.find(r => r.id === want) || {}
+  const rdName = rdObj.name || (want === 'r1' ? '第一期' : want)
+  // ★★★ v188：本营次天结构。chPlan:'v2' = 考试独占一天（Day1 前测 / Day2-6 刷题 / Day7 期末考），
+  //   每天只有一个环节 → 打卡只有「做了 ✓」与「没做 –」两态，结构上不可能再出现半圆 ◐。
+  //   字段缺省 = 旧结构（Day1/Day7 各两环节），存量营次 r1–r7 一律不重算、不迁移。
+  const planV2 = !!(rdObj && rdObj.chPlan === 'v2')
   // v88 营次筛选按钮组（多期并存时才有意义；单期时只显示提示行）
   // v94：rdList 已按 dashChDept 过滤 → 切到某部门后只列该部门的营次
   const filterBar = rdList.length > 1
@@ -5327,8 +5337,11 @@ function renderDashChallengeBlock(rows) {
       if (x.day > maxDay) maxDay = x.day
     })
     // v82 每日打卡：每天完成的阶段数（chy 按 day-si 去重）→ 2=全部完成（打卡）/1=部分/0=未打卡。
-    // 阶段数与 challenge.js CHALLENGE_DAYS 对应（Day1/7 各 2 阶段，Day2-6 各 1 阶段），本地声明避免跨文件依赖
-    const stageCnt = { 1: 2, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 2 }
+    // 阶段数与 challenge.js 的天结构对应（旧结构 Day1/7 各 2 阶段，其余各 1 阶段），本地声明避免跨文件依赖
+    // v188：新结构每天 1 阶段（见上方 planV2）→ 半圆不会再出现
+    const stageCnt = planV2
+      ? { 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1 }
+      : { 1: 2, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 2 }
     const checkin = []
     for (let d = 1; d <= 7; d++) {
       let n = 0
