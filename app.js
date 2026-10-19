@@ -5433,15 +5433,20 @@ function renderDashChallengeBlock(rows) {
   const avgAcc = totalQ > 0 ? Math.round(totalC / totalQ * 100) : 0
   // v105：进度已到 Day7 但 D7 无成绩的人数 → 提示补录入口（正是本次事故的表现形态）
   const lack7 = list.filter(p => p.s7 == null && p.maxDay >= 7).length
-  // ★v185：第 3 参 = 上期参照分。本期无成绩时才启用，灰色 + 上标「上」+ tooltip 明示「不计入本期」。
-  //   ★ 绝不能让上期数字长得像本期成绩 —— 这正是 v184 被用户抓到的问题。
-  const scoreCell = (s, manual, prev) => (s == null
-    ? (prev == null
-      ? '<span style="color:#9ca3af;font-size:12px">—</span>'
-      : `<span title="${escAttr(t('dashChPrevHint'))}" style="color:#9ca3af;font-size:12px;font-style:italic">${prev}<span style="font-size:9px;vertical-align:super;font-style:normal">${t('dashChPrevMark')}</span></span>`)
+  // 本期成绩单元格：**只渲染本期成绩**，两参。
+  // ★v187：v185 曾让第 3 参把上期分数塞进「期末」列做灰色带「上」的替身 —— 用户明确不要
+  //   （10-19：「上次成绩不要做阴影处理了，只要单独做一列上一期期末成绩即可」）。
+  //   现在上期成绩走独立的 prevCell 列，本期两列保持纯净：有分就按红黄绿判定，没分就是「—」。
+  const scoreCell = (s, manual) => (s == null
+    ? '<span style="color:#9ca3af;font-size:12px">—</span>'
     : `<span style="font-weight:700;color:${s >= 80 ? '#059669' : s >= 60 ? '#d97706' : '#dc2626'}">${s}</span>`)
     // v105：手动补录的成绩加标记，避免事后与真实考试成绩混淆
     + (manual && s != null ? `<span title="${escAttr(t('dashChManualBadgeHint'))}" style="margin-left:4px;font-size:10px;color:#92400e;background:#fef3c7;border-radius:6px;padding:1px 5px;vertical-align:middle">${t('dashChManualBadge')}</span>` : '')
+  // ★v187 上期期末成绩：**独立一列**，纯中性灰 —— 不做红黄绿判定、不带角标、不参与本期任何统计。
+  //   它存在的唯一意义是让管理员看到「这个人上一期考了多少」，属于参照信息而非本期数据。
+  const prevCell = v => (v == null
+    ? '<span style="color:#9ca3af;font-size:12px">—</span>'
+    : `<span style="color:#6b7280">${v}</span>`)
   // v139：明细表 = 三段分组（部门列 rowspan 合并、D1–D7 用 1/-1）——与导出的 Excel 同形态
   const chgCell = v => (v === '-'
     ? '<span style="color:#9ca3af">-</span>'
@@ -5482,7 +5487,8 @@ function renderDashChallengeBlock(rows) {
         <td style="text-align:center">${Number(p.q) || 0}</td>
         <td style="text-align:center">${accCell}</td>
         <td style="text-align:center;border-left:2px solid #e5e7eb">${scoreCell(p.s1, p.m1)}</td>
-        <td style="text-align:center">${scoreCell(p.s7, p.m7, p.s7p)}</td>
+        <td style="text-align:center">${scoreCell(p.s7, p.m7)}</td>
+        <td style="text-align:center" title="${escAttr(t('dashChPrevHint'))}">${prevCell(p.s7p)}</td>
         <td style="text-align:center">${chgCell(dashChScoreChange(p))}</td>
         ${[1, 2, 3, 4, 5, 6, 7].map(d => `<td style="text-align:center;border-left:${d === 1 ? '2px solid #e5e7eb' : 'none'}">${dayCell(p, d)}</td>`).join('')}
         <td style="text-align:center;border-left:2px solid #e5e7eb;white-space:nowrap">
@@ -5509,23 +5515,25 @@ function renderDashChallengeBlock(rows) {
         <td colspan="2"></td>
         <td style="text-align:center">${fmtAvg(avgOf(5))}</td>
         <td style="text-align:center">${fmtAvg(avgOf(6))}</td>
+        <td style="text-align:center"></td>
         <td style="text-align:center">${fmtAvg(avgOf(7))}</td>
         <td colspan="8"></td>
       </tr>`
     }
     return `<tbody>
-      <tr><td colspan="16" style="background:#eef2f7;font-weight:700;text-align:left;padding:6px 10px">${escHtml(b.label)} · ${t('dashChJoinCount', n)}</td></tr>
+      <tr><td colspan="17" style="background:#eef2f7;font-weight:700;text-align:left;padding:6px 10px">${escHtml(b.label)} · ${t('dashChJoinCount', n)}</td></tr>
       <tr>
         <th style="text-align:center">${t('dashChColDept')}</th><th>${t('dashChColName')}</th><th>${t('dashChColUser')}</th>
         <th style="text-align:center">${t('dashChColQ')}</th>
         <th style="text-align:center">${t('dashChColAcc')}</th>
         <th style="text-align:center;border-left:2px solid #e5e7eb">${t('dashChColPre')}</th>
         <th style="text-align:center">${t('dashChColFinal')}</th>
+        <th style="text-align:center;color:#6b7280" title="${escAttr(t('dashChPrevHint'))}">${t('dashChColPrevFinal')}</th>
         <th style="text-align:center">${t('dashChColChange')}</th>
         <th colspan="7" style="text-align:center;border-left:2px solid #e5e7eb">📅 ${t('dashChThCheckin')}（D1–D7）</th>
         <th style="text-align:center;border-left:2px solid #e5e7eb">${t('dashChThOps')}</th>
       </tr>
-      ${body || `<tr><td colspan="16" style="text-align:center;color:#9ca3af;padding:14px">${t('dashChGrpEmpty')}</td></tr>`}
+      ${body || `<tr><td colspan="17" style="text-align:center;color:#9ca3af;padding:14px">${t('dashChGrpEmpty')}</td></tr>`}
       ${avgRow}
     </tbody>`
   }).join('')

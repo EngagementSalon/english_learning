@@ -79,6 +79,16 @@ function rowOf(html, username) {
   return seg.slice(start, seg.indexOf('</tr>', start))
 }
 const countOf = (s, k) => s.split(k).length - 1
+// ★v187：明细表新增「上期期末」独立列 → 成绩相关三格的固定位置是 前测=5 / 后测=6 / 上期=7。
+//   不要再用「整行里 — 的个数」当判据：每加一列（或某人多一列空值）就会假红。
+//   本函数按单元格切分，断言各自只看自己那一格。
+function scoreCellsOf(rowHtml) {
+  // ★ 实测：rowOf 的切片起点是「用户名格的内容」（'>bob<'），不是姓名格。
+  //   先补一个 <td> 让序号从整格算起：
+  //   [1]=用户名 [2]=题量 [3]=正确率 [4]=前测 [5]=后测 [6]=上期期末 [7]=提分
+  const seg = ('<td>' + rowHtml).split('<td')
+  return { pre: seg[4] || '', fin: seg[5] || '', prev: seg[6] || '' }
+}
 
 // ---------- 学员端沙箱（challenge.js 进度相关函数） ----------
 const DAYS_MINI = [
@@ -155,7 +165,9 @@ function fullChy(cleared) {
   }
   {
     const r = rowOf(html, 'bob')
-    assert('已重置学员：两列成绩显示「—」（不再显示旧分数）', countOf(r, '>—</span>') === 2, r.slice(0, 400))
+    const sc = scoreCellsOf(r)
+    assert('已重置学员：本期两列成绩显示「—」（不再显示旧分数）',
+      countOf(sc.pre + sc.fin, '>—</span>') === 2, r.slice(0, 400))
     assert('已重置学员：不会出现考试分数 40 / 90', !r.includes('>40<') && !r.includes('>90<'))
     // v139：原「9/9 环节」进度列并入三段分组形态 → 改断 D1–D7 全为 1（存根算完成，练习进度不倒退）
     assert('已重置学员：7 天 D1–D7 全为 1（存根算完成，进度不倒退）',
@@ -222,7 +234,11 @@ function fullChy(cleared) {
     const html2 = renderDash([{ username: 'bob', name: 'Bob', dept: '迎宾前台', role: 'student', chy, chQ: {} }])
     const r = rowOf(html2, 'bob')
     assert('重考后 Day7 成绩列恢复（80 分）', r.includes('>80<'), r.slice(0, 400))
-    assert('Day1 仍为「—」（未重考）', countOf(r, '>—</span>') === 1, r.slice(0, 400))
+    const sc2 = scoreCellsOf(r)
+    assert('Day1 仍为「—」（未重考）', countOf(sc2.pre, '>—</span>') === 1, r.slice(0, 400))
+    // ★v187：上期期末是独立列，本期状态不影响它（此场景无上期记录 → 该格为「—」）
+    assert('上期期末独立成列（无上期记录 → 「—」，不影响本期两列判定）',
+      countOf(sc2.prev, '>—</span>') === 1, r.slice(0, 400))
     assert('重考的期末成绩按 3 倍权重计入积分（得分 20800 × 首答 176/210 → 17432 − 950s = 16482）', html2.includes('>16482<'), '')
     assert('Day7 打卡仍为 ✓（重考不重复计数，v141 两态形态）', countOf(r, '>✓</span>') === 7, r.slice(-240))
   }

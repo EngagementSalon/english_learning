@@ -148,15 +148,19 @@ if (list) {
   ck(totalQ === 10, '汇总题量只含本期（A 的 10，不含 B 的上期 20）', 'totalQ=' + totalQ)
 }
 
-// ── 源码契约：渲染层
+// ── 源码契约：渲染层（v187 起：上期期末是一列独立列，本期两列不再传参照）
 console.log('\n=== [D][E] 渲染层契约 ===')
-ck(/scoreCell\(p\.s1, p\.m1\)/.test(appCode), '前测列不传上期参照（第 3 参缺省）')
-ck(/scoreCell\(p\.s7, p\.m7, p\.s7p\)/.test(appCode), '期末列传 s7p 作上期参照')
+ck(/scoreCell\(p\.s1, p\.m1\)/.test(appCode), '前测列只吃本期成绩（两参）')
+ck(/scoreCell\(p\.s7, p\.m7\)/.test(appCode), '期末列同样只吃本期成绩（两参，不再塞上期）')
+ck(!/scoreCell\(p\.s7, p\.m7, p\.s7p\)/.test(appCode), '期末列已不传 s7p（v187 撤掉灰显替身）')
+ck(/prevCell\(p\.s7p\)/.test(appCode), '上期期末走独立单元格 prevCell(p.s7p)')
+ck(/dashChColPrevFinal/.test(appCode), '表头引用 dashChColPrevFinal（独立列头）')
 ck(/s7p/.test(appCode) && !/s1p\b/.test(appCode), '代码里只有 s7p，无 s1p 残留')
 ck(/dashChPrevHint/.test(I18N), 'i18n 含 dashChPrevHint（上期期末说明）')
-ck(/dashChPrevMark/.test(I18N), 'i18n 含 dashChPrevMark（上标「上」）')
+ck(/dashChColPrevFinal: '[^']+'/.test(I18N), 'i18n 含 dashChColPrevFinal 列名')
+ck(!/dashChPrevMark/.test(I18N), 'i18n 已删 dashChPrevMark（不再用上标「上」）')
 ck(!/dashChPrevOnlyBadge/.test(I18N), 'i18n 已清理「仅上期」角标键（用户要求不显示其他）')
-// ★ 带参 i18n 键必须是函数值；这两个是纯字符串，正确
+// ★ 带参 i18n 键必须是函数值；这个是纯字符串，正确
 ck(/dashChPrevHint: '[^']*'/.test(I18N), 'dashChPrevHint 为字符串（无参文案正确）')
 
 console.log('\n────────────────────────────')
