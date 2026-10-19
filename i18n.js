@@ -181,6 +181,8 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     dashChDayMarkHint: 'D1–D7：✓ = 当日全部阶段完成；◐ = 只完成部分阶段；− = 未参与。导出 Excel 时为 1 / −1 两态。',
     dashChDayPartialHint: '当日只完成了部分阶段',
     dashChManualBadgeHint: '该成绩由管理员手动补录，非学员本人考试产生',
+    dashChPrevHint: '上期期末成绩，仅供参照，不计入本期统计',
+    dashChPrevMark: '上',
     // v108：成绩同步状态（学员交卷结果页可见）+ 管理员核对成绩
     syncDone: '成绩已同步到系统',
     syncPending: '成绩正在同步，请保持页面打开…',
@@ -1231,6 +1233,8 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     dashChDayMarkHint: 'D1–D7: ✓ = all stages done that day; ◐ = partially done; − = not participated. The Excel export uses 1 / −1.',
     dashChDayPartialHint: 'Only part of that day was completed',
     dashChManualBadgeHint: 'This score was entered manually by an administrator, not produced by the student\'s own exam',
+    dashChPrevHint: 'Previous-round final score — reference only, excluded from this round\'s statistics',
+    dashChPrevMark: 'P',
     // v108: score sync status (visible on the student's result page) + admin reconcile
     syncDone: 'Your score has been synced',
     syncPending: 'Syncing your score — please keep this page open…',

@@ -5226,16 +5226,17 @@ function renderDashChallengeBlock(rows) {
   // ★ 保留 `x => recSlug(x) === wantSlug` 这一字面写法：test-v88-rounds 以源码模式校验
   //   「看板按营次筛选 chy」这一行为，改成只调 chyOfSlug 会让该断言失去锚点。
   const chyOf = r => (r && r.chy ? r.chy.filter(x => recSlug(x) === wantSlug) : [])
-  // ★★★v184（线上实测：学员考完试，看板「前测/后测」仍显示 —，打卡全是 —）
-  //   真因：同为「艳中餐厅」的营次建了两期（r2 = 第一期、r6 = 第二期），而
-  //     ① 学员的挑战进度**权威在本机 localStorage**，云端 chy 只聚合不回放（§0·补）；
-  //     ② 因此没换设备/没清缓存的学员，第二期交卷时**沿用了第一期存档键**
-  //        → 他打完了 r6 的 Day1–7，云端 r6 却一条记录都没有，记录全挂在 r2 名下。
-  //     云端实测：r6 参与 0 人，r2 参与 9 人（含实际在打第二期的人）。
-  //   修法：选中营次查不到时，回落到该学员**在本部门实际有记录、且日期最近**的营次。
-  //   ★ 为什么是「本部门」而不是「全库」：不同部门题库不同（v156 抽题已按分部门收窄），
-  //     跨部门借成绩会把别人部门的成绩算进来。本营次所属部门清单为空（= 全部门适用）时
-  //     才允许不限部门 —— 与 chRounds[].depts 的既有语义保持一致。
+  // ★★★v185（线上实测：切到「艳中第二期」后，9 个学员全都显示第一期成绩）
+  //   v184 曾用 chyAnyOf「本营次为空 → 回落到同部门最近营次」，后果是**把上一期的成绩
+  //   当成这一期的成绩展示**，制造了比原缺陷更严重的问题：管理员看到的是编造的数据。
+  //   真实数据（10-19 快照）：r6 第二期只有 2 人 3 条记录（何旭艳 2、杨宇航 1，均为当日写入），
+  //   而 r2 第一期有 89 条 → 回落把 7 个只在第一期参与过的人「搬」进了第二期。
+  //   ★ 结论（红线）：**成绩、打卡、题量、正确率、积分、导出、汇总，全部只用本营次记录**，
+  //     绝不跨期取数。上一期只允许以「灰色 + 上标」的方式出现在单元格里作参照，
+  //     且必须带 tooltip 说明「不计入本期统计」。
+  //   ★ 为什么要参照而不是干脆不显示：学员本期没做前测（本机进度未清零，见 §0·补），
+  //     管理员需要知道他上期考了多少分才能判断水平；但绝不能让他误以为这是本期成绩。
+  //   ★ 术语澄清：那位学员「前测没有成绩」不是同步失败 —— 第二期他确实没做前测。
   const _rdObj = (rdList.find(r => r.id === want) || dashRoundList().find(r => r.id === want) || {})
   const wantDepts = (Array.isArray(_rdObj.depts) ? _rdObj.depts.filter(Boolean) : []).map(String)
   const _deptOfUser = r => {
@@ -5250,7 +5251,8 @@ function renderDashChallengeBlock(rows) {
     const d = _deptOfUser(r)
     return wantDepts.some(w => w === d.key || w === d.majorKey)
   }
-  const _latestSlugOf = r => {
+  // 上期 = 同部门、非本营次、记录时间最晚的那一期（只供参照，绝不进统计）
+  const _prevSlugOf = r => {
     let best = null
     for (const x of (Array.isArray(r && r.chy) ? r.chy : [])) {
       const slug = recSlug(x)
@@ -5261,11 +5263,8 @@ function renderDashChallengeBlock(rows) {
     }
     return best ? best.slug : ''
   }
-  // 合并视图：本营次记录 + （仅当本营次为空时）该学员最近营次的记录
-  const chyAnyOf = r => {
-    const own = chyOf(r)
-    if (own.length) return own
-    const fb = _latestSlugOf(r)
+  const chyPrevOf = r => {
+    const fb = _prevSlugOf(r)
     return fb ? chyOfSlug(r, fb) : []
   }
   // v89 部门筛选：'all' = 全部部门；否则按大部门 key / 分部门 slug 过滤学员
@@ -5276,10 +5275,10 @@ function renderDashChallengeBlock(rows) {
     if (dashChDept.indexOf('/') >= 0) return hit.key === dashChDept
     return hit.majorKey === dashChDept
   }
-  // ★v184：参与名单也走 chyAnyOf —— 否则「记录挂在上一期营次」的学员会整行消失：
-  //   榜上无名比显示「—」更糟（管理员会以为他没参加）。参与与否看的是「有没有挑战记录」，
-  //   不是「记录上的营次号对不对」。
-  const parts = (rows || []).filter(r => r && chyAnyOf(r).length && deptFilter(r))
+  // ★v185 参与名单：本期有记录的人 + 本期没有但上期参与过的人（后者打「仅上期」角标）。
+  //   保留上期人员是为了「人不上榜」不会让管理员误判他没参加过；
+  //   但其所有数字由 chyOf（严格本期）算出，自然全为空/0，不会污染汇总。
+  const parts = (rows || []).filter(r => r && (chyOf(r).length || chyPrevOf(r).length) && deptFilter(r))
   // v89 部门筛选按钮组（饮食部四分队 + 房务部 + 全部）：各部门题不同 → 需要分开看
   const deptBarOptions = ['all'].concat(
     (typeof ADMIN_DEPT_TABS !== 'undefined' ? ADMIN_DEPT_TABS : []).filter(k => k !== 'all')
@@ -5312,9 +5311,10 @@ function renderDashChallengeBlock(rows) {
   // 汇总
   let totalQ = 0, totalC = 0
   const list = parts.map(r => {
-    // ★v184：成绩与打卡统一取「本营次优先，缺失则回落到同部门最近营次」的合并视图，
-    //   与 parts 过滤条件同源 —— 参与名单里有的人，成绩一定查得到。
-    const chy = chyAnyOf(r)
+    // ★★★v185 红线：统计口径**只用本营次记录**（chyOf），绝不跨期合并。
+    //   v184 曾在此处用 chyAnyOf（本期为空则回落上一期），导致「第二期全是第一期结果」。
+    //   q / acc / checkin / maxDay / 积分 / 导出 全部由 chy 派生 → 天然只含本期。
+    const chy = chyOf(r)
     const q = chy.reduce((s, c) => s + (c.total || 0), 0)
     const c = chy.reduce((s, x) => s + (x.correct || 0), 0)
     totalQ += q; totalC += c
@@ -5338,6 +5338,10 @@ function renderDashChallengeBlock(rows) {
     // 测试分：Day1 / Day7 的水平测试（test 只上报一次）；v84：成绩被管理员重置的存根跳过 → 显示「—」
     const t1 = chy.find(x => x.kind === 'test' && x.day === 1 && !x.cleared)
     const t7 = chy.find(x => x.kind === 'test' && x.day === 7 && !x.cleared)
+    // ★v185 上期参照值：**只取上期期末成绩（Day7 考试分）**，且只喂给单元格做灰色显示，
+    //   绝不参与 q/acc/积分/汇总/导出。上期前测不展示（用户 10-19 明确：只显示上期期末成绩）。
+    const prevChy = chyPrevOf(r)
+    const p7 = prevChy.find(x => x.kind === 'test' && x.day === 7 && !x.cleared)
     const score = x => x && x.total ? Math.round(x.correct / x.total * 100) : null
     // v73 积分榜：每环节按首次完成计（day-si 去重取 at 最早一条，重练不刷速度分）；
     // v78：答对分按环节权重（第七天期末考试 3 倍），用时扣分不变
@@ -5385,6 +5389,8 @@ function renderDashChallengeBlock(rows) {
       username: r.username, name: r.name, dept: r.dept, role: r.role,
       maxDay, stagesDone, q, acc: q > 0 ? Math.round(c / q * 100) : 0,
       s1: score(t1), s7: score(t7),
+      // ★v185：只保留上期期末成绩作参照（s7p），上期前测不展示
+      s7p: score(p7),
       // v105：该场成绩是否来自管理员手动补录（看板打「手动录入」标记，便于事后区分人工数据）
       m7: !!(t7 && t7.manual), m1: !!(t1 && t1.manual),
       checkin,
@@ -5427,8 +5433,12 @@ function renderDashChallengeBlock(rows) {
   const avgAcc = totalQ > 0 ? Math.round(totalC / totalQ * 100) : 0
   // v105：进度已到 Day7 但 D7 无成绩的人数 → 提示补录入口（正是本次事故的表现形态）
   const lack7 = list.filter(p => p.s7 == null && p.maxDay >= 7).length
-  const scoreCell = (s, manual) => (s == null
-    ? '<span style="color:#9ca3af;font-size:12px">—</span>'
+  // ★v185：第 3 参 = 上期参照分。本期无成绩时才启用，灰色 + 上标「上」+ tooltip 明示「不计入本期」。
+  //   ★ 绝不能让上期数字长得像本期成绩 —— 这正是 v184 被用户抓到的问题。
+  const scoreCell = (s, manual, prev) => (s == null
+    ? (prev == null
+      ? '<span style="color:#9ca3af;font-size:12px">—</span>'
+      : `<span title="${escAttr(t('dashChPrevHint'))}" style="color:#9ca3af;font-size:12px;font-style:italic">${prev}<span style="font-size:9px;vertical-align:super;font-style:normal">${t('dashChPrevMark')}</span></span>`)
     : `<span style="font-weight:700;color:${s >= 80 ? '#059669' : s >= 60 ? '#d97706' : '#dc2626'}">${s}</span>`)
     // v105：手动补录的成绩加标记，避免事后与真实考试成绩混淆
     + (manual && s != null ? `<span title="${escAttr(t('dashChManualBadgeHint'))}" style="margin-left:4px;font-size:10px;color:#92400e;background:#fef3c7;border-radius:6px;padding:1px 5px;vertical-align:middle">${t('dashChManualBadge')}</span>` : '')
@@ -5472,7 +5482,7 @@ function renderDashChallengeBlock(rows) {
         <td style="text-align:center">${Number(p.q) || 0}</td>
         <td style="text-align:center">${accCell}</td>
         <td style="text-align:center;border-left:2px solid #e5e7eb">${scoreCell(p.s1, p.m1)}</td>
-        <td style="text-align:center">${scoreCell(p.s7, p.m7)}</td>
+        <td style="text-align:center">${scoreCell(p.s7, p.m7, p.s7p)}</td>
         <td style="text-align:center">${chgCell(dashChScoreChange(p))}</td>
         ${[1, 2, 3, 4, 5, 6, 7].map(d => `<td style="text-align:center;border-left:${d === 1 ? '2px solid #e5e7eb' : 'none'}">${dayCell(p, d)}</td>`).join('')}
         <td style="text-align:center;border-left:2px solid #e5e7eb;white-space:nowrap">
