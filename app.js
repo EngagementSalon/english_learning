@@ -5949,27 +5949,35 @@ function _upLineChartSvg(opt) {
   let yMin = (opt.yMin == null) ? 0 : Number(opt.yMin)
   let yMax = (opt.yMax == null) ? 100 : Number(opt.yMax)
   let ticks = Array.isArray(opt.yTicks) ? opt.yTicks : [0, 25, 50, 75, 100]
-  // ★ 分数轴（10-20 用户反馈「每 25 分太大了」）：0–100 配 25 分一档会把 90~100 的人
-  //   全压在顶部 10% 里，看不出高低。改成 **60 起、10 分一档**。
-  //   但真实数据里最低有 35 分（523 条记录里 7 条 <60），硬切 60 会把点画到框外 = 丢数据，
-  //   所以下限跟着最低分走，向下取整到整十，并挑一个能整除到 100 的步长（避免出现 90→100 这种半格）。
+  // ★ 分数轴按**本人实际分数**自适应（10-20 两轮反馈：先「每 25 分太大了」→ 再「100 和 95
+  //   这种曲线弧度能否明显点」）。固定 60–100 跨 40 分，5 分的差只占图高 1/8，看着就是平的。
+  //   现在粒度跟着数据跨度走：跨度 ≤20 用 5 分档、≤55 用 10 分档、更大用 20 分档。
+  //   ★ 硬底线不能破：yMin 恒 ≤ 本图最低分（向下取整再留一格），**绝不把点画到框外**。
+  //     真实数据最低 35 分（523 条里 7 条 <60），所以不能为了放大一律切 60。
   if (opt.scoreAxis) {
-    let low = Infinity
+    let low = Infinity, high = -Infinity
     series.forEach(s => s.values.forEach(v => {
       const num = Number(v)
-      if (v != null && Number.isFinite(num)) low = Math.min(low, num)
+      if (v != null && Number.isFinite(num)) {
+        low = Math.min(low, num)
+        high = Math.max(high, num)
+      }
     }))
-    if (!Number.isFinite(low)) low = 100
-    yMax = Math.max(100, Math.ceil(low / 10) * 10)
-    yMin = Math.min(60, Math.floor(low / 10) * 10)
-    const span = yMax - yMin
-    let step = 10
-    const cands = [10, 20, 25]
-    for (let i = 0; i < cands.length; i++) {
-      if (span % cands[i] === 0 && span / cands[i] <= 5) { step = cands[i]; break }
-    }
+    if (!Number.isFinite(low)) { low = 100; high = 100 }
+    const raw = high - low
+    const step0 = (raw <= 20) ? 5 : (raw <= 55 ? 10 : 20)
+    // 上下各留一格余量，令点不贴边
+    let lo = Math.floor((low - step0) / step0) * step0
+    if (lo < 0) lo = 0
+    let hi = Math.ceil((high + step0) / step0) * step0
+    if (hi > 100) hi = 100            // 分数制上限就是 100
+    if (hi <= lo) hi = lo + step0
+    // 至少 3 个刻度段 —— 只有 2 段时两个点会贴着上下边框，反而看不出走势
+    while ((hi - lo) / step0 < 3 && lo - step0 >= 0) lo -= step0
+    yMin = lo
+    yMax = hi
     ticks = []
-    for (let v = yMin; v <= yMax; v += step) ticks.push(v)
+    for (let v = lo; v <= hi; v += step0) ticks.push(v)
   }
   const tickText = (typeof opt.tickText === 'function') ? opt.tickText : (v => String(v))
   const W = Math.max(460, 76 * (n - 1) + 108)

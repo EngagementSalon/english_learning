@@ -217,9 +217,11 @@ const htmlEmpty = _upProfileHtml({ username: 'z', name: '无记录' }, null, [])
 ck(htmlEmpty.indexOf('upNoChallenge') > 0 && htmlEmpty.indexOf('upNoCourse') > 0, 'F7 空数据走空态文案')
 
 // ─────────────────────────── [G] 分数轴刻度
-// 用户 10-20 追加：「每 25 分太大了 范围 60-100 吧」。
-// 契约：分数轴默认 60 起、10 分一档；**真有人低于 60 时下限跟着最低分走**（否则点被画到框外 = 丢数据）。
-console.log('\n=== [G] 分数轴：60 起 10 分一档，低分不越界 ===')
+// 用户 10-20 追加：「每 25 分太大了 范围 60-100 吧」→ v191 又追加「100 和 95 这种曲线弧度
+//   能否明显点」。结论：轴范围必须**按本人实际分数自适应收紧**，固定 60–100 跨 40 分，
+//   5 分的差只占图高 1/8，看着就是平的。
+// 契约：跨度 ≤20 → 5 分档；≤55 → 10 分档；更大 → 20 分档；**yMin 恒 ≤ 本图最低分**（不丢点）。
+console.log('\n=== [G] 分数轴：按本人分数自适应，窄跨度自动放大 ===')
 const ticksOf = svg => {
   const out = []
   const re = /text-anchor="end" font-size="10" fill="#9ca3af">([^<]*)</g
@@ -231,11 +233,12 @@ const axisSvg = vals => _upLineChartSvg({
   series: [{ name: '分数', color: '#2563eb', values: vals }],
   scoreAxis: true,
 })
-ck(ticksOf(axisSvg([95, 100])).join(',') === '60,70,80,90,100', 'G1 全部 ≥60 → 刻度 60/70/80/90/100（不再 25 分一档）')
-ck(ticksOf(axisSvg([50, 82])).join(',') === '50,60,70,80,90,100', 'G2 出现 50 分 → 下限降到 50')
-ck(ticksOf(axisSvg([35, 100])).join(',') === '30,40,50,60,70,80,90,100', 'G3 出现 35 分（线上真实最低）→ 下限降到 30')
-ck(ticksOf(axisSvg([40, 90])).join(',') === '40,60,80,100', 'G4 跨度大时步长自动放成 20，不出现半格')
-ck(ticksOf(axisSvg([null, null])).join(',') === '60,70,80,90,100', 'G5 无数据也保持 60–100')
+ck(ticksOf(axisSvg([95, 100])).join(',') === '85,90,95,100', 'G1 数据只有 95~100 → 轴收到 85–100、5 分一档')
+ck(ticksOf(axisSvg([50, 82])).join(',') === '40,50,60,70,80,90,100', 'G2 数据 50~82 → 40–100、10 分一档')
+ck(ticksOf(axisSvg([35, 100])).join(',') === '0,20,40,60,80,100', 'G3 出现 35 分（线上真实最低）→ 0–100、20 分一档')
+ck(ticksOf(axisSvg([40, 90])).join(',') === '30,40,50,60,70,80,90,100', 'G4 数据 40~90 → 30–100、10 分一档')
+ck(ticksOf(axisSvg([null, null])).join(',') === '85,90,95,100', 'G5 无数据时给一个安全默认轴（85–100）')
+ck(ticksOf(axisSvg([70, 75])).join(',') === '65,70,75,80', 'G5b 70~75 这种窄区间 → 65–80，不被硬拉到 100')
 // 几何：低分点必须仍在绘图区内。
 // ★ 边界值从源码读（H / padT / padB），不硬写数字 —— 以后调整图高不会再假红一次。
 const H_VAL = Number((APP_CODE.match(/const H = (\d+)/) || [])[1]) || 232
@@ -247,9 +250,12 @@ const cyList = svg => [...svg.matchAll(/<circle cx="[\d.]+" cy="([\d.]+)"/g)].ma
 const cyLow = cyList(axisSvg([35, 100]))
 ck(cyLow.length === 2 && cyLow.every(y => y >= PAD_T && y <= BOTTOM),
   'G6 35 分与 100 分都在绘图区内（不越界裁掉）', JSON.stringify(cyLow) + ' · 区间 ' + PAD_T + '~' + BOTTOM)
+// ★ 这条是用户「弧度明显点」的量化判据：5 分差必须能看出落差
 const cyHigh = cyList(axisSvg([95, 100]))
-ck((cyHigh[0] - cyHigh[1]) > 15, 'G7 95 与 100 的纵向间距 >15px（旧 0–100/25 档只有约 7px，挤在一起看不出高低）',
-  (cyHigh[0] - cyHigh[1]).toFixed(1) + 'px')
+const gap95 = cyHigh[0] - cyHigh[1]
+ck(gap95 >= 45, 'G7 95 与 100 的纵向间距 ≥45px（v191 固定 60–100 时只有 20.8px，仍是平的）', gap95.toFixed(1) + 'px')
+const cyFull = cyList(axisSvg([90, 100]))
+ck(cyFull[0] - cyFull[1] >= 90, 'G7b 90 与 100 的间距 ≥90px（10 分差要拉开到明显弧度）', (cyFull[0] - cyFull[1]).toFixed(1) + 'px')
 // 兼容：等级图仍走显式 yTicks，不传 scoreAxis 的调用行为不变
 ck(ticksOf(svg3).join(',') === '未评定,1,2,3,4' || ticksOf(svg3).join(',').indexOf('未评定') === 0, 'G8 显式 yTicks（等级图）不受影响')
 ck(ticksOf(_upLineChartSvg({ labels: ['a'], series: [{ name: 'S', color: '#000', values: [50] }] })).join(',') === '0,25,50,75,100',
@@ -259,6 +265,30 @@ const axUses = (APP_CODE.match(/scoreAxis:\s*true/g) || []).length
 ck(axUses === 2, 'G10 挑战分数图与线下课分数图都传了 scoreAxis', '(' + axUses + ')')
 ck(!/yMin:\s*0,\s*yMax:\s*100,\s*yTicks:\s*\[0,\s*25,\s*50,\s*75,\s*100\]/.test(APP_CODE),
   'G11 已无写死的 0–100/25 刻度残留')
+
+// ─────────────────────────── [I] 自适应轴的边界条件
+// 放大不能变成「画到框外」，也不能压过 100 上限，更不能只剩 2 段让点贴边。
+console.log('\n=== [I] 自适应轴：不越界 / 不超 100 / 至少 3 段 ===')
+const axisOf = vals => {
+  const t = ticksOf(axisSvg(vals)).map(Number)
+  return { lo: t[0], hi: t[t.length - 1], step: t.length > 1 ? t[1] - t[0] : 0, ticks: t }
+}
+const many = [[95, 100], [88, 92], [70, 75], [40, 45], [50, 82], [35, 100], [12, 88], [0, 100], [99, 100], [100]]
+let badCover = [], badTop = [], badSeg = [], badStep = []
+many.forEach(v => {
+  const a = axisOf(v)
+  const valid = v.filter(x => x != null && isFinite(x))
+  if (valid.some(x => x < a.lo || x > a.hi)) badCover.push(v.join('/'))
+  if (a.hi > 100) badTop.push(v.join('/'))
+  if ((a.hi - a.lo) / a.step < 3) badSeg.push(v.join('/'))
+  if ([5, 10, 20].indexOf(a.step) < 0) badStep.push(v.join('/'))
+})
+ck(badCover.length === 0, 'I1 任何数据下轴都覆盖全部点（不越界、不裁点）', badCover.join(' '))
+ck(badTop.length === 0, 'I2 轴上界不超过 100（分数制上限）', badTop.join(' '))
+ck(badSeg.length === 0, 'I3 轴至少 3 个刻度段（2 段会让点贴着边框）', badSeg.join(' '))
+ck(badStep.length === 0, 'I4 步长只取 5 / 10 / 20（不出现 2.5、12.5 这类怪刻度）', badStep.join(' '))
+ck(axisOf([0, 100]).lo === 0 && axisOf([0, 100]).hi === 100, 'I5 0~100 全区间不被压缩（放大只针对窄跨度）')
+ck(axisOf([95, 100]).lo >= 60, 'I6 窄跨度时轴不再死守 60（否则又回到「看着是平的」）')
 
 // ─────────────────────────── [H] 趋势线视觉强化
 // 用户 10-20 追加：「这个趋势线不明显 我希望更明显一点」。
