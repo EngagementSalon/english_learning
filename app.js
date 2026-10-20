@@ -5938,6 +5938,66 @@ function dashUserCourseSeries(courseDoc, username) {
   return out.sort((a, b) => (a.at || 0) - (b.at || 0))
 }
 
+// ====== v193：学员档案「错题」======
+// 数据来源与口径（都来自云端 base 记录的既有字段，未新增任何上报）：
+//   · r.chQ  = 七天挑战里答错的题（只在该题**最终仍答错**时 +1，见 cloud-store 'perq' 的 d.ch 分支）
+//   · r.perQ = 普通练习/考试里答错的题（答对不再记录，所以这里只会有错题）
+//   两者都是 { qid: { correct, total } } —— **没有时间戳**，所以只能按「错了几次」排序，
+//   绝不能编一个「最近错题」顺序出来（那是伪造信息）。
+//
+// ★★ 三条红线：
+//   ① 题面一律从 Store.getQuestions() 现取（种子 + 派生 + 上传 + 云端 upq 的唯一入口），
+//      绝不把题干冗余存进云端 —— storage 只有 1MB，且题库改了题干后冗余副本会立刻过期。
+//   ② 取不到题面的 qid（历史遗留 id / 已被删除的题）**不静默丢弃**，单独计数并说明，
+//      否则用户会以为「我明明错了 20 题怎么只显示 12 道」。
+//   ③ 只读。不写任何存储、不上报、不改 chQ/perQ。
+function dashUserWrongList(row, questions) {
+  const r = row || {}
+  const pool = Array.isArray(questions) ? questions : []
+  const byId = new Map()
+  pool.forEach(q => { if (q && q.id != null) byId.set(String(q.id), q) })
+
+  const collect = (src, bucket) => {
+    const tbl = (r[src] && typeof r[src] === 'object') ? r[src] : {}
+    Object.keys(tbl).forEach(qid => {
+      const rec = tbl[qid] || {}
+      const total = Number(rec.total) || 0
+      if (total <= 0) return
+      // correct/total 口径：只有「一次都没答对」才是纯错题；混有答对的仍算错题，但错次取 total-correct
+      const wrong = Math.max(0, total - (Number(rec.correct) || 0))
+      if (wrong <= 0) return
+      bucket.push({ qid: String(qid), wrong, total, q: byId.get(String(qid)) || null })
+    })
+  }
+
+  const ch = [], pr = []
+  collect('chQ', ch)
+  collect('perQ', pr)
+
+  const pack = arr => arr
+    .sort((a, b) => (b.wrong - a.wrong) || (String(a.qid) < String(b.qid) ? -1 : 1))
+    .map(x => ({
+      qid: x.qid,
+      wrong: x.wrong,
+      question: x.q ? String(x.q.question || '') : '',
+      type: x.q ? String(x.q.type || '') : '',
+      options: (x.q && Array.isArray(x.q.options)) ? x.q.options.map(o => String(o == null ? '' : o)) : [],
+      answer: (x.q && Array.isArray(x.q.answer)) ? x.q.answer.slice() : [],
+      explanation: x.q ? String(x.q.explanation || '') : '',
+      found: !!x.q,
+    }))
+
+  const chP = pack(ch), prP = pack(pr)
+  const miss = chP.concat(prP).filter(x => !x.found).length
+  return {
+    challenge: chP,
+    practice: prP,
+    total: chP.length + prP.length,
+    missing: miss,                    // 题面取不到的条数（仍计入 total）
+    found: chP.length + prP.length - miss,
+  }
+}
+
 // 手绘 SVG 折线图。series = [{ name, color, values:[num|null] }]；null = 该点没数据。
 //   ★ 缺值必须断线，不能跨缺口连直线 —— 那等于用视线编造出一段不存在的走势。
 function _upLineChartSvg(opt) {
@@ -6064,7 +6124,7 @@ function closeUserProfile() {
 }
 
 // 档案弹窗内容（纯函数，便于沙箱断言）
-function _upProfileHtml(r, courseDoc, events) {
+function _upProfileHtml(r, courseDoc, events, wrong) {
   r = r || {}
   const u = String(r.username || '')
   const rounds = dashUserRoundSeries(r)
@@ -6189,6 +6249,11 @@ function _upProfileHtml(r, courseDoc, events) {
         </tr></thead>
         <tbody>${coRows}</tbody>
       </table></div>` : `<div style="padding:18px;text-align:center;color:#9ca3af;font-size:13px">${t('upNoCourse')}</div>`}
+
+    <h4 style="margin:18px 0 6px;font-size:14px">✍️ ${t('upWrongTitle')}
+      ${wrong && wrong.total ? `<span style="font-size:12px;color:#dc2626;font-weight:700">(${wrong.total})</span>` : ''}</h4>
+    <p class="form-hint" style="margin:0 0 6px">${t('upWrongHint')}</p>
+    ${_upWrongSectionHtml(wrong)}
   `
 }
 
@@ -6230,7 +6295,88 @@ async function openUserProfile(username) {
       <p style="margin:16px 0;color:#92400e;font-size:13px">${t('upNoCloudRow')}</p>`
     return
   }
-  inner.innerHTML = _upProfileHtml(r, courseDoc, events)
+  inner.innerHTML = _upProfileHtml(r, courseDoc, events, dashUserWrongList(r,
+    (typeof Store !== 'undefined' && Store.getQuestions) ? Store.getQuestions() : []))
+}
+
+// 学员档案：错题卡片（纯函数，便于沙箱断言）。
+// 展示顺序：先「错得最多」——次数是最有信息量的维度（同一题错 5 次 vs 错 1 次，处理优先级完全不同）。
+function _upWrongCardHtml(item, idx) {
+  const q = item || {}
+  // ★ 题型标签走既有 t('typeLabels') 表（不要自造 typeSingle 这类不存在的键，
+  //   t() 对未知键原样返回键名，会直接在界面显示 "typeSingle"）
+  const tyLabel = (ty) => {
+    const m = (typeof t === 'function' && t('typeLabels')) || {}
+    return (m && m[ty]) || ty || '—'
+  }
+  // 题型 → 正确答案的展示形式。listen/voicematch 的「选项」就是候选读音文本，
+  // 直接列出会被误读成「多个正确答案」，所以只标出正确那一条。
+  const ty = String(q.type || '')
+  const ansIdx = Array.isArray(q.answer) ? q.answer : []
+  const opts = Array.isArray(q.options) ? q.options : []
+  let ansHtml = ''
+
+  if (!ansIdx.length) {
+    ansHtml = `<span style="color:#9ca3af">${t('upWrongNoAnswer')}</span>`
+  } else if (ty === 'fill' || ty === 'translate') {
+    // 这两类 options[0] 就是参考答案（见 store 的 compactUploadedOptions 注释）
+    ansHtml = `<span style="color:#059669;font-weight:700">${escHtml(opts[0] == null ? '' : opts[0])}</span>`
+  } else if (ty === 'judge' && opts.length >= 2) {
+    ansHtml = ansIdx.map(i => `<span style="color:#059669;font-weight:700">${escHtml(opts[i] == null ? '' : opts[i])}</span>`).join(' / ')
+  } else if (opts.length) {
+    // single / multiple / listen / voicematch / pronounce：按下标取
+    ansHtml = ansIdx.map(i => {
+      const v = opts[i]
+      return `<span style="color:#059669;font-weight:700">${escHtml(v == null ? '—' : v)}</span>`
+    }).join(' / ')
+  } else {
+    ansHtml = ansIdx.map(i => `<span style="color:#059669;font-weight:700">${escHtml(String(i))}</span>`).join(', ')
+  }
+
+  // 题面：listen/voicematch 的题干可能是中文提示（如「选出正确英文」），也可能就是英文原文
+  const stem = String(q.question || '')
+  const stemHtml = q.found
+    ? escHtml(stem.length > 160 ? stem.slice(0, 160) + '…' : stem)
+    : `<span style="color:#9ca3af;font-style:italic">(#${escHtml(q.qid)} 题干已不在题库)</span>`
+
+  return `<div style="border:1px solid #eef0f3;border-radius:8px;padding:9px 11px;margin-bottom:7px;background:#fff">
+      <div style="display:flex;align-items:flex-start;gap:8px">
+        <span style="flex:none;min-width:22px;text-align:center;font-size:11px;font-weight:700;color:#dc2626;background:#fef2f2;border-radius:5px;padding:1px 5px">${idx}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;line-height:1.5">${stemHtml}</div>
+          <div style="margin-top:5px;font-size:12px;color:#6b7280">
+            <span>${t('upWrongAnswer')}：</span>${ansHtml}
+          </div>
+          <div style="margin-top:4px;display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:#9ca3af">
+            <span>${escHtml(tyLabel(ty))}</span>
+            <span style="color:#dc2626;font-weight:700">${t('upWrongTimes', q.wrong || 0)}</span>
+          </div>
+        </div>
+      </div>
+    </div>`
+}
+
+function _upWrongSectionHtml(wrong) {
+  const w = wrong || { challenge: [], practice: [], total: 0, missing: 0 }
+  if (!w.total) {
+    return `<div style="padding:16px;text-align:center;color:#9ca3af;font-size:13px">${t('upWrongNone')}</div>`
+  }
+  const group = (list, title) => {
+    if (!list.length) return ''
+    return `<div style="margin-top:10px">
+        <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px">${title}
+          <span style="color:#9ca3af;font-weight:400">(${list.length})</span></div>
+        ${list.map((x, i) => _upWrongCardHtml(x, i + 1)).join('')}
+      </div>`
+  }
+  // 上限 60 条：再多就刷不动了（实测单人最多 92 条），超出部分只报数量，别让弹窗卡死
+  const LIMIT = 60
+  const trim = list => (list.length > LIMIT ? { show: list.slice(0, LIMIT), more: list.length - LIMIT } : { show: list, more: 0 })
+  const chT = trim(w.challenge), prT = trim(w.practice)
+  const moreNote = n => (n > 0 ? `<div style="margin-top:6px;color:#9ca3af;font-size:11.5px;text-align:center">… 还有 ${n} 道未列出</div>` : '')
+  return `${w.missing ? `<p class="form-hint" style="margin:0 0 8px;color:#92400e">${t('upWrongMissing', w.missing)}</p>` : ''}
+    ${group(chT.show, t('upWrongCh'))}${moreNote(chT.more)}
+    ${group(prT.show, t('upWrongPr'))}${moreNote(prT.more)}`
 }
 
 // ====== 管理员看板：分类题库分布（按部门切换） ======
