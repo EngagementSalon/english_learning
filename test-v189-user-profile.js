@@ -236,11 +236,17 @@ ck(ticksOf(axisSvg([50, 82])).join(',') === '50,60,70,80,90,100', 'G2 出现 50 
 ck(ticksOf(axisSvg([35, 100])).join(',') === '30,40,50,60,70,80,90,100', 'G3 出现 35 分（线上真实最低）→ 下限降到 30')
 ck(ticksOf(axisSvg([40, 90])).join(',') === '40,60,80,100', 'G4 跨度大时步长自动放成 20，不出现半格')
 ck(ticksOf(axisSvg([null, null])).join(',') === '60,70,80,90,100', 'G5 无数据也保持 60–100')
-// 几何：低分点必须仍在绘图区内（cy 落在 padT=24 ~ H-padB=170），分数越高 cy 越小
+// 几何：低分点必须仍在绘图区内。
+// ★ 边界值从源码读（H / padT / padB），不硬写数字 —— 以后调整图高不会再假红一次。
+const H_VAL = Number((APP_CODE.match(/const H = (\d+)/) || [])[1]) || 232
+const padM = APP_CODE.match(/padL = \d+, padR = \d+, padT = (\d+), padB = (\d+)/) || []
+const PAD_T = Number(padM[1]) || 26
+const PAD_B = Number(padM[2]) || 40
+const BOTTOM = H_VAL - PAD_B
 const cyList = svg => [...svg.matchAll(/<circle cx="[\d.]+" cy="([\d.]+)"/g)].map(m => Number(m[1]))
 const cyLow = cyList(axisSvg([35, 100]))
-ck(cyLow.length === 2 && cyLow[0] >= 24 && cyLow[0] <= 170 && cyLow[1] >= 24 && cyLow[1] <= 170,
-  'G6 35 分与 100 分都在绘图区内（不越界裁掉）', JSON.stringify(cyLow))
+ck(cyLow.length === 2 && cyLow.every(y => y >= PAD_T && y <= BOTTOM),
+  'G6 35 分与 100 分都在绘图区内（不越界裁掉）', JSON.stringify(cyLow) + ' · 区间 ' + PAD_T + '~' + BOTTOM)
 const cyHigh = cyList(axisSvg([95, 100]))
 ck((cyHigh[0] - cyHigh[1]) > 15, 'G7 95 与 100 的纵向间距 >15px（旧 0–100/25 档只有约 7px，挤在一起看不出高低）',
   (cyHigh[0] - cyHigh[1]).toFixed(1) + 'px')
@@ -253,6 +259,47 @@ const axUses = (APP_CODE.match(/scoreAxis:\s*true/g) || []).length
 ck(axUses === 2, 'G10 挑战分数图与线下课分数图都传了 scoreAxis', '(' + axUses + ')')
 ck(!/yMin:\s*0,\s*yMax:\s*100,\s*yTicks:\s*\[0,\s*25,\s*50,\s*75,\s*100\]/.test(APP_CODE),
   'G11 已无写死的 0–100/25 刻度残留')
+
+// ─────────────────────────── [H] 趋势线视觉强化
+// 用户 10-20 追加：「这个趋势线不明显 我希望更明显一点」。
+// 契约：线加粗 / 点做实心 / 加渐变面积 / 标签加白描边打底 / 图变高。
+console.log('\n=== [H] 趋势线更明显：线宽 / 实心点 / 渐变面积 ===')
+const svgVis = _upLineChartSvg({
+  labels: ['第一期', '第二期', '第三期'],
+  series: [{ name: '期末', color: '#059669', values: [80, 90, 100] }],
+  scoreAxis: true,
+})
+ck(/<linearGradient id="upg059669_0"/.test(svgVis), 'H1 每个系列生成渐变定义（面积靠它淡出）')
+ck(/<path d="M[^"]*L[^"]*Z" fill="url\(#upg059669_0\)"/.test(svgVis), 'H2 面积路径闭合到底线并引用渐变')
+ck(/stroke-width="3\.4"/.test(svgVis), 'H3 折线加粗到 3.4（原 2.2）')
+ck(/<circle[^>]*r="4\.4"[^>]*fill="#059669"[^>]*stroke="#fff"/.test(svgVis), 'H4 数据点改实心 + 白描边（原空心 3.6）')
+ck(/paint-order="stroke"/.test(svgVis), 'H5 分数标签有白色描边打底（压在面积上也读得清）')
+ck(new RegExp('height="' + H_VAL + '"').test(svgVis) && H_VAL >= 230, 'H6 图高加大到 ' + H_VAL + 'px（原 210）')
+// ★ 面积同样必须断线：缺值段各自闭合，不能跨缺口连成一整块
+const svgGap = _upLineChartSvg({
+  labels: ['a', 'b', 'c', 'd'],
+  series: [{ name: 'S', color: '#2563eb', values: [80, null, 90, 95] }],
+  scoreAxis: true,
+})
+const areaPaths = [...svgGap.matchAll(/<path d="(M[^"]*Z)" fill="url\(#/g)].map(m => m[1])
+ck(areaPaths.length === 1, 'H7 面积按连续段闭合：单点段（[80,null,90,95] 只左边 1 点）不出面积')
+const svgGap2 = _upLineChartSvg({
+  labels: ['a', 'b', 'c', 'd', 'e'],
+  series: [{ name: 'S', color: '#2563eb', values: [80, 90, null, 95, 100] }],
+  scoreAxis: true,
+})
+const areaPaths2 = [...svgGap2.matchAll(/<path d="(M[^"]*Z)" fill="url\(#/g)].map(m => m[1])
+ck(areaPaths2.length === 1 && (areaPaths2[0].match(/M/g) || []).length === 2,
+  'H8 缺值两侧各 2 点 → 同一 path 里 2 个 M（两段，绝不跨缺口连成整块）',
+  areaPaths2[0] ? areaPaths2[0].slice(0, 70) : '')
+// 定级图是离散档位：必须关掉面积，否则会被读成「等级 25% 满」
+const svgLv = _upLineChartSvg({
+  labels: ['10-01', '10-05'], series: [{ name: 'L', color: '#7c3aed', values: [1, 3] }],
+  yMin: 0, yMax: 4, yTicks: [0, 1, 2, 3, 4], area: false,
+})
+ck(svgLv.indexOf('linearGradient') < 0 && svgLv.indexOf('fill="url(#') < 0, 'H9 area:false → 定级图不画面积')
+ck(/yTicks: \[0, 1, 2, 3, 4\], area: false/.test(APP_CODE), 'H10 定级图调用处确实传了 area:false')
+ck(/stroke-width="3\.4"/.test(svgLv), 'H11 定级图折线同样加粗（一致性）')
 
 console.log('\n' + (fail === 0 ? '✅' : '❌') + ' v189 学员档案：' + pass + ' 通过 / ' + fail + ' 失败')
 process.exit(fail === 0 ? 0 : 1)

@@ -5973,12 +5973,16 @@ function _upLineChartSvg(opt) {
   }
   const tickText = (typeof opt.tickText === 'function') ? opt.tickText : (v => String(v))
   const W = Math.max(460, 76 * (n - 1) + 108)
-  const H = 210
-  const padL = 46, padR = 18, padT = 24, padB = 40
+  // ★ 10-20 用户「这个趋势线不明显 我希望更明显一点」→ 图长高 22px、线加粗到 3.4、
+  //   点改实心、每根线加一条向下淡出的渐变面积。单靠一根 2px 的线在 90~100 之间
+  //   几乎看不出起伏，面积把「量」显出来，趋势才立得住。
+  const H = 232
+  const padL = 46, padR = 18, padT = 26, padB = 40
   const iw = W - padL - padR, ih = H - padT - padB
+  const baseY = padT + ih
   const xOf = i => padL + (n === 1 ? iw / 2 : iw * i / (n - 1))
   const yOf = v => padT + ih - ih * ((Number(v) - yMin) / Math.max(1e-6, yMax - yMin))
-  const grid = ticks.map(v => `<line x1="${padL}" y1="${yOf(v).toFixed(1)}" x2="${W - padR}" y2="${yOf(v).toFixed(1)}" stroke="#eef1f5" stroke-width="1"></line>`
+  const grid = ticks.map(v => `<line x1="${padL}" y1="${yOf(v).toFixed(1)}" x2="${W - padR}" y2="${yOf(v).toFixed(1)}" stroke="#e9edf3" stroke-width="1"></line>`
     + `<text x="${padL - 8}" y="${(yOf(v) + 4).toFixed(1)}" text-anchor="end" font-size="10" fill="#9ca3af">${escHtml(String(tickText(v)))}</text>`).join('')
   const shortLb = lb => {
     const s = String(lb == null ? '' : lb)
@@ -5988,6 +5992,29 @@ function _upLineChartSvg(opt) {
   }
   const xLabels = labels.map((lb, i) =>
     `<text x="${xOf(i).toFixed(1)}" y="${H - padB + 17}" text-anchor="middle" font-size="11" fill="#6b7280">${escHtml(shortLb(lb))}</text>`).join('')
+  // 渐变面积 id：同色同序号可能跨图重复，但重复时定义完全一致（同色同透明度），取哪份都一样。
+  const gradId = (s, i) => 'upg' + String(s.color || '#000').replace(/[^0-9a-zA-Z]/g, '') + '_' + i
+  // opt.area === false → 不画面积（定级图：L1–L4 是离散档位，填了会被误读成「等级 25% 满」）
+  const defs = (opt.area === false) ? '' : series.map((s, i) => `<linearGradient id="${gradId(s, i)}" x1="0" y1="0" x2="0" y2="1">`
+    + `<stop offset="0%" stop-color="${s.color}" stop-opacity="0.26"></stop>`
+    + `<stop offset="100%" stop-color="${s.color}" stop-opacity="0.01"></stop></linearGradient>`).join('')
+  const areas = (opt.area === false) ? '' : series.map((s, i) => {
+    // ★ 面积同样必须按「连续段」闭合 —— 缺值处断开，绝不跨缺口连成一块（同折线红线）
+    const segs = []
+    let cur = []
+    s.values.forEach((v, idx) => {
+      const num = Number(v)
+      if (v == null || !Number.isFinite(num)) { if (cur.length) segs.push(cur); cur = []; return }
+      cur.push({ x: xOf(idx), y: yOf(num) })
+    })
+    if (cur.length) segs.push(cur)
+    const d = segs.filter(g => g.length >= 2).map(g => {
+      let p = 'M' + g[0].x.toFixed(1) + ' ' + baseY.toFixed(1)
+      g.forEach(q => { p += 'L' + q.x.toFixed(1) + ' ' + q.y.toFixed(1) + ' ' })
+      return p + 'L' + g[g.length - 1].x.toFixed(1) + ' ' + baseY.toFixed(1) + ' Z'
+    }).join(' ')
+    return d ? `<path d="${d}" fill="url(#${gradId(s, i)})" stroke="none"></path>` : ''
+  }).join('')
   const paths = series.map(s => {
     let d = '', pen = false
     s.values.forEach((v, i) => {
@@ -5999,17 +6026,18 @@ function _upLineChartSvg(opt) {
     const dots = s.values.map((v, i) => {
       const num = Number(v)
       if (v == null || !Number.isFinite(num)) return ''
-      return `<circle cx="${xOf(i).toFixed(1)}" cy="${yOf(num).toFixed(1)}" r="3.6" fill="#fff" stroke="${s.color}" stroke-width="2.2"></circle>`
-        + `<text x="${xOf(i).toFixed(1)}" y="${(yOf(num) - 9).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="700" fill="${s.color}">${escHtml(String(num))}</text>`
+      return `<circle cx="${xOf(i).toFixed(1)}" cy="${yOf(num).toFixed(1)}" r="4.4" fill="${s.color}" stroke="#fff" stroke-width="2.2"></circle>`
+        // 标签压在面积上也要读得清 → 白色描边打底（paint-order 让描边画在字下面）
+        + `<text x="${xOf(i).toFixed(1)}" y="${(yOf(num) - 10).toFixed(1)}" text-anchor="middle" font-size="12" font-weight="700" fill="${s.color}" stroke="#fff" stroke-width="3.2" paint-order="stroke" stroke-linejoin="round">${escHtml(String(num))}</text>`
     }).join('')
-    return `<path d="${d.trim()}" fill="none" stroke="${s.color}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"></path>${dots}`
+    return `<path d="${d.trim()}" fill="none" stroke="${s.color}" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round"></path>${dots}`
   }).join('')
   const legend = series.map(s => `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#6b7280">`
-    + `<span style="width:14px;height:3px;border-radius:2px;background:${s.color};display:inline-block"></span>${escHtml(s.name || '')}</span>`).join('')
+    + `<span style="width:16px;height:4px;border-radius:2px;background:${s.color};display:inline-block"></span>${escHtml(s.name || '')}</span>`).join('')
   return `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-      <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" style="display:block">${grid}${xLabels}${paths}</svg>
+      <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" style="display:block"><defs>${defs}</defs>${grid}${areas}${xLabels}${paths}</svg>
     </div>
-    ${legend ? `<div style="display:flex;gap:14px;flex-wrap:wrap;margin:2px 0 0">${legend}</div>` : ''}`
+    ${legend ? `<div style="display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 0">${legend}</div>` : ''}`
 }
 
 // 姓名单元格里的可点链接。★ 用户名走 data-u（v85 教训：名字里一个引号就能截断内联 onclick）
@@ -6076,7 +6104,7 @@ function _upProfileHtml(r, courseDoc, events) {
     ? _upLineChartSvg({
         labels: lvPts.map(p => (p.at ? fmtAt(p.at) : t('upNow'))),
         series: [{ name: t('upSeriesLevel'), color: '#7c3aed', values: lvPts.map(p => p.lv) }],
-        yMin: 0, yMax: 4, yTicks: [0, 1, 2, 3, 4],
+        yMin: 0, yMax: 4, yTicks: [0, 1, 2, 3, 4], area: false,
         tickText: v => (Number(v) === 0 ? t('upLvNone') : 'L' + v),
       })
     : ''
