@@ -216,5 +216,43 @@ ck(!/NaN|undefined/.test(html), 'F6 整片 HTML 无 NaN/undefined')
 const htmlEmpty = _upProfileHtml({ username: 'z', name: '无记录' }, null, [])
 ck(htmlEmpty.indexOf('upNoChallenge') > 0 && htmlEmpty.indexOf('upNoCourse') > 0, 'F7 空数据走空态文案')
 
+// ─────────────────────────── [G] 分数轴刻度
+// 用户 10-20 追加：「每 25 分太大了 范围 60-100 吧」。
+// 契约：分数轴默认 60 起、10 分一档；**真有人低于 60 时下限跟着最低分走**（否则点被画到框外 = 丢数据）。
+console.log('\n=== [G] 分数轴：60 起 10 分一档，低分不越界 ===')
+const ticksOf = svg => {
+  const out = []
+  const re = /text-anchor="end" font-size="10" fill="#9ca3af">([^<]*)</g
+  let m; while ((m = re.exec(svg))) out.push(m[1])
+  return out
+}
+const axisSvg = vals => _upLineChartSvg({
+  labels: vals.map((_, i) => '第' + (i + 1) + '期'),
+  series: [{ name: '分数', color: '#2563eb', values: vals }],
+  scoreAxis: true,
+})
+ck(ticksOf(axisSvg([95, 100])).join(',') === '60,70,80,90,100', 'G1 全部 ≥60 → 刻度 60/70/80/90/100（不再 25 分一档）')
+ck(ticksOf(axisSvg([50, 82])).join(',') === '50,60,70,80,90,100', 'G2 出现 50 分 → 下限降到 50')
+ck(ticksOf(axisSvg([35, 100])).join(',') === '30,40,50,60,70,80,90,100', 'G3 出现 35 分（线上真实最低）→ 下限降到 30')
+ck(ticksOf(axisSvg([40, 90])).join(',') === '40,60,80,100', 'G4 跨度大时步长自动放成 20，不出现半格')
+ck(ticksOf(axisSvg([null, null])).join(',') === '60,70,80,90,100', 'G5 无数据也保持 60–100')
+// 几何：低分点必须仍在绘图区内（cy 落在 padT=24 ~ H-padB=170），分数越高 cy 越小
+const cyList = svg => [...svg.matchAll(/<circle cx="[\d.]+" cy="([\d.]+)"/g)].map(m => Number(m[1]))
+const cyLow = cyList(axisSvg([35, 100]))
+ck(cyLow.length === 2 && cyLow[0] >= 24 && cyLow[0] <= 170 && cyLow[1] >= 24 && cyLow[1] <= 170,
+  'G6 35 分与 100 分都在绘图区内（不越界裁掉）', JSON.stringify(cyLow))
+const cyHigh = cyList(axisSvg([95, 100]))
+ck((cyHigh[0] - cyHigh[1]) > 15, 'G7 95 与 100 的纵向间距 >15px（旧 0–100/25 档只有约 7px，挤在一起看不出高低）',
+  (cyHigh[0] - cyHigh[1]).toFixed(1) + 'px')
+// 兼容：等级图仍走显式 yTicks，不传 scoreAxis 的调用行为不变
+ck(ticksOf(svg3).join(',') === '未评定,1,2,3,4' || ticksOf(svg3).join(',').indexOf('未评定') === 0, 'G8 显式 yTicks（等级图）不受影响')
+ck(ticksOf(_upLineChartSvg({ labels: ['a'], series: [{ name: 'S', color: '#000', values: [50] }] })).join(',') === '0,25,50,75,100',
+  'G9 不传 scoreAxis 仍用旧默认刻度（向后兼容）')
+// 接线：两处分数图必须真的打开 scoreAxis
+const axUses = (APP_CODE.match(/scoreAxis:\s*true/g) || []).length
+ck(axUses === 2, 'G10 挑战分数图与线下课分数图都传了 scoreAxis', '(' + axUses + ')')
+ck(!/yMin:\s*0,\s*yMax:\s*100,\s*yTicks:\s*\[0,\s*25,\s*50,\s*75,\s*100\]/.test(APP_CODE),
+  'G11 已无写死的 0–100/25 刻度残留')
+
 console.log('\n' + (fail === 0 ? '✅' : '❌') + ' v189 学员档案：' + pass + ' 通过 / ' + fail + ' 失败')
 process.exit(fail === 0 ? 0 : 1)

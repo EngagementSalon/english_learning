@@ -5946,9 +5946,31 @@ function _upLineChartSvg(opt) {
   const series = (Array.isArray(opt.series) ? opt.series : []).filter(s => s && Array.isArray(s.values))
   let n = Math.max(labels.length, 1)
   series.forEach(s => { n = Math.max(n, s.values.length) })
-  const yMin = (opt.yMin == null) ? 0 : Number(opt.yMin)
-  const yMax = (opt.yMax == null) ? 100 : Number(opt.yMax)
-  const ticks = Array.isArray(opt.yTicks) ? opt.yTicks : [0, 25, 50, 75, 100]
+  let yMin = (opt.yMin == null) ? 0 : Number(opt.yMin)
+  let yMax = (opt.yMax == null) ? 100 : Number(opt.yMax)
+  let ticks = Array.isArray(opt.yTicks) ? opt.yTicks : [0, 25, 50, 75, 100]
+  // ★ 分数轴（10-20 用户反馈「每 25 分太大了」）：0–100 配 25 分一档会把 90~100 的人
+  //   全压在顶部 10% 里，看不出高低。改成 **60 起、10 分一档**。
+  //   但真实数据里最低有 35 分（523 条记录里 7 条 <60），硬切 60 会把点画到框外 = 丢数据，
+  //   所以下限跟着最低分走，向下取整到整十，并挑一个能整除到 100 的步长（避免出现 90→100 这种半格）。
+  if (opt.scoreAxis) {
+    let low = Infinity
+    series.forEach(s => s.values.forEach(v => {
+      const num = Number(v)
+      if (v != null && Number.isFinite(num)) low = Math.min(low, num)
+    }))
+    if (!Number.isFinite(low)) low = 100
+    yMax = Math.max(100, Math.ceil(low / 10) * 10)
+    yMin = Math.min(60, Math.floor(low / 10) * 10)
+    const span = yMax - yMin
+    let step = 10
+    const cands = [10, 20, 25]
+    for (let i = 0; i < cands.length; i++) {
+      if (span % cands[i] === 0 && span / cands[i] <= 5) { step = cands[i]; break }
+    }
+    ticks = []
+    for (let v = yMin; v <= yMax; v += step) ticks.push(v)
+  }
   const tickText = (typeof opt.tickText === 'function') ? opt.tickText : (v => String(v))
   const W = Math.max(460, 76 * (n - 1) + 108)
   const H = 210
@@ -6028,7 +6050,7 @@ function _upProfileHtml(r, courseDoc, events) {
           { name: t('upSeriesPre'), color: '#2563eb', values: rounds.map(x => x.pre) },
           { name: t('upSeriesFinal'), color: '#059669', values: rounds.map(x => x.final) },
         ],
-        yMin: 0, yMax: 100, yTicks: [0, 25, 50, 75, 100],
+        scoreAxis: true,
       })
     : `<div style="padding:18px;text-align:center;color:#9ca3af;font-size:13px">${t('upNoChallenge')}</div>`
   const chRows = rounds.map(x => {
@@ -6069,7 +6091,7 @@ function _upProfileHtml(r, courseDoc, events) {
     ? _upLineChartSvg({
         labels: scored.map((c, i) => '#' + (i + 1)),
         series: [{ name: t('upSeriesCourse'), color: '#d97706', values: scored.map(c => c.score) }],
-        yMin: 0, yMax: 100, yTicks: [0, 25, 50, 75, 100],
+        scoreAxis: true,
       })
     : ''
   const typeLabel = ty => (typeof courseAssignTypeLabel === 'function') ? courseAssignTypeLabel(ty) : ty
