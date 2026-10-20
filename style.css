@@ -1441,3 +1441,14 @@ tr.chapter-sep-plain.chapter-sep-locked > td { background:#f3f4f6; }
   .ch-lv-flash-up .ch-lv-badge, .ch-lv-flash-down .ch-lv-badge { animation: none; }
   .ch-lv-bar-fill { transition: none; }
 }
+
+/* ====== v189：学员档案（数据看板里点姓名 → 个人走势） ====== */
+/* 姓名是「可点的」这件事必须看得出来，否则没人会去点。
+   虚线下划线 = 链接语义但比实线下划线安静，不干扰表格阅读。 */
+.up-link { color: inherit; text-decoration: none; border-bottom: 1px dashed #c7cbd1; cursor: pointer; }
+.up-link:hover, .up-link:focus { color: #2563eb; border-bottom-color: #2563eb; outline: none; }
+/* 档案弹窗在窄屏上留足边距，内层表格自己横向滚动，页面本身不横滚 */
+@media (max-width: 520px) {
+  #upProfileModal { padding: 8px !important; }
+  #upProfileModal > div { padding: 14px !important; border-radius: 10px !important; }
+}

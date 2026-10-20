@@ -3939,6 +3939,10 @@ function dashStorageBarHtml() {
 
 async function renderDashboard() {
   if (!Store.isAdmin()) return
+  // ★ v189：姓名可点链接。**必须在函数内用 typeof 守卫自包含** —— 既有套件按源码切片
+  //   只注入本函数（沙箱里没有 upNameLink），直接引用会 ReferenceError 让整片套件假红
+  //   （v182 拆函数、v139 同款坑）。切片沙箱里 typeof 恒 undefined → 退回纯文本，行为不变。
+  const _nameLink = (typeof upNameLink === 'function') ? upNameLink : ((_u, _x) => escHtml(_x || '—'))
   const session = Store.getSession()
   const el = document.getElementById('page-dashboard')
   el.innerHTML = `<div class="card" style="text-align:center;padding:48px;color:#6b7280"><div style="font-size:28px;margin-bottom:10px">☁️</div>${t('cloudLoading')}</div>`
@@ -3951,7 +3955,7 @@ async function renderDashboard() {
     const lastActive = u.lastActive ? new Date(u.lastActive).toLocaleString(LANG === 'en' ? 'en-US' : 'zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—'
     return `<tr>
       <td>${escHtml(u.username)}${u.id === session.id ? ` <span style="color:#9ca3af;font-size:10px">${t('meTag')}</span>` : ''}${u.cloudOnly ? ` <span style="color:#2563eb;font-size:10px" title="${t('cloudUserTip')}">☁</span>` : ''}</td>
-      <td>${escHtml(u.name || '—')}</td>
+      <td>${_nameLink(u.username, u.name || '—')}</td>
       <td>${escHtml(u.dept || '—')}</td>
       <td><span class="role-badge ${u.role === 'admin' ? 'role-admin' : ''}">${u.role === 'admin' ? t('roleAdmin') : t('roleStudent')}</span></td>
       <td>${u.role !== 'admin' ? _chLevelCell(u) : '—'}</td>
@@ -3992,7 +3996,7 @@ async function renderDashboard() {
   // ---- 线下明细表（学员线下课程完成情况）----
   const offlineRowsHtml = students.map(u => `<tr>
     <td>${escHtml(u.username)}${u.cloudOnly ? ` <span style="color:#2563eb;font-size:10px" title="${t('cloudUserTip')}">☁</span>` : ''}</td>
-    <td>${escHtml(u.name || '—')}</td>
+    <td>${_nameLink(u.username, u.name || '—')}</td>
     <td>${escHtml(u.dept || '—')}</td>
     <td style="text-align:center">${u.courseTotal > 0 ? u.courseDone + '/' + u.courseTotal : '—'}</td>
     <td style="text-align:center">${u.courseDone > 0 ? u.courseAvg + (LANG === 'en' ? '' : '分') : '—'}</td>
@@ -5203,6 +5207,8 @@ function dashRoundUnderDept(r, sel) {
   return false
 }
 function renderDashChallengeBlock(rows) {
+  // ★ v189：姓名链接的沙箱守卫（同上，见 renderDashboard 开头注释）
+  const _nameLink = (typeof upNameLink === 'function') ? upNameLink : ((_u, _x) => escHtml(_x || '—'))
   const el = document.getElementById('dashChallengeBlock')
   if (!el) return
   // v162：累计总览视图 → 交给独立渲染函数（跨**全部营次**的总账，不再按营次筛选）。
@@ -5495,7 +5501,7 @@ function renderDashChallengeBlock(rows) {
         : '<span style="color:#9ca3af">-</span>'
       return `<tr>
         ${run ? `<td rowspan="${run.to - run.from + 1}" style="vertical-align:middle;text-align:center;color:#6b7280;font-size:12px">${escHtml(p.dept || '—')}</td>` : ''}
-        <td style="white-space:nowrap">${escHtml(p.name || '—')}</td>
+        <td style="white-space:nowrap">${_nameLink(p.username, p.name || '—')}</td>
         <td style="white-space:nowrap;color:#6b7280;font-size:12px">${escHtml(p.username || '—')}</td>
         <td style="text-align:center">${Number(p.q) || 0}</td>
         <td style="text-align:center">${accCell}</td>
@@ -5590,7 +5596,7 @@ function renderDashChallengeBlock(rows) {
             ${lbList.length ? lbList.map((p, i) => `<tr${i < 3 ? ' style="background:#fffbeb"' : ''}>
               <td style="text-align:center;font-size:15px">${medal(i)}</td>
               <td>${escHtml(p.username)}</td>
-              <td>${escHtml(p.name || '—')}</td>
+              <td>${_nameLink(p.username, p.name || '—')}</td>
               <td>${escHtml(p.dept || '—')}</td>
               <td style="text-align:center;font-weight:700;color:#b45309">${p.lbScore}</td>
               <td style="text-align:center">${p.lbC}</td>
@@ -5697,6 +5703,8 @@ function dashChTotalRows(rows, deptSel) {
 }
 
 function renderDashChTotalBlock(rows) {
+  // ★ v189：姓名链接的沙箱守卫（同上，见 renderDashboard 开头注释）
+  const _nameLink = (typeof upNameLink === 'function') ? upNameLink : ((_u, _x) => escHtml(_x || '—'))
   const el = document.getElementById('dashChallengeBlock')
   if (!el) return
   // 累计总览是「总账页」→ 把营次管理面板收起，避免两个面板抢视线（切回当期看板即恢复）。
@@ -5748,7 +5756,7 @@ function renderDashChTotalBlock(rows) {
   const body = sorted.map((p, i) => `<tr>
       <td style="text-align:center;color:#6b7280;font-size:12px" title="${escAttr(t('dashChTotalRankHint'))}">${i + 1}</td>
       <td style="white-space:nowrap;text-align:center;color:#6b7280;font-size:12px">${escHtml(p.dept || '—')}</td>
-      <td style="white-space:nowrap">${escHtml(p.name || '—')}${p.role === 'admin' ? ` <span style="font-size:10px;color:#92400e;background:#fef3c7;border-radius:6px;padding:1px 5px">${escHtml(t('roleAdmin'))}</span>` : ''}</td>
+      <td style="white-space:nowrap">${_nameLink(p.username, p.name || '—')}${p.role === 'admin' ? ` <span style="font-size:10px;color:#92400e;background:#fef3c7;border-radius:6px;padding:1px 5px">${escHtml(t('roleAdmin'))}</span>` : ''}</td>
       <td style="white-space:nowrap;color:#6b7280;font-size:12px">${escHtml(p.username || '—')}</td>
       <td style="text-align:center" title="${escAttr(p.roundSlugs.map(rdNameOf).join('、'))}">${p.rounds}</td>
       <td style="text-align:center;font-weight:700">${p.q}</td>
@@ -5795,6 +5803,376 @@ function renderDashChTotalBlock(rows) {
         </table>
       </div>
     </div>`
+}
+
+// ====== v189：学员档案（点姓名 → 个人走势）======
+// 用户诉求（2026-10-20）：「我可以点击每个人的名字，然后看到这个人具体七天挑战和线下课
+//   以及定级的走势，要有每次七天挑战的折线图分数走势」。
+//
+// ★★★ 口径红线（承 v185）：本档案**逐营次独立取数、绝不跨期合并或回落**。
+//   每个营次一个数据点，没参加就是空的 —— 宁可显示「—」，也不许拿上一期顶替。
+//   · 分数 = round(correct / total * 100)，与看板 score() 同口径；cleared（成绩重置存根）不计。
+//   · 前测 = 该营次 day===1 的 test（取最晚一条，兼容重置后重考）；期末 = 该营次 day 最大且
+//     >1 的 test（同样取最晚）。用「最大 day」而非写死 7：v188 起新结构仍以 Day7 收尾，
+//     存量营次里也有提前开考只做到 Day7 的情况，max 天然兼容两种。
+//   · 线下课只读 CourseStore 文档里的 results，不写回、不触发任何上报。
+//   · 定级走势 = chlevel 事件的**变化点**（v166 A 案），不是从 chy 反推 ——
+//     chy 里的 lv 只是阶段快照（cloud-store 注释已警告），拿它画线会造出从未有过的等级。
+//   · 折线图是纯手写 SVG（站点无图表库依赖）。宽度按点数自适应 + 横向滚动：
+//     手机 360px 下整体缩放会把 11px 字压成 7px，看不清，宁可让它滚。
+function dashUserRoundSeries(r) {
+  const recs = (r && Array.isArray(r.chy)) ? r.chy.filter(Boolean) : []
+  const slugOf = x => (typeof dashRoundSlug === 'function')
+    ? dashRoundSlug((x && x.rd) || '')
+    : (String((x && x.rd) || '') || '第一期')
+  const groups = {}
+  const order = []
+  recs.forEach(x => {
+    const slug = slugOf(x)
+    if (!groups[slug]) { groups[slug] = []; order.push(slug) }
+    groups[slug].push(x)
+  })
+  const rdList = (typeof dashRoundList === 'function') ? dashRoundList() : []
+  const nameOf = slug => {
+    const hit = rdList.filter(x => ((typeof dashRoundSlug === 'function') ? dashRoundSlug(x.id) : x.id) === slug)[0]
+    return (hit && hit.name) || slug
+  }
+  const pctOf = x => {
+    const tt = Number(x && x.total) || 0
+    const cc = Number(x && x.correct) || 0
+    return tt > 0 ? Math.round(Math.min(1, cc / tt) * 100) : null
+  }
+  const atOf = x => Number(x && x.at) || 0
+  const latest = arr => arr.slice().sort((a, b) => atOf(a) - atOf(b)).pop() || null
+  const out = order.map(slug => {
+    const list = groups[slug].slice().sort((a, b) => atOf(a) - atOf(b))
+    const tests = list.filter(x => x.kind === 'test' && !x.cleared)
+    const dayOf = x => Number(x && x.day) || 0
+    const dMax = tests.length ? Math.max.apply(null, tests.map(dayOf)) : 0
+    const pre = latest(tests.filter(x => dayOf(x) === 1))
+    // 单日营次（只做过 Day1）→ 期末留空，绝不把前测复制成期末
+    const fin = dMax > 1 ? latest(tests.filter(x => dayOf(x) === dMax)) : null
+    let q = 0, c = 0
+    const first = {}
+    list.forEach(x => {
+      q += Number(x.total) || 0
+      c += Number(x.correct) || 0
+      if (x.cleared) return                       // v84：重置存根不计首答
+      const k = dayOf(x) + '|' + (Number(x.si) || 0)
+      if (!first[k] || atOf(x) < atOf(first[k])) first[k] = x
+    })
+    let fQ = 0, fC = 0
+    Object.keys(first).forEach(k => { fQ += Number(first[k].total) || 0; fC += Number(first[k].correct) || 0 })
+    const days = {}
+    list.forEach(x => { if (!x.cleared) days[dayOf(x)] = true })
+    return {
+      slug, name: nameOf(slug),
+      at: atOf(list[0]), endAt: atOf(list[list.length - 1]),
+      pre: pctOf(pre), final: pctOf(fin),
+      q, acc: q > 0 ? Math.round(Math.min(1, c / q) * 100) : null,
+      firstQ: fQ, firstAcc: fQ > 0 ? Math.round(Math.min(1, fC / fQ) * 100) : null,
+      days: Object.keys(days).length,
+    }
+  })
+  // 时间升序：X 轴必须是「第一次参与的先后」，不是营次创建顺序
+  return out.sort((a, b) => (a.at - b.at) || String(a.slug).localeCompare(String(b.slug)))
+}
+
+// 定级走势：chlevel 事件的变化点 + 当前值兜底。
+//   events 结构 = 云端事件队列（{ u, ty:'chlevel', ts, d:{ lv } | { clear:true } }）。
+//   相邻同值合并：管理员「重算历史等级」会一次刷出十几条同值事件，逐条画点会糊成一片。
+function dashUserLevelSeries(username, events, curLv) {
+  const u = String(username || '')
+  const pts = []
+  ;(Array.isArray(events) ? events : [])
+    .filter(ev => ev && ev.ty === 'chlevel' && String(ev.u || '') === u)
+    .map(ev => {
+      const d = ev.d || {}
+      if (d.clear === true) return { at: Number(ev.ts) || 0, lv: 0 }   // 清除 = 回到「未评定」
+      const n = Number(d.lv)
+      return (Number.isInteger(n) && n >= 1 && n <= 4) ? { at: Number(ev.ts) || 0, lv: n } : null
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.at - b.at)
+    .forEach(p => {
+      const last = pts[pts.length - 1]
+      if (last && last.lv === p.lv) { last.at = p.at; return }
+      pts.push({ at: p.at, lv: p.lv })
+    })
+  const cur = Number(curLv) || 0
+  const last = pts[pts.length - 1]
+  // 末尾补当前值（事件流拉不到时至少有一个点）；已有同值就不重复补
+  if (cur > 0 && (!last || last.lv !== cur)) pts.push({ at: 0, lv: cur })
+  return pts
+}
+
+// 线下课：该学员在各班级任务上的成绩序列（只读）。offline 无分数、video 取小测分。
+function dashUserCourseSeries(courseDoc, username) {
+  const u = String(username || '')
+  const out = []
+  const classes = (courseDoc && Array.isArray(courseDoc.classes)) ? courseDoc.classes : []
+  classes.forEach(c => {
+    const members = Array.isArray(c && c.members) ? c.members : []
+    const assigns = Array.isArray(c && c.assignments) ? c.assignments : []
+    assigns.forEach(a => {
+      if (!a || a.status === 'draft') return        // 草稿未发布 → 不算
+      const res = (a.results || {})[u]
+      if (!res) return
+      const ty = String(a.type || '')
+      let sc = null
+      if (ty === 'exam' || ty === 'coursefinal' || ty === 'homework') {
+        const n = Number(res.score)
+        sc = Number.isFinite(n) ? n : null
+      } else if (ty === 'video') {
+        const n = Number(res.quizScore)
+        sc = Number.isFinite(n) ? n : null
+      }
+      out.push({
+        className: c.name || '', title: a.title || '', type: ty, score: sc,
+        at: Number(res.at) || 0, attempts: Number(res.attempts) || 0,
+        done: (typeof _courseCellDone === 'function') ? _courseCellDone(a, res) : !!(res && res.done),
+        isMember: members.indexOf(u) >= 0,
+      })
+    })
+  })
+  return out.sort((a, b) => (a.at || 0) - (b.at || 0))
+}
+
+// 手绘 SVG 折线图。series = [{ name, color, values:[num|null] }]；null = 该点没数据。
+//   ★ 缺值必须断线，不能跨缺口连直线 —— 那等于用视线编造出一段不存在的走势。
+function _upLineChartSvg(opt) {
+  opt = opt || {}
+  const labels = Array.isArray(opt.labels) ? opt.labels : []
+  const series = (Array.isArray(opt.series) ? opt.series : []).filter(s => s && Array.isArray(s.values))
+  let n = Math.max(labels.length, 1)
+  series.forEach(s => { n = Math.max(n, s.values.length) })
+  const yMin = (opt.yMin == null) ? 0 : Number(opt.yMin)
+  const yMax = (opt.yMax == null) ? 100 : Number(opt.yMax)
+  const ticks = Array.isArray(opt.yTicks) ? opt.yTicks : [0, 25, 50, 75, 100]
+  const tickText = (typeof opt.tickText === 'function') ? opt.tickText : (v => String(v))
+  const W = Math.max(460, 76 * (n - 1) + 108)
+  const H = 210
+  const padL = 46, padR = 18, padT = 24, padB = 40
+  const iw = W - padL - padR, ih = H - padT - padB
+  const xOf = i => padL + (n === 1 ? iw / 2 : iw * i / (n - 1))
+  const yOf = v => padT + ih - ih * ((Number(v) - yMin) / Math.max(1e-6, yMax - yMin))
+  const grid = ticks.map(v => `<line x1="${padL}" y1="${yOf(v).toFixed(1)}" x2="${W - padR}" y2="${yOf(v).toFixed(1)}" stroke="#eef1f5" stroke-width="1"></line>`
+    + `<text x="${padL - 8}" y="${(yOf(v) + 4).toFixed(1)}" text-anchor="end" font-size="10" fill="#9ca3af">${escHtml(String(tickText(v)))}</text>`).join('')
+  const shortLb = lb => {
+    const s = String(lb == null ? '' : lb)
+    // ★ 截断必须保留**尾部**：实测营次名是「标帜餐厅七天挑战第一期 / 第二期」，
+    //   砍掉后半段会让两期标签长得一模一样（10-20 真实数据踩到），尾部才是区分点。
+    return s.length > 6 ? '…' + s.slice(-5) : s
+  }
+  const xLabels = labels.map((lb, i) =>
+    `<text x="${xOf(i).toFixed(1)}" y="${H - padB + 17}" text-anchor="middle" font-size="11" fill="#6b7280">${escHtml(shortLb(lb))}</text>`).join('')
+  const paths = series.map(s => {
+    let d = '', pen = false
+    s.values.forEach((v, i) => {
+      const num = Number(v)
+      if (v == null || !Number.isFinite(num)) { pen = false; return }
+      d += (pen ? 'L' : 'M') + xOf(i).toFixed(1) + ' ' + yOf(num).toFixed(1) + ' '
+      pen = true
+    })
+    const dots = s.values.map((v, i) => {
+      const num = Number(v)
+      if (v == null || !Number.isFinite(num)) return ''
+      return `<circle cx="${xOf(i).toFixed(1)}" cy="${yOf(num).toFixed(1)}" r="3.6" fill="#fff" stroke="${s.color}" stroke-width="2.2"></circle>`
+        + `<text x="${xOf(i).toFixed(1)}" y="${(yOf(num) - 9).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="700" fill="${s.color}">${escHtml(String(num))}</text>`
+    }).join('')
+    return `<path d="${d.trim()}" fill="none" stroke="${s.color}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"></path>${dots}`
+  }).join('')
+  const legend = series.map(s => `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#6b7280">`
+    + `<span style="width:14px;height:3px;border-radius:2px;background:${s.color};display:inline-block"></span>${escHtml(s.name || '')}</span>`).join('')
+  return `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+      <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" style="display:block">${grid}${xLabels}${paths}</svg>
+    </div>
+    ${legend ? `<div style="display:flex;gap:14px;flex-wrap:wrap;margin:2px 0 0">${legend}</div>` : ''}`
+}
+
+// 姓名单元格里的可点链接。★ 用户名走 data-u（v85 教训：名字里一个引号就能截断内联 onclick）
+function upNameLink(username, text) {
+  const u = String(username || '')
+  if (!u) return escHtml(text || '—')
+  return `<a href="javascript:void 0" class="up-link" data-u="${escAttr(u)}" title="${escAttr(t('upOpenHint'))}" onclick="openUserProfileFromEl(this)">${escHtml(text || u)}</a>`
+}
+function openUserProfileFromEl(el) {
+  if (!el || !el.dataset) return
+  openUserProfile(el.dataset.u || '')
+}
+function closeUserProfile() {
+  const el = document.getElementById('upProfileModal')
+  if (el) el.remove()
+}
+
+// 档案弹窗内容（纯函数，便于沙箱断言）
+function _upProfileHtml(r, courseDoc, events) {
+  r = r || {}
+  const u = String(r.username || '')
+  const rounds = dashUserRoundSeries(r)
+  const lvPts = dashUserLevelSeries(u, events, r.chLevel)
+  const courses = dashUserCourseSeries(courseDoc, u)
+  const lvNow = Number(r.chLevel) || 0
+  const lvBadge = lvNow
+    ? `<span class="level-badge level-${lvNow}" title="${escAttr(t('dashChLevelTip'))}">L${lvNow}</span>`
+    : `<span style="color:#9ca3af;font-size:12px">${t('dashChLevelNone')}</span>`
+  const fmtAt = ts => (ts ? new Date(ts).toLocaleDateString(LANG === 'en' ? 'en-US' : 'zh-CN', { month: '2-digit', day: '2-digit' }) : '—')
+  const dash = v => (v == null ? '<span style="color:#9ca3af">—</span>' : String(v))
+
+  // ---- 七天挑战：分数走势（前测 / 期末两条线）----
+  const chLabels = rounds.map(x => x.name)
+  const chChart = rounds.length
+    ? _upLineChartSvg({
+        labels: chLabels,
+        series: [
+          { name: t('upSeriesPre'), color: '#2563eb', values: rounds.map(x => x.pre) },
+          { name: t('upSeriesFinal'), color: '#059669', values: rounds.map(x => x.final) },
+        ],
+        yMin: 0, yMax: 100, yTicks: [0, 25, 50, 75, 100],
+      })
+    : `<div style="padding:18px;text-align:center;color:#9ca3af;font-size:13px">${t('upNoChallenge')}</div>`
+  const chRows = rounds.map(x => {
+    const d = (x.pre != null && x.final != null) ? (x.final - x.pre) : null
+    const dTxt = d == null ? '<span style="color:#9ca3af">—</span>'
+      : `<span style="font-weight:700;color:${d > 0 ? '#059669' : d < 0 ? '#dc2626' : '#6b7280'}">${d > 0 ? '+' + d : d}</span>`
+    return `<tr>
+      <td style="white-space:nowrap">${escHtml(x.name)}</td>
+      <td style="text-align:center;color:#6b7280;font-size:12px;white-space:nowrap">${fmtAt(x.at)}</td>
+      <td style="text-align:center;font-weight:700;color:#2563eb">${dash(x.pre)}</td>
+      <td style="text-align:center;font-weight:700;color:#059669">${dash(x.final)}</td>
+      <td style="text-align:center">${dTxt}</td>
+      <td style="text-align:center">${x.q}</td>
+      <td style="text-align:center">${x.firstAcc == null ? '<span style="color:#9ca3af">-</span>' : x.firstAcc + '%'}</td>
+      <td style="text-align:center;color:#6b7280">${x.days}</td>
+    </tr>`
+  }).join('')
+
+  // ---- 定级走势 ----
+  // ★ 只有一个点时不画图（单点折线毫无「走势」可言，看着像坏掉）：
+  //   改为徽章 + 说明。存量学员常见这种情形 —— 等级是 v166 迁移直接写进 base 的，没有事件历史。
+  const lvChart = lvPts.length >= 2
+    ? _upLineChartSvg({
+        labels: lvPts.map(p => (p.at ? fmtAt(p.at) : t('upNow'))),
+        series: [{ name: t('upSeriesLevel'), color: '#7c3aed', values: lvPts.map(p => p.lv) }],
+        yMin: 0, yMax: 4, yTicks: [0, 1, 2, 3, 4],
+        tickText: v => (Number(v) === 0 ? t('upLvNone') : 'L' + v),
+      })
+    : ''
+  const lvFlat = `<div style="padding:12px 0;text-align:center;color:#6b7280;font-size:13px">
+      <div style="margin-bottom:4px">${t('upLevelNow')}：${lvBadge}</div>
+      <div style="color:#9ca3af;font-size:12px">${lvPts.length === 1 ? t('upLvSingle') : t('upLvNoHistory')}</div>
+    </div>`
+
+  // ---- 线下课：分数走势 + 明细 ----
+  const scored = courses.filter(c => c.score != null)
+  const coChart = scored.length
+    ? _upLineChartSvg({
+        labels: scored.map((c, i) => '#' + (i + 1)),
+        series: [{ name: t('upSeriesCourse'), color: '#d97706', values: scored.map(c => c.score) }],
+        yMin: 0, yMax: 100, yTicks: [0, 25, 50, 75, 100],
+      })
+    : ''
+  const typeLabel = ty => (typeof courseAssignTypeLabel === 'function') ? courseAssignTypeLabel(ty) : ty
+  const coRows = courses.map((c, i) => {
+    // 图上标签 #n 与表格序号一一对应（任务名太长，塞不进 X 轴）
+    const idx = (c.score != null) ? '#' + (scored.indexOf(c) + 1) : '—'
+    return `<tr>
+      <td style="text-align:center;color:#6b7280;font-size:12px">${idx}</td>
+      <td style="white-space:nowrap;color:#6b7280;font-size:12px">${escHtml(c.className)}</td>
+      <td>${escHtml(c.title)}</td>
+      <td style="text-align:center;color:#6b7280;font-size:12px;white-space:nowrap">${escHtml(typeLabel(c.type))}</td>
+      <td style="text-align:center">${c.done ? '✅' : '<span style="color:#9ca3af">—</span>'}</td>
+      <td style="text-align:center;font-weight:700;color:#d97706">${c.score == null ? '<span style="color:#9ca3af">—</span>' : c.score}</td>
+      <td style="text-align:center;color:#6b7280;font-size:12px;white-space:nowrap">${fmtAt(c.at)}</td>
+    </tr>`
+  }).join('')
+
+  const th = 'style="text-align:center;color:#6b7280;font-weight:700;font-size:12px"'
+  return `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <div>
+        <h3 style="margin:0 0 4px;font-size:17px">👤 ${escHtml(r.name || u)} <span style="font-size:12px;color:#6b7280;font-weight:400">${escHtml(u)}</span></h3>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:#6b7280">
+          <span>${escHtml(r.dept || '—')}</span>
+          <span>·</span>
+          <span>${t('upLevelNow')}：${lvBadge}</span>
+          <span>·</span>
+          <span>${t('upRoundCount', rounds.length)}</span>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="closeUserProfile()">✕ ${t('upClose')}</button>
+    </div>
+
+    <h4 style="margin:16px 0 6px;font-size:14px">🏅 ${t('upChTitle')}</h4>
+    <p class="form-hint" style="margin:0 0 6px">${t('upChHint')}</p>
+    ${chChart}
+    ${rounds.length ? `<div style="overflow-x:auto;margin-top:10px">
+      <table class="admin-table" style="font-size:12px;min-width:560px">
+        <thead><tr>
+          <th>${t('upThRound')}</th><th ${th}>${t('upThStart')}</th>
+          <th ${th}>${t('dashChColPre')}</th><th ${th}>${t('dashChColFinal')}</th><th ${th}>${t('dashChColChange')}</th>
+          <th ${th}>${t('dashChColQ')}</th><th ${th}>${t('dashChTotalThFirst')}</th><th ${th}>${t('upThDays')}</th>
+        </tr></thead>
+        <tbody>${chRows}</tbody>
+      </table></div>` : ''}
+
+    <h4 style="margin:18px 0 6px;font-size:14px">🎚️ ${t('upLvTitle')}</h4>
+    <p class="form-hint" style="margin:0 0 6px">${t('upLvHint')}</p>
+    ${lvChart || lvFlat}
+
+    <h4 style="margin:18px 0 6px;font-size:14px">🏫 ${t('upCourseTitle')}</h4>
+    <p class="form-hint" style="margin:0 0 6px">${t('upCourseHint')}</p>
+    ${coChart}
+    ${courses.length ? `<div style="overflow-x:auto;margin-top:10px">
+      <table class="admin-table" style="font-size:12px;min-width:600px">
+        <thead><tr>
+          <th ${th}>#</th><th>${t('upThClass')}</th><th>${t('upThTask')}</th>
+          <th ${th}>${t('upThType')}</th><th ${th}>${t('upThDone')}</th><th ${th}>${t('upThScore')}</th><th ${th}>${t('upThStart')}</th>
+        </tr></thead>
+        <tbody>${coRows}</tbody>
+      </table></div>` : `<div style="padding:18px;text-align:center;color:#9ca3af;font-size:13px">${t('upNoCourse')}</div>`}
+  `
+}
+
+async function openUserProfile(username) {
+  const u = String(username || '').trim()
+  if (!u) return
+  const old = document.getElementById('upProfileModal')
+  if (old) old.remove()
+  const box = document.createElement('div')
+  box.id = 'upProfileModal'
+  box.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:flex-start;justify-content:center;background:rgba(0,0,0,.45);padding:16px;overflow-y:auto'
+  box.innerHTML = `<div style="background:#fff;border-radius:12px;max-width:880px;width:100%;margin:auto;padding:18px;box-shadow:0 10px 40px rgba(0,0,0,.2)">
+      <div style="padding:24px;text-align:center;color:#6b7280">☁️ ${t('cloudLoading')}</div>
+    </div>`
+  document.body.appendChild(box)
+  box.addEventListener('click', e => { if (e.target === box) closeUserProfile() })
+  const inner = box.firstElementChild
+  let rows = null, courseDoc = null
+  try {
+    const jobs = [
+      (typeof CloudSync !== 'undefined' && CloudSync.getDashboardData)
+        ? CloudSync.getDashboardData().catch(() => null)
+        : Promise.resolve(null),
+      (typeof CourseStore !== 'undefined' && CourseStore.getDoc)
+        ? CourseStore.getDoc().catch(() => null)
+        : Promise.resolve(null),
+    ]
+    const res = await Promise.all(jobs)
+    rows = res[0]; courseDoc = res[1]
+  } catch (e) { /* 离线：下面按「无数据」渲染 */ }
+  const r = (Array.isArray(rows) ? rows : []).filter(x => x && x.username === u)[0] || null
+  // 等级事件：getDashboardData 已把本次重放用的事件流挂在 _lastEvents 上（cloud-store v189）
+  const events = (typeof CloudSync !== 'undefined' && Array.isArray(CloudSync._lastEvents)) ? CloudSync._lastEvents : []
+  if (!r) {
+    inner.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <h3 style="margin:0;font-size:16px">👤 ${escHtml(u)}</h3>
+        <button class="btn btn-ghost btn-sm" onclick="closeUserProfile()">✕ ${t('upClose')}</button>
+      </div>
+      <p style="margin:16px 0;color:#92400e;font-size:13px">${t('upNoCloudRow')}</p>`
+    return
+  }
+  inner.innerHTML = _upProfileHtml(r, courseDoc, events)
 }
 
 // ====== 管理员看板：分类题库分布（按部门切换） ======

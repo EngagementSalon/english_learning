@@ -1787,6 +1787,10 @@ const CloudSync = {
     // v75：缓存全局每题聚合与云端文档体积（正确率看板/存储用量指示条用；
     // 挂在实例上而不改返回结构——学员端挑战页也复用本方法取数组）
     this._lastQStats = map.__q || {}
+    // v189：把本次重放用的事件流挂到实例上 —— 「学员档案」画定级走势要读 chlevel 事件历史，
+    //   而等级只有「当前值」（r.chLevel）没有时间轴，不重放事件就无法还原变化过程。
+    //   ★ 只是引用，不做深拷贝、不改返回结构；同一批事件已被 _apply 消费，读取方必须**只读**。
+    this._lastEvents = events
     try { this._lastDocBytes = JSON.stringify(doc).length } catch (e) { /* ignore */ }
     return Object.keys(map).map(u => map[u]).filter(r => r.username)
   },
