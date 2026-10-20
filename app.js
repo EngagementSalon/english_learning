@@ -5906,6 +5906,75 @@ function dashUserLevelSeries(username, events, curLv) {
   return pts
 }
 
+// ====== v194：七天挑战每日准确率走势 ======
+// 数据来源：r.chy 里每条 { day, si, kind, correct, total, at, rd }，**同字段结构已有，不新增上报**。
+//
+// 每日的环节构成（实测 10-20 全库分布）：
+//   Day1: test|si0（前测 20 题）+ practice|si1（10 题热身）
+//   Day2–6: practice|si0（30 题）
+//   Day7: practice|si0（30 题）+ test|si1（期末 20 题）
+//   → 所以「当天准确率」必须是**按题量加权**，不能把各环节百分比简单平均
+//     （20 题 60% 与 10 题 100% 简单平均 = 80%，真实是 73%）。
+//
+// ★★★ 三条红线：
+//   ① 同一 (day, si) 可能有多条 —— 实测 38 人有重刷记录。必须取**最早那条（首答）**，
+//      否则「重刷到满分」会把走势图拉成虚假上升。这与 firstAcc 的口径完全一致。
+//   ② cleared（重置存根）**一律剔除**，它不是一次作答。
+//   ③ 某天没数据 → 该点必须是 null，让折线**断开**。绝不补 0、绝不把相邻两天连起来
+//      （补 0 会被读成「这天考了 0 分」，跨缺口连线会被读成「慢慢下滑」，都是假信息）。
+//
+// 返回：{ days: [{ day, q, acc, stages }], avg: 有份量的平均值, covered: 有效天数, total: 总天数 }
+//   · avg = 全期累计 正确题数 / 总题数（加权），**不是**每日 acc 的算术平均。
+//   · cum：逐日累计准确率（第 1 天=第 1 天，第 2 天=前 2 天合计…），用于「平均准确率走势」。
+function dashUserDailyAcc(r, totalDays) {
+  const recs = (r && Array.isArray(r.chy)) ? r.chy.filter(Boolean) : []
+  const N = Math.max(1, Number(totalDays) || 7)
+  // ① 按 (day|si) 取首答
+  const first = {}
+  recs.forEach(x => {
+    if (x.cleared) return                              // ② 重置存根不算作答
+    const day = Number(x.day) || 0
+    if (day < 1 || day > N) return                     // 越界天数（老方案 210 题口径的残留）丢弃
+    const q = Number(x.total) || 0
+    if (q <= 0) return
+    const k = day + '|' + (Number(x.si) || 0)
+    const at = Number(x.at) || 0
+    if (!first[k] || at < (Number(first[k].at) || 0)) first[k] = { day, q, c: Number(x.correct) || 0, at, kind: String(x.kind || 'practice') }
+  })
+  // ③ 按天加权合并
+  const byDay = {}
+  Object.keys(first).forEach(k => {
+    const it = first[k]
+    if (!byDay[it.day]) byDay[it.day] = { q: 0, c: 0, stages: 0 }
+    byDay[it.day].q += it.q
+    byDay[it.day].c += Math.max(0, Math.min(it.q, it.c))   // 脏数据兜底：correct 不得超过 total
+    byDay[it.day].stages += 1
+  })
+  const days = []
+  let cq = 0, cc = 0, covered = 0
+  for (let d = 1; d <= N; d++) {
+    const b = byDay[d]
+    if (!b || b.q <= 0) {
+      // ★ null = 该天无数据 → 折线断开。绝不写 0。
+      days.push({ day: d, q: 0, acc: null, cum: cq > 0 ? Math.round(cc / cq * 100) : null, stages: 0 })
+      continue
+    }
+    covered++
+    cq += b.q; cc += b.c
+    days.push({
+      day: d, q: b.q, stages: b.stages,
+      acc: Math.round(Math.min(1, b.c / b.q) * 100),
+      cum: Math.round(Math.min(1, cc / cq) * 100),
+    })
+  }
+  return {
+    days,
+    avg: cq > 0 ? Math.round(Math.min(1, cc / cq) * 100) : null,
+    covered,
+    total: N,
+  }
+}
+
 // 线下课：该学员在各班级任务上的成绩序列（只读）。offline 无分数、video 取小测分。
 function dashUserCourseSeries(courseDoc, username) {
   const u = String(username || '')
@@ -6137,6 +6206,64 @@ function _upProfileHtml(r, courseDoc, events, wrong) {
   const fmtAt = ts => (ts ? new Date(ts).toLocaleDateString(LANG === 'en' ? 'en-US' : 'zh-CN', { month: '2-digit', day: '2-digit' }) : '—')
   const dash = v => (v == null ? '<span style="color:#9ca3af">—</span>' : String(v))
 
+  // ---- 七天挑战：每日准确率走势 + 累计（平均）准确率走势 ----
+  // ★ 只画「当前营次」：跨营次混在一张 7 天图里会变成 14 个点，X 轴失去意义。
+  //   当前营次 = 最近一条有 rd 的记录所属营次；取不到就退回全部（老数据 rd 为空）。
+  const dailyRound = (() => {
+    const recs = Array.isArray(r.chy) ? r.chy.filter(x => x && !x.cleared && x.rd) : []
+    if (!recs.length) return { slug: '', name: '', rows: r.chy }
+    const slugOf = x => (typeof dashRoundSlug === 'function') ? dashRoundSlug(x.rd) : String(x.rd)
+    let best = null
+    recs.forEach(x => { if (!best || (Number(x.at) || 0) > (Number(best.at) || 0)) best = x })
+    const slug = slugOf(best)
+    const rdList = (typeof dashRoundList === 'function') ? dashRoundList() : []
+    const hit = rdList.filter(x => ((typeof dashRoundSlug === 'function') ? dashRoundSlug(x.id) : x.id) === slug)[0]
+    return {
+      slug,
+      name: (hit && hit.name) || slug,
+      rows: (r.chy || []).filter(x => x && !x.cleared && (!x.rd || slugOf(x) === slug)),
+    }
+  })()
+  const daily = dashUserDailyAcc({ chy: dailyRound.rows }, 7)
+  const dailyChart = daily.covered
+    ? _upLineChartSvg({
+        labels: daily.days.map(x => 'D' + x.day),
+        series: [{ name: t('upSeriesDailyAcc'), color: '#0891b2', values: daily.days.map(x => x.acc) }],
+        scoreAxis: true,
+      })
+    : ''
+  // 平均（累计）准确率：第 n 个点 = 第 1..n 天的**合并**正确率。
+  // ★ 不画「每日 acc 的算术平均」——那会让第 5 天的单日波动把整条平均线拽歪，
+  //   而且与表里的 firstAcc 口径不一致。累计口径天然单调平滑，才是「平均水平怎么走」。
+  const cumChart = daily.covered
+    ? _upLineChartSvg({
+        labels: daily.days.map(x => 'D' + x.day),
+        series: [{ name: t('upSeriesCumAcc'), color: '#7c3aed', values: daily.days.map(x => x.cum) }],
+        scoreAxis: true,
+      })
+    : ''
+  const dailyTable = daily.covered
+    ? `<table class="admin-table" style="font-size:12px;min-width:420px;margin-top:8px">
+        <thead><tr><th>${t('upThDay')}</th><th style="text-align:center;color:#6b7280;font-size:12px">${t('upThDailyQ')}</th>
+        <th style="text-align:center;color:#6b7280;font-size:12px">${t('upThDailyAcc')}</th>
+        <th style="text-align:center;color:#6b7280;font-size:12px">${t('upThCumAcc')}</th></tr></thead>
+        <tbody>${daily.days.map(x => {
+          // ★ 题量少于 10 的天标灰 + 加注：实测有「3 题 100%」这种点，加权时它只贡献 3 题，
+          //   但读者看着 100% 会以为那天学得最好。不隐去、不篡改，只如实标注样本太小。
+          const thin = x.q > 0 && x.q < 10
+          const qCell = x.q
+            ? (thin ? `<span style="color:#b45309" title="${escAttr(t('upDailyThinTip'))}">${x.q}*</span>` : String(x.q))
+            : '<span style="color:#9ca3af">—</span>'
+          return `<tr>
+          <td style="white-space:nowrap">D${x.day}</td>
+          <td style="text-align:center">${qCell}</td>
+          <td style="text-align:center;font-weight:700;color:#0891b2">${x.acc == null ? '<span style="color:#9ca3af">—</span>' : x.acc + '%'}</td>
+          <td style="text-align:center;font-weight:700;color:#7c3aed">${x.cum == null ? '<span style="color:#9ca3af">—</span>' : x.cum + '%'}</td>
+        </tr>`
+        }).join('')}</tbody>
+      </table>
+      ${daily.days.some(x => x.q > 0 && x.q < 10) ? `<p class="form-hint" style="margin:4px 0 0">${t('upDailyThinNote')}</p>` : ''}` : ''
+
   // ---- 七天挑战：分数走势（前测 / 期末两条线）----
   const chLabels = rounds.map(x => x.name)
   const chChart = rounds.length
@@ -6221,7 +6348,12 @@ function _upProfileHtml(r, courseDoc, events, wrong) {
       <button class="btn btn-ghost btn-sm" onclick="closeUserProfile()">✕ ${t('upClose')}</button>
     </div>
 
-    <h4 style="margin:16px 0 6px;font-size:14px">🏅 ${t('upChTitle')}</h4>
+    <h4 style="margin:16px 0 6px;font-size:14px">📈 ${t('upDailyTitle')}</h4>
+    <p class="form-hint" style="margin:0 0 6px">${t('upDailyHint', dailyRound.name || '—', daily.covered, daily.total, daily.avg == null ? '—' : daily.avg + '%')}</p>
+    ${daily.covered ? `${dailyChart}` : `<div style="padding:14px;text-align:center;color:#9ca3af;font-size:13px">${t('upDailyNone')}</div>`}
+    ${daily.covered ? `<div style="margin-top:4px"><span style="font-size:12px;font-weight:700;color:#374151">${t('upCumTitle')}</span></div>${cumChart}${dailyTable}` : ''}
+
+    <h4 style="margin:18px 0 6px;font-size:14px">🏅 ${t('upChTitle')}</h4>
     <p class="form-hint" style="margin:0 0 6px">${t('upChHint')}</p>
     ${chChart}
     ${rounds.length ? `<div style="overflow-x:auto;margin-top:10px">

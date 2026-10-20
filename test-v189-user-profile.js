@@ -67,7 +67,7 @@ const sandbox = {
   courseAssignTypeLabel: ty => ty,
 }
 vm.createContext(sandbox)
-const funs = ['dashUserRoundSeries', 'dashUserLevelSeries', 'dashUserCourseSeries', '_upLineChartSvg', '_upProfileHtml', '_upWrongCardHtml', '_upWrongSectionHtml', 'upNameLink']
+const funs = ['dashUserRoundSeries', 'dashUserLevelSeries', 'dashUserCourseSeries', 'dashUserDailyAcc', '_upLineChartSvg', '_upProfileHtml', '_upWrongCardHtml', '_upWrongSectionHtml', 'upNameLink']
 let bundle = ''
 funs.forEach(n => {
   const src = extractFn(APP, n)
@@ -262,7 +262,8 @@ ck(ticksOf(_upLineChartSvg({ labels: ['a'], series: [{ name: 'S', color: '#000',
   'G9 不传 scoreAxis 仍用旧默认刻度（向后兼容）')
 // 接线：两处分数图必须真的打开 scoreAxis
 const axUses = (APP_CODE.match(/scoreAxis:\s*true/g) || []).length
-ck(axUses === 2, 'G10 挑战分数图与线下课分数图都传了 scoreAxis', '(' + axUses + ')')
+// v194 起档案里共 4 张分数图（前测/期末、线下课、每日准确率、累计准确率）都开 scoreAxis；只断下限，绝不定死总数
+ck(axUses >= 4, 'G10 分数图都传了 scoreAxis（v194 起 ≥4 张）', '(' + axUses + ')')
 ck(!/yMin:\s*0,\s*yMax:\s*100,\s*yTicks:\s*\[0,\s*25,\s*50,\s*75,\s*100\]/.test(APP_CODE),
   'G11 已无写死的 0–100/25 刻度残留')
 
