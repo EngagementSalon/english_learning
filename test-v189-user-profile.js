@@ -67,7 +67,7 @@ const sandbox = {
   courseAssignTypeLabel: ty => ty,
 }
 vm.createContext(sandbox)
-const funs = ['dashUserRoundSeries', 'dashUserLevelSeries', 'dashUserCourseSeries', 'dashUserDailyAcc', '_upLineChartSvg', '_upProfileHtml', '_upWrongCardHtml', '_upWrongSectionHtml', 'upNameLink']
+const funs = ['dashUserRoundSeries', 'dashUserLevelSeries', 'dashUserCourseSeries', 'dashUserDailyAcc', 'dashUserDailyAllAcc', '_upLineChartSvg', '_upProfileHtml', '_upWrongCardHtml', '_upWrongSectionHtml', 'upNameLink']
 let bundle = ''
 funs.forEach(n => {
   const src = extractFn(APP, n)
