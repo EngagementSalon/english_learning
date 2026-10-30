@@ -173,8 +173,8 @@ ok('C2 chLevelOf：v3 早退不并线下课（return capped）',
   (() => { const c = codeOnly(extractFn(CH, 'chLevelOf')); return c.includes("chPlanIsV3()") && c.includes('return capped') })())
 ok('C3 chTitleText：v3 走 chTitleDept21 / chTitle21',
   codeOnly(extractFn(CH, 'chTitleText')).includes("t('chTitleDept21'") && codeOnly(extractFn(CH, 'chTitleText')).includes("t('chTitle21')"))
-ok('C4 renderChallenge 末尾：导航按营次动态命名（navChallengeCh21）',
-  codeOnly(extractFn(CH, 'renderChallenge')).includes("navChallengeCh21"))
+ok('C4 v201：renderChallenge 末尾调用 refreshChallengeNavLabel，该函数内按营次动态命名（navChallengeCh21）',
+  codeOnly(extractFn(CH, 'renderChallenge')).includes('refreshChallengeNavLabel()') && codeOnly(extractFn(CH, 'refreshChallengeNavLabel')).includes('navChallengeCh21'))
 ok('C5 app.js：dashChDayCount 被 列宽/导出表头/补录 total/补录 si 共用',
   codeOnly(extractFn(APP, 'dashChColPx')).includes('dashChDayCount()') &&
   codeOnly(extractFn(APP, 'dashChExportHeader')).includes('dashChDayCount()') &&

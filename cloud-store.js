@@ -243,6 +243,8 @@ function _chSideHydrateFromCache(obj) {
     obj._chRoundCurName = cur ? cur.name : ''
     obj._chRoundCurDepts = (cur && Array.isArray(cur.depts)) ? cur.depts : []
     obj._chRoundSeen = _roundsSeenIds()
+    // v201：营次数据落地即刷新顶栏挑战导航命名（21 天营次不等学员点进挑战页才改名）
+    if (typeof refreshChallengeNavLabel === 'function') { try { refreshChallengeNavLabel() } catch (e) {} }
     const effOpen = cur ? roundOpenState(cur, Date.now()) : { state: 'closed', on: false, locked: true, everOpen: false }
     const effExam = cur ? roundExamState(cur, Date.now(), effOpen) : { on: false, locked: true, everOpen: false }
     obj._chExamOpen = effExam.on
@@ -583,6 +585,8 @@ const CloudSync = {
     this._chResets = lv.chResets
     this._chResetModes = lv.chResetModes
     try { localStorage.setItem('eq_cloud_cache', txt) } catch (e) { /* ignore */ }
+    // v201：营次数据落地即刷新顶栏挑战导航命名（21 天营次不等学员点进挑战页才改名）
+    if (typeof refreshChallengeNavLabel === 'function') { try { refreshChallengeNavLabel() } catch (e) {} }
     return doc
   },
   async _putDoc(doc) {

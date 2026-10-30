@@ -502,6 +502,8 @@ async function saveProfile() {
 //   要等下一次云端拉取的门禁轮询（最长一个推送周期）才换期，用户会误以为「没生效」。
 function refreshDeptAwarePages() {
   try {
+    // v201：切部门后营次结构可能变（v3↔七天），顶栏挑战导航命名同步刷新
+    if (typeof refreshChallengeNavLabel === 'function') refreshChallengeNavLabel()
     const pages = document.querySelectorAll('.page')
     for (let i = 0; i < pages.length; i++) {
       const el = pages[i]

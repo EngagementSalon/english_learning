@@ -2323,6 +2323,14 @@ function renderChallenge() {
   `
   chLoadLeaderboard()
   // v196：顶栏挑战导航按营次结构动态命名（21 天营次不出现「七天」字样）
+  // v201：抽成全局函数 refreshChallengeNavLabel() —— 云端营次落地 / 切部门时也刷新，
+  //       否则首页顶栏一直是 index.html 静态写死的「七天挑战」，点进挑战页才变（用户实测困惑）
+  refreshChallengeNavLabel()
+}
+
+// v201：顶栏挑战导航按当前视角营次结构动态命名（v3=21天，其余=七天）。
+// 数据未就绪 / 无法解析营次 → 显示默认「七天挑战」（与 index.html 静态文案一致）。
+function refreshChallengeNavLabel() {
   try {
     const nav = document.getElementById('navChallenge')
     if (nav && typeof t === 'function') {
