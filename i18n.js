@@ -31,6 +31,8 @@ const I18N = {
     deptTree: {
       dining: { name: '饮食部', subs: ['标帜餐厅', '艳中餐厅', '酒吧团队', '客房送餐'] },
       rooms: { name: '房务部', subs: ['迎宾前台', '礼宾部', '随时随需', '客房造型', '健身及水疗中心'] },
+      // v196：日照大部门（21 天挑战）
+      rizhao: { name: '日照', subs: ['日照-餐饮', '日照-房务'] },
       other: { name: '其他部门', subs: [] }
     },
     // v89：旧分部门 → 四分队归一（酒吧团队 = 原 WOOBAR + WETBAR + LIQUID）
@@ -42,7 +44,8 @@ const I18N = {
       '标帜': '标帜餐厅', '艳中': '艳中餐厅', '艳餐厅': '艳中餐厅'
     },
     chDeptNames: {
-      '标帜餐厅': '标帜餐厅', '艳中餐厅': '艳中餐厅', '酒吧团队': '酒吧团队', '客房送餐': '客房送餐'
+      '标帜餐厅': '标帜餐厅', '艳中餐厅': '艳中餐厅', '酒吧团队': '酒吧团队', '客房送餐': '客房送餐',
+      '日照-餐饮': '日照-餐饮', '日照-房务': '日照-房务'
     },
     // v92：管理员练习页部门切片
     practiceDeptLabel: '题目部门',
@@ -60,7 +63,10 @@ impChallengeTag: '七天挑战题库（各部门共用）',
 chUploadBtn: '上传题目',
 chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「七天挑战题库」），各环节自动从中抽题。',
     chTitleDept: (d) => `${d}七天英文挑战`,
-    chBankShortWarn: (n, min) => `本部门题库当前只有 ${n} 题，跑完七天挑战建议至少 ${min} 题，请管理员继续上传题目。`,
+    // v196：21 天挑战标题（日照部门；dept 版带参 → 必须箭头函数）
+    chTitle21: '21天英文挑战',
+    chTitleDept21: (d) => `${d}21天英文挑战`,
+    chBankShortWarn: (n, min) => `本部门题库当前只有 ${n} 题，跑完挑战建议至少 ${min} 题，请管理员继续上传题目。`,
     chEmptyAlert: '该环节暂时抽不到题目，请联系管理员补充本部门题库后重试。',
     chBankDiffWarn: (d) => `本部门题库的「${d} 档」题目偏少，系统已自动从相邻难度档补足。建议管理员补充该难度档的题目，以保证难度梯度。`,
     dashRoundDeptHint: '不勾选 = 全部部门适用；勾选后该营次只对这些部门的学员开放。各部门可同时进行不同营次。',
@@ -68,6 +74,14 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     dashRoundSeqTitle: '该营次在其适用部门组内的期号（各部门独立编号，例如「标帜第 2 期」与「客房送餐第 1 期」可同时存在）',
     dashRoundPlanV2Tag: '新天结构',
     dashRoundPlanV2Title: '第 1 天前测、第 2-6 天刷题、第 7 天期末考 —— 考试独占一天，每天只有一个环节（共 190 题）。本版起新建的营次自动使用该结构；未带此标记的营次仍是老结构（第 1/7 天各含练习+考试两个环节，共 210 题）。',
+    // v196：21 天挑战结构（营次表单选择 + 列表徽章）
+    dashRoundPlanV3Tag: '21天',
+    dashRoundPlanV3Title: '21 天挑战：第 1/21 天各 30 题考试、第 2-20 天每日 30 题练习，共 630 题（不并线下课）。',
+    dashRoundPlanLabel: '挑战结构',
+    dashRoundPlanV1: '7 天经典版（第 1/7 天各含练习+考试，共 210 题）',
+    dashRoundPlanV2: '7 天考试版（第 1/7 天只考试，共 190 题）',
+    dashRoundPlanV3: '21 天挑战版（第 1/21 天考试 30 题，共 630 题）',
+    dashRoundPlanHint: '结构按营次生效：营次创建后尽量不要切换，避免进度与打卡口径错乱。21 天版面向日照部门。',
     dashChDeptFilterLabel: '部门',
     adminHint: '管理员账号由系统预置或由管理员创建',
     errInputUserPwd: '请输入用户名和密码',
@@ -80,6 +94,7 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     navProgress: '进度', navAdmin: '题库管理', navUsers: '👥 账号管理', navDashboard: '📊 数据看板', navTraining: '🍽️ 培训测试',
     // v112：七天挑战升为顶栏独立分栏（与线上培训 / 线下课并列）
     navChallengeCh: '🏅 七天挑战',
+    navChallengeCh21: '🏅 21天挑战',
     roleStudent: '学员', roleAdmin: '管理员', notSet: '未设置',
     logout: '退出', confirmLogout: '确定退出登录吗？',
     currentLevelTitle: '当前等级：',
@@ -89,6 +104,8 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     // 标帜餐厅七天英文挑战（v68）
     chTitle: '七天英文挑战',
     chIntroV2: '第 1 天：水平测试 20 题（每次随机，仅一次）；第 2-6 天：每日练习 30 题；第 7 天：水平测试 20 题（每次随机，仅一次）。考试单独占一天，当天只有一个环节。题目全部选自当前部门挑战题库，每天只能解锁新的一天，难度逐日递增；练习错题要当天刷到全对，前一天的错题还会在第二天额外复习。',
+    // v196：21 天挑战介绍
+    chIntro21: '第 1 天：水平测试 30 题（每次随机，仅一次）；第 2-20 天：每日练习 30 题；第 21 天：水平测试 30 题（每次随机，仅一次）。首尾两天考试、中间 19 天刷题，共 630 题。每天只能解锁新的一天，难度逐日递增；练习错题要当天刷到全对，前一天的错题还会在第二天额外复习。',
     chIntro: '第 1 天：水平测试 20 题（每次随机，仅一次）→ 巩固练习 10 题；第 2-6 天：每日练习 30 题；第 7 天：巩固练习 10 题 → 水平测试 20 题（每次随机，仅一次）。题目全部选自当前部门挑战题库，每天只能解锁新的一天，难度逐日递增；练习错题要当天刷到全对，前一天的错题还会在第二天额外复习。',
     chPoolInfo: (n, total) => `题库共 ${n} 题 · 每日 30 题（共 ${total || 210} 题）· 难度逐日递增 · 错题次日复习 · 每人题目随机不同 · 考题出自本人已刷题目`,
     chEntryHint: (d) => `已完成 ${d}/7 天 · 每日 30 题 · 点击进入`,
@@ -105,7 +122,7 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     chExtraDone: (n) => `本次含前一天错题复习 ${n} 题（额外，不计入每日 30 题）`,
     chLbTitle: '当前积分榜前三',
     chLbEmpty: '还没有学员完成挑战环节，快来做第一个！',
-    chLbRule: '答对越多、首答越准，积分越高；用时按每题最多 30 秒计；第七天期末考试每题按 3 倍计分',
+    chLbRule: '答对越多、首答越准，积分越高；用时按每题最多 30 秒计；最后一天的期末考试每题按 3 倍计分',
     chTestTag: '水平测试', chPracticeTag: '每日练习',
     chDay: (n) => `第 ${n} 天`,
     chLocked: '完成前一天解锁', chStart: '开始', chRetake: '再练一轮',
@@ -116,6 +133,7 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     chTestDone: '水平测试完成', chPracticeDone: '今日练习完成',
     chBackToChallenge: '返回挑战',
     chReportTitle: '七天进步报告',
+    chReportTitle21: '21天进步报告',
     chDelta: (d) => d > 0 ? `比第 1 天进步 ${d} 分，继续保持！` : (d === 0 ? '与第 1 天持平，再接再厉！' : `比第 1 天低 ${-d} 分，建议回到每日练习巩固`),
     chReportHint: '每天正确率一览（难度逐日递增，第 7 天分数请结合难度看待）',
     chDayDoneTag: '已完成',
@@ -143,8 +161,9 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     dashChManualTitle: '手动补录考试成绩',
     dashChManualDay: '场次',
     dashChManualDay7: 'Day7 期末考试',
+    dashChManualDay21: 'Day21 期末考试（21天挑战）',
     dashChManualDay1: 'Day1 摸底测试',
-    dashChManualCorrect: '答对题数（满分 20）',
+    dashChManualCorrect: '答对题数（满分 20；21 天挑战营次为 30）',
     dashChManualSec: '用时（秒，用于积分扣减；留 0 不扣分）',
     dashChManualOverwrite: '覆盖已有成绩（录错了改数用）',
     dashChManualOverwriteConfirm: '将覆盖该学员已有的成绩记录，确认继续？',
@@ -896,13 +915,13 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     dashChExamHint: '开启后学员才可进入第 7 天期末考试（全平台约 1 分钟内生效）；开放期间未完成七天课程的学员也可直接参加；关闭仅阻止新进入，正在作答的学员不受影响。',
     dashChExamFail: '操作失败，请检查网络后重试',
     chNoRoundForDept: '本部门暂无开营',
-    chNoRoundForDeptHint: '管理员还未为「{0}」开设七天挑战营次，请等待开营通知，或联系管理员。',
+    chNoRoundForDeptHint: '管理员还未为「{0}」开设挑战营次，请等待开营通知，或联系管理员。',
     chNotOpen: '挑战暂未开放',
-    chNotOpenHint: '七天挑战需管理员开放后才能开始，请稍候再来看看。',
+    chNotOpenHint: '挑战需管理员开放后才能开始，请稍候再来看看。',
     chNotOpenShort: '挑战未开放',
     chNotOpenAlert: '七天挑战暂未开放，请等待管理员开放。',
     // v107：部门门禁（七天挑战只对饮食部四个二级分队开放；非适用部门看到说明卡而非入口）
-    chDeptNotEligible: '七天挑战仅对饮食部以下分队开放，你所属部门暂不参加。',
+    chDeptNotEligible: '挑战仅对已开通的分部门开放（饮食部各分队 / 日照-餐饮 / 日照-房务），你所属部门暂不参加。',
     chDeptNeedSet: '还未设置所属部门，请先在个人资料里选择部门后再查看。',
     chDeptEligibleList: '可参加的分队：',
     chDeptGoSet: '去设置部门',
@@ -918,6 +937,8 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     // v174：等级来源分项（挑战 70% + 线下课 30%）
     chLevelSrcBlend: (c, k, s) => `挑战首答 ${c}% × 70% + 线下课 ${k} 分 × 30% = 综合 ${s} 分`,
     chLevelSrcNoCourse: '挑战首答 × 70% + 线下课 30%（暂无线下课正式考试成绩）',
+    // v196：21 天挑战不并线下课（用户口径「不显示线下课」）
+    chLevelSrc21: '按挑战首答准确率评定（21 天挑战不并线下课）',
     chLevelNoData: '完成今天的练习后，系统会自动评定你的等级。',
     chLevelMax: '已达最高等级，继续保持！',
     chLevelNeedAcc: (v) => `首答准确率再达到 ${v}% 即可升到下一级。`,
@@ -1142,6 +1163,8 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     deptTree: {
       dining: { name: 'F&B', subs: ['Signatures Restaurant', 'Yan Chinese Restaurant', 'Bar Team', 'In-Room Dining'] },
       rooms: { name: 'Rooms', subs: ['Front Office', 'Concierge', 'Whatever/Whenever', 'Room Styling', 'Fitness & Spa'] },
+      // v196: Rizhao major department (21-day challenge)
+      rizhao: { name: 'Rizhao', subs: ['Rizhao F&B', 'Rizhao Rooms'] },
       other: { name: 'Other', subs: [] }
     },
     // v89: legacy sub-department → canonical sub-team
@@ -1154,7 +1177,8 @@ chUploadHint: '管理员可将题目上传进七天挑战题库（栏目选「�
     },
     chDeptNames: {
       '标帜餐厅': 'Signatures Restaurant', '艳中餐厅': 'Yan Chinese Restaurant',
-      '酒吧团队': 'Bar Team', '客房送餐': 'In-Room Dining'
+      '酒吧团队': 'Bar Team', '客房送餐': 'In-Room Dining',
+      '日照-餐饮': 'Rizhao F&B', '日照-房务': 'Rizhao Rooms'
     },
     // v92：practice-page department switch (admin only)
     practiceDeptLabel: 'Question Dept',
@@ -1172,7 +1196,10 @@ impChallengeTag: 'Seven-Day Challenge bank (shared by all departments)',
 chUploadBtn: 'Upload',
 chUploadHint: 'As admin you can upload questions into the challenge bank (pick the Seven-Day Challenge category); all stages draw from it automatically.',
     chTitleDept: (d) => `${d} 7-Day English Challenge`,
-    chBankShortWarn: (n, min) => `This department bank currently has only ${n} questions; at least ${min} are recommended to complete the 7-day challenge. Please ask an admin to upload more.`,
+    // v196: 21-day challenge titles (Rizhao departments; dept version takes args -> arrow fn)
+    chTitle21: '21-Day English Challenge',
+    chTitleDept21: (d) => `${d} 21-Day English Challenge`,
+    chBankShortWarn: (n, min) => `This department bank currently has only ${n} questions; at least ${min} are recommended to complete the challenge. Please ask an admin to upload more.`,
     chEmptyAlert: 'No questions available for this stage right now. Please ask an admin to add questions to your department bank and try again.',
     chBankDiffWarn: (d) => `This department bank has too few questions at level ${d}; the system has automatically filled the gap from adjacent difficulty levels. Please ask an admin to add questions at this level to keep the difficulty gradient intact.`,
     dashRoundDeptHint: 'Leave all unchecked to apply to every department; checked departments see this round only. Different departments can run different rounds at the same time.',
@@ -1180,6 +1207,14 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     dashRoundSeqTitle: 'Sequence number of this round within its applicable department group (each department numbers independently, so "Signatures #2" and "IRD #1" can coexist)',
     dashRoundPlanV2Tag: 'new layout',
     dashRoundPlanV2Title: 'Day 1 pre-test, Days 2-6 practice, Day 7 final test — each test has a day of its own, so every day holds exactly one stage (190 questions). Rounds created from this version on use this layout automatically; rounds without this tag keep the old layout (practice + test on both Day 1 and Day 7, 210 questions).',
+    // v196: 21-day challenge plan keys
+    dashRoundPlanV3Tag: '21-Day',
+    dashRoundPlanV3Title: '21-day challenge: a 30-question test on Day 1 and Day 21 each, 30 practice questions daily on Days 2-20 — 630 questions in total (course scores excluded).',
+    dashRoundPlanLabel: 'Challenge plan',
+    dashRoundPlanV1: '7-day classic (practice + test on Day 1/7, 210 questions)',
+    dashRoundPlanV2: '7-day exam edition (test only on Day 1/7, 190 questions)',
+    dashRoundPlanV3: '21-day challenge (30-question tests on Day 1/21, 630 questions)',
+    dashRoundPlanHint: 'The plan applies per round: avoid switching it after creation, or progress and check-in semantics may drift. The 21-day plan is for the Rizhao departments.',
     dashChDeptFilterLabel: 'Dept',
     adminHint: 'Admin accounts are pre-configured or created by administrators',
     errInputUserPwd: 'Please enter username and password',
@@ -1190,6 +1225,7 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     navHome: 'Home', navPlacement: '🎯 Placement', navPractice: 'Practice', navExam: 'Exam',
     navProgress: 'Progress', navAdmin: 'Question Bank', navUsers: '👥 Accounts', navDashboard: '📊 Dashboard', navTraining: '🍽️ Training',
     navChallengeCh: '🏅 7-Day Challenge',
+    navChallengeCh21: '🏅 21-Day Challenge',
     roleStudent: 'Student', roleAdmin: 'Admin', notSet: 'Not set',
     logout: 'Log out', confirmLogout: 'Are you sure you want to log out?',
     currentLevelTitle: 'Current level: ',
@@ -1199,6 +1235,8 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     // Signature Restaurant 7-Day Challenge (v68)
     chTitle: '7-Day English Challenge',
     chIntroV2: 'Day 1: a 20-question placement test (randomized each attempt, one attempt); Days 2-6: 30 daily practice questions; Day 7: the 20-question placement test again (randomized each attempt, one attempt). Each test has a day of its own, so a day holds exactly one stage. All drawn from the department\'s challenge bank — only one new day unlocks per day and difficulty rises daily; you must retry every missed question until all correct the same day, and yesterday\'s wrong questions come back as extra review the next day.',
+    // v196: 21-day challenge intro
+    chIntro21: 'Day 1: a 30-question placement test (randomized each attempt, one attempt); Days 2-20: 30 daily practice questions; Day 21: the 30-question placement test again (randomized each attempt, one attempt). Tests on the first and last day, 19 practice days in between — 630 questions in total. Only one new day unlocks per day and difficulty rises daily; you must retry every missed question until all correct the same day, and yesterday\'s wrong questions come back as extra review the next day.',
     chIntro: 'Day 1: a 20-question placement test (randomized each attempt, one attempt) followed by 10 consolidation questions; Days 2-6: 30 daily practice questions; Day 7: 10 consolidation questions followed by the 20-question placement test (randomized each attempt, one attempt). All drawn from the department\'s challenge bank — only one new day unlocks per day and difficulty rises daily; you must retry every missed question until all correct the same day, and yesterday\'s wrong questions come back as extra review the next day.',
     chPoolInfo: (n, total) => `Bank of ${n} questions · 30 per day (${total || 210} total) · difficulty rises daily · wrong answers reviewed next day · questions vary per person · exam questions come from your practiced set`,
     chEntryHint: (d) => `${d}/7 days done · 30 questions per day · tap to open`,
@@ -1215,7 +1253,7 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     chExtraDone: (n) => `Includes ${n} extra review question(s) from yesterday's wrong answers (not counted in the daily 30)`,
     chLbTitle: 'Current Top 3',
     chLbEmpty: 'No one has finished a challenge stage yet — be the first!',
-    chLbRule: 'More correct answers and a higher first-try accuracy score higher; time counts at max 30 seconds per question; Day-7 final exam answers score 3×',
+    chLbRule: 'More correct answers and a higher first-try accuracy score higher; time counts at max 30 seconds per question; final-exam answers on the last day score 3×',
     chTestTag: 'Placement Test', chPracticeTag: 'Daily Practice',
     chDay: (n) => `Day ${n}`,
     chLocked: 'Finish the previous day to unlock', chStart: 'Start', chRetake: 'Practice Again',
@@ -1226,6 +1264,7 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     chTestDone: 'Placement Test Complete', chPracticeDone: 'Daily Practice Complete',
     chBackToChallenge: 'Back to Challenge',
     chReportTitle: '7-Day Progress Report',
+    chReportTitle21: '21-Day Progress Report',
     chDelta: (d) => d > 0 ? `+${d} points vs Day 1 — keep it up!` : (d === 0 ? 'Same as Day 1 — keep practicing!' : `${-d} points below Day 1 — review the daily practice`),
     chReportHint: 'Accuracy by day (difficulty rises daily — read Day 7 scores accordingly)',
     chDayDoneTag: 'Completed',
@@ -1253,8 +1292,9 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     dashChManualTitle: 'Manually enter an exam score',
     dashChManualDay: 'Session',
     dashChManualDay7: 'Day 7 final exam',
+    dashChManualDay21: 'Day 21 final exam (21-day challenge)',
     dashChManualDay1: 'Day 1 placement test',
-    dashChManualCorrect: 'Correct answers (out of 20)',
+    dashChManualCorrect: 'Correct answers (out of 20; 30 for 21-day rounds)',
     dashChManualSec: 'Time used (seconds, deducted from points; 0 = no deduction)',
     dashChManualOverwrite: 'Overwrite the existing score (use to correct a mistake)',
     dashChManualOverwriteConfirm: 'This will overwrite the student\'s existing score. Continue?',
@@ -1995,13 +2035,13 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     dashChExamHint: 'Students can enter the Day-7 final exam only while it is open (takes effect within ~1 min); while open, students who have not finished the 7-day course can also take it; closing only blocks new entries — those already taking it are unaffected.',
     dashChExamFail: 'Operation failed — please check your network and retry',
     chNoRoundForDept: 'No round for your department',
-    chNoRoundForDeptHint: 'Your admin has not opened a 7-day challenge round for "{0}" yet. Please wait for the announcement or contact your admin.',
+    chNoRoundForDeptHint: 'Your admin has not opened a challenge round for "{0}" yet. Please wait for the announcement or contact your admin.',
     chNotOpen: 'Challenge not open yet',
-    chNotOpenHint: 'The 7-day challenge starts once your admin opens it. Please check back later.',
+    chNotOpenHint: 'The challenge starts once your admin opens it. Please check back later.',
     chNotOpenShort: 'Challenge closed',
-    chNotOpenAlert: 'The 7-day challenge is not open yet. Please wait for your admin to open it.',
+    chNotOpenAlert: 'The challenge is not open yet. Please wait for your admin to open it.',
     // v107: department gate (the 7-day challenge is open only to the four F&B sub-teams)
-    chDeptNotEligible: 'The 7-day challenge is only open to the teams listed below. Your department is not participating at the moment.',
+    chDeptNotEligible: 'The challenge is only open to participating teams (F&B teams / Rizhao F&B / Rizhao Rooms). Your department is not participating at the moment.',
     chDeptNeedSet: 'You have not set your department yet. Please choose one in your profile first.',
     chDeptEligibleList: 'Eligible teams:',
     chDeptGoSet: 'Set my department',
@@ -2017,6 +2057,8 @@ chUploadHint: 'As admin you can upload questions into the challenge bank (pick t
     // v174: level source breakdown (challenge 70% + offline course 30%)
     chLevelSrcBlend: (c, k, s) => `Challenge ${c}% × 70% + Course ${k} × 30% = ${s}`,
     chLevelSrcNoCourse: 'Challenge × 70% + Course 30% (no graded course exam yet)',
+    // v196: 21-day challenge excludes course scores
+    chLevelSrc21: 'Graded by challenge first-try accuracy (the 21-day challenge excludes course scores)',
     chLevelNoData: 'Finish today\'s practice and your level will be assessed automatically.',
     chLevelMax: 'You have reached the top level. Keep it up!',
     chLevelNeedAcc: (v) => `Reach ${v}% first-try accuracy to move up to the next level.`,

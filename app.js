@@ -510,7 +510,8 @@ function updateUserInfoDisplay() {
 }
 
 // ====== 部门二级联动（注册 / 个人资料 / 管理员建账号共用） ======
-const DEPT_MAJOR_KEYS = ['dining', 'rooms', 'other']
+// v196：新增日照大部门（rizhao）—— 日照-餐饮 / 日照-房务，挑战为「21 天挑战」（chPlan:'v3'）
+const DEPT_MAJOR_KEYS = ['dining', 'rooms', 'rizhao', 'other']
 const DEPT_GROUPS = {
   register: ['regDeptMajor', 'regDeptSub', 'regDeptOther'],
   profile: ['profileDeptMajor', 'profileDeptSub', 'profileDeptOther'],
@@ -523,6 +524,7 @@ function deptTree() { return t('deptTree') }
 const DEPT_CANON = {
   dining: ['标帜餐厅', '艳中餐厅', '酒吧团队', '客房送餐'],
   rooms: ['迎宾前台', '礼宾部', '随时随需', '客房造型', '健身及水疗中心'],
+  rizhao: [],
 }
 // 反向索引：分部门名（含别名，中英双写、去空格小写）→ { majorKey, majorName, subName }
 function _deptSubIndex() {
@@ -591,9 +593,11 @@ function normDept(value) {
   }
 }
 // 分部门 slug（题库 dept 字段 / 营次适用范围共用；与中英文无关，切语言不丢数据）
+// v196：日照大部门两个分部 slug（'rizhao/canyin' 日照-餐饮 / 'rizhao/fangwu' 日照-房务）
 const DEPT_SUB_SLUGS = {
   dining: { '标帜餐厅': 'sig', '艳中餐厅': 'yan', '酒吧团队': 'bar', '客房送餐': 'ird' },
   rooms: { '迎宾前台': 'fo', '礼宾部': 'concierge', '随时随需': 'ww', '客房造型': 'styling', '健身及水疗中心': 'spa' },
+  rizhao: { '日照-餐饮': 'canyin', '日照-房务': 'fangwu' },
 }
 const DEPT_SUB_BY_SLUG = (() => {
   const out = {}
@@ -1213,12 +1217,14 @@ function practiceDeptKey() {
 // 非管理员不使用本变量（恒走 practiceDeptKey()），切片 UI 也不渲染。
 // v109：一级栏目层级化 —— 顶部一级行只放 全部部门/饮食部/房务部/通用 四项（用户口径：
 //   「应该只有餐饮部和房务部两个栏目」），分部门不再平铺在一级行，选中大部门时在下方展开二级行。
-const PRACTICE_DEPT_TABS = ['', 'dining', 'rooms', 'all']
+const PRACTICE_DEPT_TABS = ['', 'dining', 'rooms', 'rizhao', 'all']
 // v109：合法切片全集（一级 + 二级分部门）。setPracticeDept 校验与 chDeptKey 联动（challenge.js）都用它，
 //   否则点二级分部门按钮会被误判非法而回落「全部部门」。
-const PRACTICE_DEPT_SLUGS = ['', 'dining', 'rooms', 'all',
+// v196：日照大部门 + 两个分部切片。
+const PRACTICE_DEPT_SLUGS = ['', 'dining', 'rooms', 'rizhao', 'all',
   'dining/sig', 'dining/yan', 'dining/bar', 'dining/ird',
-  'rooms/fo', 'rooms/concierge', 'rooms/ww', 'rooms/styling', 'rooms/spa']
+  'rooms/fo', 'rooms/concierge', 'rooms/ww', 'rooms/styling', 'rooms/spa',
+  'rizhao/canyin', 'rizhao/fangwu']
 let practiceDept = ''
 // 切片项显示名
 function practiceDeptTabLabel(k) {
@@ -1227,6 +1233,7 @@ function practiceDeptTabLabel(k) {
   const tree = deptTree()
   if (k === 'dining') return tree.dining.name
   if (k === 'rooms') return tree.rooms.name
+  if (k === 'rizhao') return tree.rizhao.name
   return deptSlugName(k) || k
 }
 // 该部门视角下可练习题数（不叠加分类/难度/等级筛选，作为切换时的即时反馈）
@@ -1254,7 +1261,7 @@ function practiceDeptSwitchHtml() {
   // 二级行：一级选中饮食部/房务部（或其分部门）时展开；DEPT_SUB_SLUGS 键为中文显示名、值为 slug
   const major = String(practiceDept || '').split('/')[0]
   let subRow = ''
-  if ((major === 'dining' || major === 'rooms') && DEPT_SUB_SLUGS[major]) {
+  if ((major === 'dining' || major === 'rooms' || major === 'rizhao') && DEPT_SUB_SLUGS[major]) {
     const subs = Object.keys(DEPT_SUB_SLUGS[major])
       .map(name => major + '/' + DEPT_SUB_SLUGS[major][name])
       .map(k => btn(k, true)).join('')
@@ -2166,7 +2173,8 @@ function formatTime(ts) {
 
 // ====== Admin Page ======
 // v89：题库 tab 各自独立的筛选状态（饮食部四分队 slug + 房务部 + 通用）
-const ADMIN_DEPT_TABS = ['dining/sig', 'dining/yan', 'dining/bar', 'dining/ird', 'rooms', 'all']
+// v196：日照两分部进入题库管理 tab（题库按部门上传/统计/保存均走 adminDeptSetOf）
+const ADMIN_DEPT_TABS = ['dining/sig', 'dining/yan', 'dining/bar', 'dining/ird', 'rizhao/canyin', 'rizhao/fangwu', 'rooms', 'all']
 let adminStates = (() => {
   const m = {}
   ADMIN_DEPT_TABS.forEach(k => { m[k] = { page: 1, pageSize: 10, keyword: '', category: 0, difficulty: 0 } })
@@ -2185,6 +2193,7 @@ function adminDeptSetOf(tab) {
 }
 const ADMIN_DEPT_TAB_LABELS = {
   'dining/sig': 'sig', 'dining/yan': 'yan', 'dining/bar': 'bar', 'dining/ird': 'ird',
+  'rizhao/canyin': 'canyin', 'rizhao/fangwu': 'fangwu',
 }
 function adminTabLabel(tab) {
   const sub = ADMIN_DEPT_TAB_LABELS[tab]
@@ -4163,6 +4172,15 @@ function dashOpenEditRound(el) {
       <div class="dashEditRoundDeptBox">${dashDeptOptionsHtml(rec.depts || [])}</div>
       <p class="form-hint" style="margin:0">${t('dashRoundDeptHint')}</p>
     </div>
+    <div style="margin-bottom:10px">
+      <label style="font-size:13px;font-weight:700;display:block;margin-bottom:6px">🗓️ ${t('dashRoundPlanLabel')}</label>
+      <select id="dashEditRoundPlan" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;min-width:220px">
+        <option value="" ${!rec.chPlan ? 'selected' : ''}>${t('dashRoundPlanV1')}</option>
+        <option value="v2" ${rec.chPlan === 'v2' ? 'selected' : ''}>${t('dashRoundPlanV2')}</option>
+        <option value="v3" ${rec.chPlan === 'v3' ? 'selected' : ''}>${t('dashRoundPlanV3')}</option>
+      </select>
+      <p class="form-hint" style="margin:4px 0 0">${t('dashRoundPlanHint')}</p>
+    </div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-primary btn-sm" id="dashEditRoundSaveBtn" onclick="dashSaveRoundEdit()">${t('dashRoundEditSave')}</button>
       <button class="btn btn-ghost btn-sm" onclick="dashCloseEditRound()">${t('dashRoundCancel')}</button>
@@ -4194,11 +4212,15 @@ async function dashSaveRoundEdit() {
   const startAt = dashParseLocalDT(startEl && startEl.value)
   const endAt = dashParseLocalDT(endEl && endEl.value)
   const depts = dashPickedEditDepts()
+  // v196：挑战结构（不改动 = 保持原值 —— patch 不带 chPlan 字段时云端不会动它）
+  const planEl = document.getElementById('dashEditRoundPlan')
+  const patch = { name, startAt, endAt, depts }
+  if (planEl && planEl.value) patch.chPlan = planEl.value
   if (startAt && endAt && endAt <= startAt) { alert(t('dashRoundCreateFail')); return }
   const btn = document.getElementById('dashEditRoundSaveBtn')
   if (btn) btn.disabled = true
   try {
-    const res = await CloudSync.setChallengeRound(rid, { name, startAt, endAt, depts })
+    const res = await CloudSync.setChallengeRound(rid, patch)
     if (res && res.ok) {
       _dashEditRoundId = ''
       alert(t('dashRoundEditSaved', name || rid))
@@ -4316,7 +4338,10 @@ function dashRoundsPanelHtml() {
       : ''
     // v188：天结构徽章 —— Day1/Day7 只考试的新结构（chPlan:'v2'）与老结构并存时，
     //   管理员必须能一眼分辨哪一期是哪种，否则会拿新口径去质问老数据。
-    const planTag = (r.chPlan === 'v2')
+    // v196：v3 = 21 天挑战徽章（紫色调，与 v2 绿色区分）。
+    const planTag = (r.chPlan === 'v3')
+      ? ` <span title="${escAttr(t('dashRoundPlanV3Title'))}" style="font-size:11px;font-weight:800;color:#6d28d9;background:#ede9fe;border-radius:10px;padding:2px 8px">${t('dashRoundPlanV3Tag')}</span>`
+      : (r.chPlan === 'v2')
       ? ` <span title="${escAttr(t('dashRoundPlanV2Title'))}" style="font-size:11px;font-weight:800;color:#047857;background:#d1fae5;border-radius:10px;padding:2px 8px">${t('dashRoundPlanV2Tag')}</span>`
       : ''
     return `<tr${viewed ? ' style="background:#eff6ff"' : ''}>
@@ -4358,6 +4383,15 @@ function dashRoundsPanelHtml() {
           <div style="font-weight:700;font-size:13px;margin-bottom:6px">🏷️ ${t('roundDeptLabel')}</div>
           <div>${dashDeptOptionsHtml([])}</div>
           <p class="form-hint" style="margin:0">${t('dashRoundDeptHint')}</p>
+        </div>
+        <div style="margin-bottom:10px">
+          <label style="font-size:13px;font-weight:700;display:block;margin-bottom:6px">🗓️ ${t('dashRoundPlanLabel')}</label>
+          <select id="dashRoundPlan" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;min-width:220px">
+            <option value="v2" selected>${t('dashRoundPlanV2')}</option>
+            <option value="v3">${t('dashRoundPlanV3')}</option>
+            <option value="">${t('dashRoundPlanV1')}</option>
+          </select>
+          <p class="form-hint" style="margin:4px 0 0">${t('dashRoundPlanHint')}</p>
         </div>
         <label style="display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:13px;cursor:pointer">
           <input type="checkbox" id="dashRoundMakeCur" checked />
@@ -4413,6 +4447,9 @@ async function dashCreateRound() {
   const endAt = dashParseLocalDT(endEl && endEl.value)
   // v89：适用部门（不勾 = 全部部门）
   const depts = dashPickedDepts()
+  // v196：挑战结构（缺省 v2 = 考试独占一天；可选 v3 = 21 天挑战；'' = 旧结构）
+  const planEl = document.getElementById('dashRoundPlan')
+  const chPlan = (planEl && planEl.value === 'v3') ? 'v3' : (planEl && planEl.value === '' ? '' : 'v2')
   // v152：显式选择是否顺手切换当前营次（不勾 = 只建期，当前期保持不动）
   const makeCurrent = !(curEl && curEl.checked === false)
   if (startAt && endAt && endAt <= startAt) { alert(t('dashRoundCreateFail')); return }
@@ -4421,7 +4458,7 @@ async function dashCreateRound() {
   try {
     // v152：labelOf 把 slug 转中文 → 默认名形如「客房送餐部七天挑战第一期」
     const res = await CloudSync.addChallengeRound({
-      name, startAt, endAt, depts, makeCurrent,
+      name, startAt, endAt, depts, makeCurrent, chPlan,
       labelOf: (k) => (typeof adminTabLabel === 'function' ? adminTabLabel(k) : k),
     })
     if (res && res.ok) {
@@ -4797,12 +4834,13 @@ function dashManualScoreOpen(usernames, name) {
       <div style="display:flex;flex-direction:column;gap:12px">
         <label style="font-size:13px">${t('dashChManualDay')}
           <select id="dashChManualDay" style="width:100%;margin-top:4px;padding:8px;border:1px solid #d1d5db;border-radius:8px">
-            <option value="7">${t('dashChManualDay7')}</option>
-            <option value="1">${t('dashChManualDay1')}</option>
+            ${dashChDayCount() === 21
+              ? `<option value="21">${t('dashChManualDay21')}</option><option value="1">${t('dashChManualDay1')}</option>`
+              : `<option value="7">${t('dashChManualDay7')}</option><option value="1">${t('dashChManualDay1')}</option>`}
           </select>
         </label>
         <label style="font-size:13px">${t('dashChManualCorrect')}
-          <input id="dashChManualCorrect" type="number" min="0" max="20" value="20"
+          <input id="dashChManualCorrect" type="number" min="0" max="${dashChDayCount() === 21 ? 30 : 20}" value="${dashChDayCount() === 21 ? 30 : 20}"
             style="width:100%;margin-top:4px;padding:8px;border:1px solid #d1d5db;border-radius:8px">
         </label>
         <label style="font-size:13px">${t('dashChManualSec')}
@@ -4839,7 +4877,10 @@ async function dashManualScoreSubmit(btn) {
   const usernames = String((btn && btn.dataset && btn.dataset.u) || '').split(',').map(s => s.trim()).filter(Boolean)
   if (!usernames.length) return
   const day = Number((document.getElementById('dashChManualDay') || {}).value) || 7
-  const total = 20
+  // v196：考试题量按营次结构取（21 天营次考试 30 题，其余 20 题）；
+  //   阶段号 si：旧结构 Day7 的 test 在 si=1（前面还有练习），v2/v3 每天单阶段恒 si=0。
+  const total = dashChDayCount() === 21 ? 30 : 20
+  const siOf = d => (dashChDayCount() === 21) ? 0 : (Number(d) === 7 ? 1 : 0)
   let correct = Number((document.getElementById('dashChManualCorrect') || {}).value)
   if (!isFinite(correct)) correct = total
   correct = Math.max(0, Math.min(total, Math.round(correct)))
@@ -4849,7 +4890,7 @@ async function dashManualScoreSubmit(btn) {
   if (btn) { btn.disabled = true; btn.textContent = t('dashChManualWorking') }
   try {
     const res = await CloudSync.setChallengeManualScore(usernames, {
-      day, si: day === 7 ? 1 : 0, kind: 'test', correct, total, usedSec, overwrite,
+      day, si: siOf(day), kind: 'test', correct, total, usedSec, overwrite,
     })
     if (res && res.ok) {
       dashManualScoreClose()
@@ -4903,7 +4944,7 @@ function dashReconcileResultOpen(res) {
   if (old) old.remove()
   const list = res.missing.slice(0, 60)
   // 环节名：test 且 day=7 → 期末；test 且 day=1 → 摸底；其余为每日练习
-  const stageLabel = m => (m.kind === 'test' ? (Number(m.day) === 7 ? t('dashChManualDay7') : t('dashChManualDay1')) : t('dashChReconcilePractice'))
+  const stageLabel = m => (m.kind === 'test' ? (Number(m.day) === (dashChDayCount() === 21 ? 21 : 7) ? t(dashChDayCount() === 21 ? 'dashChManualDay21' : 'dashChManualDay7') : t('dashChManualDay1')) : t('dashChReconcilePractice'))
   const box = document.createElement('div')
   box.id = 'dashReconcileModal'
   box.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);padding:16px'
@@ -5005,8 +5046,16 @@ function dashChDayMark(p, d) {
   const ck = (p && p.checkin) || []
   return ck[d - 1] === 2 ? 1 : -1
 }
-function dashChGroupKey(p) {
-  // ⚠️ 判据次序要紧：门槛先判，再判成绩齐全度。
+// v196：当前查看的营次天数（'v3' = 21，其余 = 7）。导出 Excel / 补录弹窗共用同一口径，
+//   与成绩矩阵的 chN 同源（都从 dashRoundView 指向的营次记录取 chPlan）。
+function dashChDayCount() {
+  const want = String(dashRoundView || dashRoundCurId() || '')
+  const list = dashRoundList()
+  const rec = list.find(r => String(r && r.id) === want) ||
+              list.find(r => String(r && r.id) === String(dashRoundCurId() || ''))
+  return (rec && rec.chPlan === 'v3') ? 21 : 7
+}
+function dashChGroupKey(p) {  // ⚠️ 判据次序要紧：门槛先判，再判成绩齐全度。
   //    「答题数够、但两场测试分都没有」是真实存在的形态——管理员用「重置考试成绩」
   //    （v84 的 exam 模式只删两场水平测试的阶段记录）之后就是这样：练习进度 q 还在，
   //    分数没了。这种人绝不能归进「无效/未参与组」（他就是参与了，只是成绩被清了），
@@ -5035,13 +5084,19 @@ function dashChScoreBlocks(list) {
   }))
 }
 // 明细表列宽（px → 写入器换算成字符宽）；顺序与 dashChExportHeader 一一对应
-const DASH_CH_COL_PX = [179, 151, 120, 147, 147, 100, 100, 111, 60, 60, 60, 60, 60, 60, 60]
+// v196：前 9 列固定，后 chN 列（D1–D7 或 D1–D21）按 60px 追加 —— 列宽随营次结构动态生成
+const DASH_CH_COL_PX_BASE = [179, 151, 120, 147, 147, 100, 100, 111]
+function dashChColPx() {
+  return DASH_CH_COL_PX_BASE.concat(new Array(dashChDayCount()).fill(60))
+}
 // 明细表列标题。⚠️ 英文值刻意与原表逐字一致（Department / Questions Answered / Accuracy Rate /
 //    Pre-test / Final Test / Score Change）——先把站点切到 EN 再导出，得到的表头就和原文件一模一样。
+// v196：D 列按营次天数动态（D1–D7 / D1–D21）。
 function dashChExportHeader() {
+  const N = dashChDayCount()
   return [t('dashChColDept'), t('dashChColName'), t('dashChColUser'), t('dashChColQ'), t('dashChColAcc'),
     t('dashChColPre'), t('dashChColFinal'), t('dashChColChange')]
-    .concat([1, 2, 3, 4, 5, 6, 7].map(d => 'D' + d))
+    .concat(Array.from({ length: N }, (_, i) => 'D' + (i + 1)))
 }
 
 // v116：七天挑战成绩导出（Excel，双 sheet：成绩明细 + 积分榜）。
@@ -5052,7 +5107,7 @@ function dashChExportHeader() {
 //        数字格式（前测/后测一位小数、提分两位小数、正确率百分比）、提分写成公式。
 function dashChExportSheets(list) {
   const rows0 = Array.isArray(list) ? list : []
-  const cols = DASH_CH_COL_PX.slice()
+  const cols = dashChColPx()
   const nCol = cols.length
   const lastCol = xlsxColRef(nCol - 1)
   const rows = [], merges = []
@@ -5111,7 +5166,7 @@ function dashChExportSheets(list) {
       row[7] = (chg === '-')
         ? num('-', E(7))
         : { v: chg, f: xlsxColRef(6) + rn + '-' + xlsxColRef(5) + rn, s: Object.assign({}, E(7), { fmt: '0.0' }) }
-      for (let d = 1; d <= 7; d++) row[7 + d] = num(dashChDayMark(p, d), E(7 + d))
+      for (let d = 1; d <= dashChDayCount(); d++) row[7 + d] = num(dashChDayMark(p, d), E(7 + d))
       rows.push(row)
     })
     runs.forEach(rr => { if (rr.to > rr.from) merges.push('A' + (start + rr.from) + ':A' + (start + rr.to)) })
@@ -5310,7 +5365,12 @@ function renderDashChallengeBlock(rows) {
   // ★★★ v188：本营次天结构。chPlan:'v2' = 考试独占一天（Day1 前测 / Day2-6 刷题 / Day7 期末考），
   //   每天只有一个环节 → 打卡只有「做了 ✓」与「没做 –」两态，结构上不可能再出现半圆 ◐。
   //   字段缺省 = 旧结构（Day1/Day7 各两环节），存量营次 r1–r7 一律不重算、不迁移。
+  // v196：chPlan:'v3' = 21 天挑战（Day1/Day21 考试 30 题、Day2-20 每天 30 题练习，总 630 题）。
+  //   矩阵列数 / 打卡格 / 期末列全部按 N 动态生成，绝不写死 7。
   const planV2 = !!(rdObj && rdObj.chPlan === 'v2')
+  const planV3 = !!(rdObj && rdObj.chPlan === 'v3')
+  const chN = planV3 ? 21 : 7                      // 本营次天数（列数 / 打卡循环上限）
+  const chLastTest = planV3 ? 21 : 7               // 本营次最后一个考试日（期末列 / 上期期末参照）
   // v88 营次筛选按钮组（多期并存时才有意义；单期时只显示提示行）
   // v94：rdList 已按 dashChDept 过滤 → 切到某部门后只列该部门的营次
   const filterBar = rdList.length > 1
@@ -5345,22 +5405,23 @@ function renderDashChallengeBlock(rows) {
     // v82 每日打卡：每天完成的阶段数（chy 按 day-si 去重）→ 2=全部完成（打卡）/1=部分/0=未打卡。
     // 阶段数与 challenge.js 的天结构对应（旧结构 Day1/7 各 2 阶段，其余各 1 阶段），本地声明避免跨文件依赖
     // v188：新结构每天 1 阶段（见上方 planV2）→ 半圆不会再出现
-    const stageCnt = planV2
-      ? { 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1 }
+    // v196：21 天结构每天同样只 1 阶段（Day1/Day21 考试、其余练习）
+    const stageCnt = (planV2 || planV3)
+      ? (() => { const m = {}; for (let d = 1; d <= chN; d++) m[d] = 1; return m })()
       : { 1: 2, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 2 }
     const checkin = []
-    for (let d = 1; d <= 7; d++) {
+    for (let d = 1; d <= chN; d++) {
       let n = 0
       for (let si = 0; si < stageCnt[d]; si++) if (seen[d + '-' + si]) n++
       checkin.push(n === 0 ? 0 : n === stageCnt[d] ? 2 : 1)
     }
-    // 测试分：Day1 / Day7 的水平测试（test 只上报一次）；v84：成绩被管理员重置的存根跳过 → 显示「—」
+    // 测试分：Day1 / 期末（Day7 或 Day21）的水平测试（test 只上报一次）；v84：成绩被管理员重置的存根跳过 → 显示「—」
     const t1 = chy.find(x => x.kind === 'test' && x.day === 1 && !x.cleared)
-    const t7 = chy.find(x => x.kind === 'test' && x.day === 7 && !x.cleared)
-    // ★v185 上期参照值：**只取上期期末成绩（Day7 考试分）**，且只喂给单元格做灰色显示，
+    const t7 = chy.find(x => x.kind === 'test' && x.day === chLastTest && !x.cleared)
+    // ★v185 上期参照值：**只取上期期末成绩（Day7/Day21 考试分）**，且只喂给单元格做灰色显示，
     //   绝不参与 q/acc/积分/汇总/导出。上期前测不展示（用户 10-19 明确：只显示上期期末成绩）。
     const prevChy = chyPrevOf(r)
-    const p7 = prevChy.find(x => x.kind === 'test' && x.day === 7 && !x.cleared)
+    const p7 = prevChy.find(x => x.kind === 'test' && x.day === chLastTest && !x.cleared)
     const score = x => x && x.total ? Math.round(x.correct / x.total * 100) : null
     // v73 积分榜：每环节按首次完成计（day-si 去重取 at 最早一条，重练不刷速度分）；
     // v78：答对分按环节权重（第七天期末考试 3 倍），用时扣分不变
@@ -5419,8 +5480,8 @@ function renderDashChallengeBlock(rows) {
   })
   list.sort((a, b) => b.q - a.q)
   _chDashRows = list   // v105：供批量补录读取（「进度已到 Day7 但 D7 无成绩」的学员集合）
-  // v82 每日打卡汇总：每天完成（全部阶段）的人数
-  const checkinStats = [0, 0, 0, 0, 0, 0, 0]
+  // v82 每日打卡汇总：每天完成（全部阶段）的人数（v196：按营次天数动态）
+  const checkinStats = new Array(chN).fill(0)
   list.forEach(p => (p.checkin || []).forEach((c, i) => { if (c === 2) checkinStats[i]++ }))
   // v139：原三态打卡单元格（✅/◐/—）随「三段分组 + D1–D7 用 1/-1」的改造下线，
   // 由下面的 dayCell 取代 —— 别再引入第二套打卡渲染，否则口径会分叉。
@@ -5450,8 +5511,8 @@ function renderDashChallengeBlock(rows) {
     .sort((a, b) => b.wrong - a.wrong)
     .slice(0, 50)
   const avgAcc = totalQ > 0 ? Math.round(totalC / totalQ * 100) : 0
-  // v105：进度已到 Day7 但 D7 无成绩的人数 → 提示补录入口（正是本次事故的表现形态）
-  const lack7 = list.filter(p => p.s7 == null && p.maxDay >= 7).length
+  // v105：进度已到期末（Day7/Day21）但期末无成绩的人数 → 提示补录入口（正是本次事故的表现形态）
+  const lack7 = list.filter(p => p.s7 == null && p.maxDay >= chLastTest).length
   // 本期成绩单元格：**只渲染本期成绩**，两参。
   // ★v187：v185 曾让第 3 参把上期分数塞进「期末」列做灰色带「上」的替身 —— 用户明确不要
   //   （10-19：「上次成绩不要做阴影处理了，只要单独做一列上一期期末成绩即可」）。
@@ -5509,7 +5570,7 @@ function renderDashChallengeBlock(rows) {
         <td style="text-align:center">${scoreCell(p.s7, p.m7)}</td>
         <td style="text-align:center" title="${escAttr(t('dashChPrevHint'))}">${prevCell(p.s7p)}</td>
         <td style="text-align:center">${chgCell(dashChScoreChange(p))}</td>
-        ${[1, 2, 3, 4, 5, 6, 7].map(d => `<td style="text-align:center;border-left:${d === 1 ? '2px solid #e5e7eb' : 'none'}">${dayCell(p, d)}</td>`).join('')}
+        ${Array.from({ length: chN }, (_, i) => i + 1).map(d => `<td style="text-align:center;border-left:${d === 1 ? '2px solid #e5e7eb' : 'none'}">${dayCell(p, d)}</td>`).join('')}
         <td style="text-align:center;border-left:2px solid #e5e7eb;white-space:nowrap">
           <button class="btn btn-ghost" id="dashChResetBtn_${pi}" style="padding:4px 10px;font-size:12px;white-space:nowrap"
             data-u="${escAttr(p.username)}" data-n="${escAttr(p.name || '')}"
@@ -5529,6 +5590,7 @@ function renderDashChallengeBlock(rows) {
         return vals.length ? Math.round(vals.reduce((s, v) => s + v, 0) / vals.length * 100) / 100 : null
       }
       const fmtAvg = v => (v == null ? '-' : v)
+      // v196：天数列 + 操作列 = chN + 1 列（旧结构 7+1=8，21 天 21+1=22）
       avgRow = `<tr style="background:#f9fafb;font-weight:700">
         <td colspan="3" style="text-align:center;color:#6b7280">${escHtml(t('dashChAvgLabel'))}</td>
         <td colspan="2"></td>
@@ -5536,11 +5598,11 @@ function renderDashChallengeBlock(rows) {
         <td style="text-align:center">${fmtAvg(avgOf(6))}</td>
         <td style="text-align:center"></td>
         <td style="text-align:center">${fmtAvg(avgOf(7))}</td>
-        <td colspan="8"></td>
+        <td colspan="${chN + 1}"></td>
       </tr>`
     }
     return `<tbody>
-      <tr><td colspan="17" style="background:#eef2f7;font-weight:700;text-align:left;padding:6px 10px">${escHtml(b.label)} · ${t('dashChJoinCount', n)}</td></tr>
+      <tr><td colspan="${10 + chN}" style="background:#eef2f7;font-weight:700;text-align:left;padding:6px 10px">${escHtml(b.label)} · ${t('dashChJoinCount', n)}</td></tr>
       <tr>
         <th style="text-align:center">${t('dashChColDept')}</th><th>${t('dashChColName')}</th><th>${t('dashChColUser')}</th>
         <th style="text-align:center">${t('dashChColQ')}</th>
@@ -5549,10 +5611,10 @@ function renderDashChallengeBlock(rows) {
         <th style="text-align:center">${t('dashChColFinal')}</th>
         <th style="text-align:center;color:#6b7280" title="${escAttr(t('dashChPrevHint'))}">${t('dashChColPrevFinal')}</th>
         <th style="text-align:center">${t('dashChColChange')}</th>
-        <th colspan="7" style="text-align:center;border-left:2px solid #e5e7eb">📅 ${t('dashChThCheckin')}（D1–D7）</th>
+        <th colspan="${chN}" style="text-align:center;border-left:2px solid #e5e7eb">📅 ${t('dashChThCheckin')}（D1–D${chN}）</th>
         <th style="text-align:center;border-left:2px solid #e5e7eb">${t('dashChThOps')}</th>
       </tr>
-      ${body || `<tr><td colspan="17" style="text-align:center;color:#9ca3af;padding:14px">${t('dashChGrpEmpty')}</td></tr>`}
+      ${body || `<tr><td colspan="${10 + chN}" style="text-align:center;color:#9ca3af;padding:14px">${t('dashChGrpEmpty')}</td></tr>`}
       ${avgRow}
     </tbody>`
   }).join('')
@@ -6012,8 +6074,14 @@ function dashUserDailyAllAcc(r) {
   }
   const cells = []
   let cq = 0, cc = 0, covered = 0
+  // v196：单营次天数按营次结构取（'v3' = 21 天，其余 = 7 天）—— 绝不写死 7，
+  //   否则 21 天营次的第 8 天起会被 dashUserDailyAcc 的 day>N 过滤整段丢弃。
+  const daysOfSlug = slug => {
+    const hit = rdList.filter(x => ((typeof dashRoundSlug === 'function') ? dashRoundSlug(x.id) : x.id) === slug)[0]
+    return (hit && hit.chPlan === 'v3') ? 21 : 7
+  }
   order.forEach((slug, gi) => {
-    const d = dashUserDailyAcc({ chy: groups[slug] }, 7)
+    const d = dashUserDailyAcc({ chy: groups[slug] }, daysOfSlug(slug))
     d.days.forEach(x => {
       const has = x.q > 0
       if (has) { cq += x.q; cc += x.c; covered++ }
