@@ -5194,7 +5194,8 @@ function dashChExportSheets(list) {
     }
   })
   // 积分榜口径与看板一致：管理员不参加排名；同分用时短者在前，再比答对数（v73/v78）；积分含首答准确率乘数（v160）
-  const lb = rows0.filter(p => p.role !== 'admin').slice()
+  // v196b：本期零首答记录的人不入导出积分榜（与看板积分榜 / 学员端 chLbAggregate 同口径）
+  const lb = rows0.filter(p => p.role !== 'admin' && (p.lbStages || 0) > 0).slice()
     .sort((a, b) => (b.lbScore - a.lbScore) || (a.lbT - b.lbT) || (b.lbC - a.lbC))
   const rankRows = [[
     t('dashChThRank'), t('thUsername'), t('thName'), t('thDept'),
@@ -5475,6 +5476,8 @@ function renderDashChallengeBlock(rows) {
       m7: !!(t7 && t7.manual), m1: !!(t1 && t1.manual),
       checkin,
       lbC, lbQ, lbAcc, lbT, lbTa, lbScore: Math.round(lbPts * lbAcc) - lbT,
+      // v196b：本期有效首答阶段数 —— 积分榜入榜资格判据（>0 才有排名资格），明细表保留全员不受影响
+      lbStages: Object.keys(firstByStage).length,
       chQ: r.chQ || {},
     }
   })
@@ -5487,7 +5490,8 @@ function renderDashChallengeBlock(rows) {
   // 由下面的 dayCell 取代 —— 别再引入第二套打卡渲染，否则口径会分叉。
   // v160 积分榜排序：积分（答对×权重×100×首答准确率−用时秒）高者在前；同分用时短者在前，再比答对数
   // v78：管理员账号不参加排名（进度明细表与汇总仍含管理员，便于自查）
-  const lbList = list.filter(p => p.role !== 'admin').slice().sort((a, b) => (b.lbScore - a.lbScore) || (a.lbT - b.lbT) || (b.lbC - a.lbC))
+  // v196b：本期零首答记录的人（含「仅上期」人员）不入积分榜 —— 与学员端 chLbAggregate 同口径
+  const lbList = list.filter(p => p.role !== 'admin' && (p.lbStages || 0) > 0).slice().sort((a, b) => (b.lbScore - a.lbScore) || (a.lbT - b.lbT) || (b.lbC - a.lbC))
   const fmtSec = s => { s = Math.max(0, s || 0); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') }
   const medal = i => (i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : String(i + 1))
   // 错题排行：跨学员合并 chQ（错次），取错误次数最多的 50 题

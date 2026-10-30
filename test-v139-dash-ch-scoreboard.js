@@ -108,6 +108,7 @@ const mkRow = (o) => Object.assign({
   username: 'u', name: 'N', dept: 'D', role: 'student',
   q: 100, acc: 80, s1: 80, s7: 90, m1: false, m7: false,
   checkin: [2, 2, 2, 2, 2, 2, 2], lbC: 0, lbT: 0, lbScore: 0, chQ: {},
+  lbStages: 1,   // v197：积分榜入榜资格判据（本套件 mock 行都代表参加过本期的学员）
   maxDay: 7, stagesDone: 9,
 }, o || {})
 

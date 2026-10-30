@@ -1902,6 +1902,10 @@ function chLbAggregate(rows, round) {
     return Math.min(sec, total * 30)
   }
   // v78：管理员账号不参加排名（学员端前三同样剔除）
+  // v196b：外层只筛「有任意 chy」，但 matchRound 把**别的营次**的记录全剔除后，这个人本期
+  //   first 为空 → tq=0 → acc 走缺省 1、积分 0 → 照样以「答对 0·100% 0分」占榜
+  //   （10-30 实锤：新营次第一期无人作答，榜上却出现三个 0 分用户）。修法：本期至少有
+  //   一条有效首答记录（first 非空）才入榜 —— 语义 =「参加过本期的人」才有排名资格。
   const list = (rows || []).filter(r => r && r.role !== 'admin' && r.chy && r.chy.length).map(r => {
     const first = {}
     ;(r.chy || []).forEach(x => {
@@ -1921,10 +1925,9 @@ function chLbAggregate(rows, round) {
     // v160：与看板同口径 —— 积分 = 首答得分 × 首答准确率 − 用时秒。
     //   ★ 准确率必须与答对同源（去重后的首次完成记录），绝不能用含重做的「正确率」——那样重做就能刷分。
     const acc = tq > 0 ? Math.min(1, c / tq) : 1
-    return { name: r.name || r.username || '', username: r.username, correct: c, q: tq, acc: acc, sec: tsec, score: Math.round(pts * acc) - tsec }
+    return { name: r.name || r.username || '', username: r.username, correct: c, q: tq, acc: acc, sec: tsec, score: Math.round(pts * acc) - tsec, stages: Object.keys(first).length }
   })
-  list.sort((a, b) => (b.score - a.score) || (a.sec - b.sec) || (b.correct - a.correct))
-  return list.slice(0, 3)
+  return list.filter(p => p.stages > 0).sort((a, b) => (b.score - a.score) || (a.sec - b.sec) || (b.correct - a.correct)).slice(0, 3)
 }
 function chLbRowsHtml(top) {
   if (!top || !top.length) return `<div style="color:#9ca3af;font-size:13px;padding:2px 0">${t('chLbEmpty')}</div>`

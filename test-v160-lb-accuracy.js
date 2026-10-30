@@ -119,10 +119,12 @@ function accCellsOf(html) {
 }
 
 // 三档学员：答对/用时相同但准确率不同（sharp 全对）、答对更多但准确率低（grinder）
+// v197：lbStages = 积分榜入榜资格判据（真实链路由 renderDashChallengeBlock 产出；
+//   本套件把手工行直接喂 dashChExportSheets / 断言明细元素 → 补上该字段）
 const rowsAcc = [
-  { username: 'sharp', name: '准', role: 'student', dept: 'dining', chy: [{ day: 1, si: 0, kind: 'practice', correct: 80, total: 80, at: 100, usedSec: 600 }] },
-  { username: 'sloppy', name: '糊', role: 'student', dept: 'dining', chy: [{ day: 1, si: 0, kind: 'practice', correct: 80, total: 100, at: 100, usedSec: 600 }] },
-  { username: 'grinder', name: '刷', role: 'student', dept: 'dining', chy: [{ day: 1, si: 0, kind: 'practice', correct: 90, total: 150, at: 100, usedSec: 1000 }] },
+  { username: 'sharp', name: '准', role: 'student', dept: 'dining', lbStages: 1, chy: [{ day: 1, si: 0, kind: 'practice', correct: 80, total: 80, at: 100, usedSec: 600 }] },
+  { username: 'sloppy', name: '糊', role: 'student', dept: 'dining', lbStages: 1, chy: [{ day: 1, si: 0, kind: 'practice', correct: 80, total: 100, at: 100, usedSec: 600 }] },
+  { username: 'grinder', name: '刷', role: 'student', dept: 'dining', lbStages: 1, chy: [{ day: 1, si: 0, kind: 'practice', correct: 90, total: 150, at: 100, usedSec: 1000 }] },
 ]
 
 ;(async () => {

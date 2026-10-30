@@ -213,7 +213,7 @@ const rowsMix = [
     assert('i18n dashChScoreRule 中英文均含 3 倍说明',
       i18nSrc.includes('第七天期末考试每题按 3 倍计分') && i18nSrc.includes('Day-7 final exam answers score 3×'))
     assert('app.js 排名剔除管理员 + 权重接线',
-      appSrc.includes("const lbList = list.filter(p => p.role !== 'admin')") && appSrc.includes('dashChStageWeight(x.day, x.kind)'))
+      appSrc.includes("list.filter(p => p.role !== 'admin' && (p.lbStages || 0) > 0)") && appSrc.includes('dashChStageWeight(x.day, x.kind)'))
     assert('challenge.js 学员端剔除管理员 + 权重接线',
       chSrc.includes("r.role !== 'admin'") && chSrc.includes('chLbStageWeight(x.day, x.kind)'))
   }

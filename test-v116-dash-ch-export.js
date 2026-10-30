@@ -76,7 +76,8 @@ const mk = (u, role, lbScore, lbT, lbC, extra) => Object.assign({
   maxDay: 7, stagesDone: 9, q: 100, acc: 85,
   s1: 80, s7: 90, m1: false, m7: false,
   checkin: [2, 2, 2, 2, 2, 2, 2],
-  lbC: lbC, lbT: lbT, lbScore: lbScore, chQ: {}
+  lbC: lbC, lbT: lbT, lbScore: lbScore, chQ: {},
+  lbStages: 1   // v197：积分榜入榜资格判据（本套件 mock 行都代表参加过本期的学员）
 }, extra || {})
 
 // 结构：双 sheet（v139 起明细表为「三段分组」，明细契约见 test-v139-dash-ch-scoreboard.js）
