@@ -388,6 +388,9 @@ function makeDeptSandbox() {
     `, sb)
     vm.runInContext(extractFn(CH, 'chDeptKey'), sb)
     vm.runInContext(extractFn(CH, 'chBankQuestions'), sb)
+    // v196：chBankQuestions/chRoundBankQuestions 经 chPoolExpandDepts 展开题池 → 需注入常量与函数
+    vm.runInContext(CH.slice(CH.indexOf('const CH_DEPT_POOL_ALIAS'), CH.indexOf('function chPoolExpandDepts')), sb)
+    vm.runInContext(extractFn(CH, 'chPoolExpandDepts'), sb)
     // v154：chBankCount/chBankIdSet 改走「当前营次」口径 → 需注入新依赖；
     //   本沙箱无云端营次（CloudSync 未定义）→ chRoundBankQuestions 回落视角口径，计数不变（240）
     vm.runInContext(extractFn(CH, 'chRoundRecForCurrent'), sb)
@@ -457,6 +460,9 @@ function makeDeptSandbox() {
     `, sb)
     vm.runInContext(extractFn(CH, 'chDeptKey'), sb)
     vm.runInContext(extractFn(CH, 'chBankQuestions'), sb)
+    // v196：题池展开依赖（同上）
+    vm.runInContext(CH.slice(CH.indexOf('const CH_DEPT_POOL_ALIAS'), CH.indexOf('function chPoolExpandDepts')), sb)
+    vm.runInContext(extractFn(CH, 'chPoolExpandDepts'), sb)
     // v154：chBankIdSet 改走营次口径 → 注入新依赖（无云端营次 → 回落视角口径，行为不变）
     vm.runInContext(extractFn(CH, 'chRoundRecForCurrent'), sb)
     vm.runInContext(extractFn(CH, 'chRoundBankQuestions'), sb)
@@ -633,8 +639,9 @@ function makeDeptSandbox() {
     assert("all tab → ['all', '']（含无 dept 的历史题）", JSON.stringify(set('all')) === JSON.stringify(['all', '']), JSON.stringify(set('all')))
     assert('未知 tab 兜底为 all', JSON.stringify(set('nope')) === JSON.stringify(['all', '']), JSON.stringify(set('nope')))
     // 题库 tab 顺序（饮食部四分队在前）
-    assert('题库 tab 共 6 个（四分队 + 房务部 + 通用）',
-      call(sb, 'ADMIN_DEPT_TABS.length') === 6, String(call(sb, 'ADMIN_DEPT_TABS.length')))
+    // v196：新增日照-餐饮 / 日照-房务 → 6 → 8 个 tab
+    assert('题库 tab 共 8 个（四分队 + 日照两分部 + 房务部 + 通用）',
+      call(sb, 'ADMIN_DEPT_TABS.length') === 8, String(call(sb, 'ADMIN_DEPT_TABS.length')))
     assert('题库 tab 首项为 dining/sig（默认落在标帜餐厅）', call(sb, 'ADMIN_DEPT_TABS[0]') === 'dining/sig')
     // 营次适用部门文案（dashRoundDeptText 依赖 t / escHtml / deptSlugName → 沙箱补齐）
     vm.runInContext(extractFn(APP, 'dashRoundDeptText'), sb)

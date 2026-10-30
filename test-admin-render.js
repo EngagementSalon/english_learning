@@ -85,7 +85,7 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   console.log('\n1️⃣  renderAdmin 渲染')
   vm.runInContext('renderAdmin()', sandbox)
   const shell = getEl('page-admin').innerHTML
-  assert('tab 数量为 6', tabs.length === 6, `got ${tabs.length}`)
+  assert('tab 数量为 8（v196 加日照-餐饮/日照-房务）', tabs.length === 8, `got ${tabs.length}`)
   assert('默认 tab 落在 dining/sig（标帜餐厅）', vm.runInContext('adminTab', sandbox) === 'dining/sig', vm.runInContext('adminTab', sandbox))
   tabs.forEach(k => {
     const label = vm.runInContext(`adminTabLabel(${JSON.stringify(k)})`, sandbox)

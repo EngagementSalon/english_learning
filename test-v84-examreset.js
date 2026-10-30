@@ -248,7 +248,8 @@ function fullChy(cleared) {
   // v88：重置改为按营次作用 → 条件中多了 inRound(x)（仅清当前营次的测试记录），
   // 但「按重置时刻过滤、只清重置前的成绩」这一幂等口径不变。
   assert('云端：exam 模式按重置时刻过滤（重放幂等，只清重置前的成绩）', /x\.kind === 'test' && !x\.cleared && inRound\(x\) && \(x\.at \|\| 0\) <= ev\.ts/.test(fs.readFileSync(path.join(__dirname, 'cloud-store.js'), 'utf-8')))
-  assert('看板：测试列跳过存根（!x.cleared）', APP.includes("x.kind === 'test' && x.day === 1 && !x.cleared") && APP.includes("x.kind === 'test' && x.day === 7 && !x.cleared"))
+  // v196：期末日改走 chLastTest（v1/v2 = 7 不变；21 天营次 = 21）→ day===7 断言改 day===chLastTest
+  assert('看板：测试列跳过存根（!x.cleared）', APP.includes("x.kind === 'test' && x.day === 1 && !x.cleared") && APP.includes("x.kind === 'test' && x.day === chLastTest && !x.cleared"))
   assert('看板：积分去重跳过存根', /firstByStage\[k\] \|\| \(x\.at \|\| 0\)/.test(APP) && APP.includes('if (x.cleared) return'))
   assert('学员端积分榜同样跳过存根', CH.includes('if (x && x.cleared) return'))
   assert('学员端：chDayDone / chDayLastDoneAt 兼容存根', CH.includes('cfg.stages.every((_, si) => chStageCounted(day, si))') && CH.includes('if (r && (r.done || r.cleared) && r.at)'))

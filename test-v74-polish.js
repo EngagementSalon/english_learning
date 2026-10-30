@@ -293,8 +293,9 @@ vm.runInContext(extractFn(chSrc, 'chLbAggregate'), sb)
       assert(`i18n ${k} zh/en 成对（恰好 2 处）`, cnt === 2, 'count=' + cnt)
     })
     // v161：chLbRule 文案补上「用时按每题最多 30 秒计」（计时改为计分用时后必须同步说明）
-    assert('i18n 中文文案正确', i18nSrc.includes("chLbTitle: '当前积分榜前三'") && i18nSrc.includes("chLbEmpty: '还没有学员完成挑战环节，快来做第一个！'") && i18nSrc.includes("chLbRule: '答对越多、首答越准，积分越高；用时按每题最多 30 秒计；第七天期末考试每题按 3 倍计分'"))
-    assert('i18n 英文文案正确', i18nSrc.includes("chLbTitle: 'Current Top 3'") && i18nSrc.includes("chLbEmpty: 'No one has finished a challenge stage yet — be the first!'") && i18nSrc.includes("chLbRule: 'More correct answers and a higher first-try accuracy score higher; time counts at max 30 seconds per question; Day-7 final exam answers score 3×'"))
+    // v196：chLbRule 通用化（去「第七天」特指，最后一天的期末考试 3 倍同样覆盖 21 天营次）
+    assert('i18n 中文文案正确', i18nSrc.includes("chLbTitle: '当前积分榜前三'") && i18nSrc.includes("chLbEmpty: '还没有学员完成挑战环节，快来做第一个！'") && i18nSrc.includes("chLbRule: '答对越多、首答越准，积分越高；用时按每题最多 30 秒计；最后一天的期末考试每题按 3 倍计分'"))
+    assert('i18n 英文文案正确', i18nSrc.includes("chLbTitle: 'Current Top 3'") && i18nSrc.includes("chLbEmpty: 'No one has finished a challenge stage yet — be the first!'") && i18nSrc.includes("chLbRule: 'More correct answers and a higher first-try accuracy score higher; time counts at max 30 seconds per question; final-exam answers on the last day score 3×'"))
     assert('app.js 看板积分榜（v73）未回退', appSrc.includes('lbScore') && i18nSrc.includes("dashChRankTitle: '七天挑战积分榜'"))
   }
 

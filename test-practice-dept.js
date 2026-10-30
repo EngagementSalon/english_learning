@@ -81,14 +81,15 @@ const run = code => vm.runInContext(code, sandbox)
   const slugs = run('PRACTICE_DEPT_SLUGS')
 
   console.log('\n1️⃣  切片项定义（v109 层级化）')
-  assert('一级行共 4 项（全部/饮食部/房务部/通用）', tabs.length === 4, `got ${JSON.stringify(tabs)}`)
+  assert('一级行共 5 项（全部/饮食部/房务部/日照/通用）', tabs.length === 5, `got ${JSON.stringify(tabs)}`)
   assert('首项为「全部」(\'\')', tabs[0] === '')
   assert('一级行含饮食部大部门项', tabs.indexOf('dining') >= 0)
   assert('一级行含房务部大部门项', tabs.indexOf('rooms') >= 0)
+  assert('一级行含日照大部门项（v196）', tabs.indexOf('rizhao') >= 0)
   assert('一级行含通用项', tabs.indexOf('all') >= 0)
   assert('一级行不含任何分部门 slug（分部门收进二级行）',
     tabs.every(k => k.indexOf('/') < 0), JSON.stringify(tabs))
-  assert('合法切片全集共 13 项', slugs.length === 13, `got ${slugs.length}`)
+  assert('合法切片全集共 16 项', slugs.length === 16, `got ${slugs.length}`)
   ;['dining/sig', 'dining/yan', 'dining/bar', 'dining/ird'].forEach(k => {
     assert(`全集含饮食部四分队 ${k}`, slugs.indexOf(k) >= 0)
   })
