@@ -134,7 +134,8 @@ function makeSandbox(pre) {
     const Store = vm.runInContext('Store', sb)
     Store.init()
     const cats = JSON.parse(sb.localStorage.getItem('eq_categories'))
-    assert('迁移后分类表 = 线下课题库 + 标帜餐厅常见词汇', cats.length === 2 && Number(cats[0].id) === 1 && Number(cats[1].id) === 12,
+    // v198：分类 13「房务常用词汇」入库 → 分类表 = 线下课题库(1) + 标帜餐厅常见词汇(12) + 房务常用词汇(13)
+    assert('迁移后分类表 = 线下课题库 + 标帜餐厅常见词汇 + 房务常用词汇', cats.length === 3 && Number(cats[0].id) === 1 && Number(cats[1].id) === 12 && Number(cats[2].id) === 13,
       JSON.stringify(cats.map(c => c.id)))
     const qs = Store.getQuestions()
     assert('派生题保留', qs.some(q => q.question === '派生题甲'))

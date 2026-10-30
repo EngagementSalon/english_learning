@@ -96,7 +96,10 @@ The proper way to greet a visitor is with "good + part of the day".（问候访�
   const re = /\{\s*id:\s*(\d+),/g
   let m
   while ((m = re.exec(src)) !== null) ids.push(+m[1])
-  assert('bank-data.js 总条目 = 1448（1436 题 + 12 分类）', ids.length === 1448, '现有 ' + ids.length)
+  // v198：改为动态口径（题数 + 分类数），避免每次扩容题库都要改断言
+  const B = require('vm').runInNewContext(require('fs').readFileSync(__dirname + '/bank-data.js', 'utf-8') + ';BANK')
+  const wantCount = B.questions.length + B.categories.length
+  assert(`bank-data.js 总条目 = ${wantCount}（${B.questions.length} 题 + ${B.categories.length} 分类）`, ids.length === wantCount, '现有 ' + ids.length)
 
   console.log('\n' + (failed ? '❌ 有失败项' : '✅ 全部通过'))
   process.exit(failed ? 1 : 0)

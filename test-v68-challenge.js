@@ -120,7 +120,7 @@ const DAY = 86400000
     assert('两次进入测试题不同（随机）', JSON.stringify(t1.map(q => q.id)) !== JSON.stringify(t2.map(q => q.id)))
     const dist = [1, 2, 3].map(d => t1.filter(q => Number(q.difficulty) === d).length)
     assert('测试分层 难度1×10+难度2×7+难度3×3', JSON.stringify(dist) === JSON.stringify([10, 7, 3]), `got ${JSON.stringify(dist)}`)
-    assert('测试题全部属于分类 12', t1.every(q => Number(q.category_id) === 12))
+    assert('测试题全部属于分类 >=12（v198 起含房务词汇库）', t1.every(q => Number(q.category_id) >= 12))
     const t7 = vm.runInContext('challengeStageQuestions(7,1)', sb)
     assert('Day7 测试也是 20 题随机', t7.length === 20 && JSON.stringify(t7.map(q => q.id)) !== JSON.stringify(t1.map(q => q.id)))
   }
@@ -386,7 +386,7 @@ const DAY = 86400000
     })())
     // 全对走完 Day2（含额外题）→ 直接 done（无错题时无需回顾轮）
     vm.runInContext(`
-      chs.questions.forEach((q, i) => { chs.index = i; chPick(q.answer[0]); chSubmitAnswer() })
+      chs.questions.forEach((q, i) => { chs.index = i; (q.type === 'multiple' ? q.answer : [q.answer[0]]).forEach(k => chPick(k)); chSubmitAnswer() })
       chFinishPractice()
     `, sb)
     assert('Day2 全对（41/41）直接完成', (() => {
@@ -412,7 +412,7 @@ const DAY = 86400000
     assert('Day6 昨天 done → Day7 天级解锁', vm.runInContext('chDayUnlocked(7)', sb) === true)
     vm.runInContext(`
       chStartStage(7, 0)
-      chs.questions.forEach((q, i) => { chs.index = i; chPick(q.answer[0]); chSubmitAnswer() })
+      chs.questions.forEach((q, i) => { chs.index = i; (q.type === 'multiple' ? q.answer : [q.answer[0]]).forEach(k => chPick(k)); chSubmitAnswer() })
       chFinishPractice()
     `, sb)
     assert('Day7 巩固完成后测试阶段解锁', vm.runInContext('chStageUnlocked(7,1)', sb) === true)
@@ -516,7 +516,7 @@ const DAY = 86400000
     assert('看板调用 renderDashChallengeBlock', appSrc.includes('renderDashChallengeBlock(rows)'))
     assert('看板错题排行聚合 chQ', appSrc.includes('wrongAgg'))
     const chSrc = fs.readFileSync(path.join(__dirname, 'challenge.js'), 'utf-8')
-    assert('题源固定分类 12', chSrc.includes('Number(q.category_id) === 12'))
+    assert('题源口径为分类 >=12', chSrc.includes('Number(q.category_id) >= 12'))
     assert('水平测试不可重做 guard（阶段版）', /=== 'test' && chStageDone\(day, si\)/.test(chSrc))
     assert('状态键 eq_challenge_v2', chSrc.includes("CHALLENGE_KEY = 'eq_challenge_v2'"))
     assert('难度配比表存在', chSrc.includes('CHALLENGE_DIFF_PLAN'))

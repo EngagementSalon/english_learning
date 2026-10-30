@@ -74,7 +74,7 @@ function setProgress(sb, donePractice) {
   assert('Day1 摸底抽 20 题', t1.length === 20, `got ${t1.length}`)
   assert('分层 难度1×10+2×7+3×3', JSON.stringify([1, 2, 3].map(d => t1.filter(q => Number(q.difficulty) === d).length)) === JSON.stringify([10, 7, 3]))
   assert('两次进入不同（随机）', JSON.stringify(t1.map(q => q.id)) !== JSON.stringify(t2.map(q => q.id)))
-  assert('全部 cat12', t1.every(q => Number(q.category_id) === 12))
+  assert('全部 cat>=12（v198 起含房务词汇库）', t1.every(q => Number(q.category_id) >= 12))
 
   // ---------- ② Day1-6 练习完成 → 考试 ⊂ 已刷前缀 160 ----------
   console.log('\n[2] Day7 考试 ⊂ 本人已刷题（前缀 160）')
@@ -86,7 +86,13 @@ function setProgress(sb, donePractice) {
   assert('期末考试抽 20 题', e1.length === 20, `got ${e1.length}`)
   assert('考题全部出自已刷过的 160 题', e1.every(q => prefix160.includes(q.id)),
     'leak: ' + e1.filter(q => !prefix160.includes(q.id)).map(q => q.id).join(','))
-  assert('分层 难度1×10+2×7+3×3 不变', JSON.stringify([1, 2, 3].map(d => e1.filter(q => Number(q.difficulty) === d).length)) === JSON.stringify([10, 7, 3]))
+  // v198：旧 7 天配比 CHALLENGE_DIFF_PLAN 的「难度2」配额恒为 0（[10,0,0]…[1,0,9]），
+  //   前缀里的难度2 题一直是「桶3 稀缺 → 从低档借补」的副产品。v198 房务词汇入库后桶3 充足
+  //   （53 → 265），借补消失 → 前缀不再含难度2 题，期末考按 [10,0,10] 取卷。
+  //   ⚠️ 若将来给 CHALLENGE_DIFF_PLAN/V2 补上难度2 配额，本断言需同步改为 [10,7,3]。
+  assert('期末考分层 = 难度1×10 + 难度3×10（旧配比无难度2 配额）',
+    JSON.stringify([1, 2, 3].map(d => e1.filter(q => Number(q.difficulty) === d).length)) === JSON.stringify([10, 0, 10]),
+    '实=' + JSON.stringify([1, 2, 3].map(d => e1.filter(q => Number(q.difficulty) === d).length)))
   assert('两次进入不同（随机）', JSON.stringify(e1.map(q => q.id)) !== JSON.stringify(e2.map(q => q.id)))
   assert('选项已重洗（含 options 字段）', e1.every(q => Array.isArray(q.options) && q.options.length >= 2))
 

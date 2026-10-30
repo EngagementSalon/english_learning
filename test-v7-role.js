@@ -88,9 +88,9 @@ function makeSandbox(prefill) {
     Store2.init()
 
     const qs2 = Store2.getQuestions()
-    const trCount = qs2.filter(q => q.id >= 9001).length
+    const trCount = qs2.filter(q => q.id >= 9001 && q.id < 10000).length
     assert('培训题已合并进统一题库（>0 道）', trCount > 0, `got ${trCount}`)
-    assert('培训合并题全部 dept=dining', qs2.filter(q => q.id >= 9001).every(q => q.dept === 'dining'))
+    assert('培训合并题全部 dept=dining', qs2.filter(q => q.id >= 9001 && q.id < 10000).every(q => q.dept === 'dining'))
     const all2 = qs2.filter(q => q.dept === 'all')
     assert('通用题（cat11 原核心词汇）保留', all2.length > 0, `got ${all2.length}`)
     resolve()
