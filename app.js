@@ -2225,6 +2225,8 @@ const ADMIN_DEPT_TAB_LABELS = {
 function adminTabLabel(tab) {
   const sub = ADMIN_DEPT_TAB_LABELS[tab]
   if (sub) return (t('chDeptNames') || {})[DEPT_SUB_BY_SLUG[tab] || ''] || tab
+  // v202：挑战成绩统计筛选条新增「日照」大类按钮（rizhao 不在 ADMIN_DEPT_TABS，仅筛选条用）
+  if (tab === 'rizhao') return (typeof deptTree === 'function' && deptTree().rizhao && deptTree().rizhao.name) || '日照'
   if (tab === 'rooms') return t('bankRooms')
   return t('bankGeneral')
 }
@@ -5375,8 +5377,9 @@ function renderDashChallengeBlock(rows) {
   //   但其所有数字由 chyOf（严格本期）算出，自然全为空/0，不会污染汇总。
   const parts = (rows || []).filter(r => r && (chyOf(r).length || chyPrevOf(r).length) && deptFilter(r))
   // v89 部门筛选按钮组（饮食部四分队 + 房务部 + 全部）：各部门题不同 → 需要分开看
-  const deptBarOptions = ['all'].concat(
-    (typeof ADMIN_DEPT_TABS !== 'undefined' ? ADMIN_DEPT_TABS : []).filter(k => k !== 'all')
+  // v202：「日照」大类按钮（rizhao/canyin + rizhao/fangwu 合并看），大类紧跟其两个分部
+  const deptBarOptions = ['all', 'rizhao', 'rizhao/canyin', 'rizhao/fangwu'].concat(
+    (typeof ADMIN_DEPT_TABS !== 'undefined' ? ADMIN_DEPT_TABS : []).filter(k => k !== 'all' && String(k).indexOf('rizhao/') !== 0)
   )
   const deptLabelOf = k => k === 'all'
     ? t('roundDeptAll')
@@ -5811,8 +5814,9 @@ function renderDashChTotalBlock(rows) {
   const list = dashChTotalRows(rows, sel)
   // 部门筛选条（与当期看板同款）。★ 刻意**内联、不抽公共函数**：既有套件按源码切片注入，
   //   抽成模块级函数会让 renderDashChallengeBlock 的沙箱缺注入而整片报错（v161 同款教训）。
-  const deptBarOptions = ['all'].concat(
-    (typeof ADMIN_DEPT_TABS !== 'undefined' ? ADMIN_DEPT_TABS : []).filter(k => k !== 'all')
+  //   v202：「日照」大类按钮（rizhao/canyin + rizhao/fangwu 合并看），大类紧跟其两个分部。
+  const deptBarOptions = ['all', 'rizhao', 'rizhao/canyin', 'rizhao/fangwu'].concat(
+    (typeof ADMIN_DEPT_TABS !== 'undefined' ? ADMIN_DEPT_TABS : []).filter(k => k !== 'all' && String(k).indexOf('rizhao/') !== 0)
   )
   const deptLabelOf = k => k === 'all'
     ? t('roundDeptAll')
