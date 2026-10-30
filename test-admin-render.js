@@ -109,7 +109,8 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   console.log('\n2️⃣  切换 tab')
   vm.runInContext("switchAdminTab('rooms')", sandbox)
   const roomsBody = getEl('adminTabBody').innerHTML
-  assert('房务部空题库显示暂无题目', roomsBody.includes('noQuestions') || roomsBody.includes('暂无题目'))
+  // v198：房务题库已入库（礼宾 50 词 + 客房用品 68 词）→ 不再显示空态
+  assert('房务部题库有题可渲染（v198 起非空）', !roomsBody.includes('noQuestions') && roomsBody.length > 0)
   const roomsShell = getEl('page-admin').innerHTML
   assert('房务部 tab 高亮', roomsShell.includes("admin-tab active"))
 
@@ -144,7 +145,9 @@ if (!Store) { console.error('Store missing!'); process.exit(1) }
   const fullHtml = getEl('dashCatBlock').innerHTML
   const catItems = (fullHtml.match(/cat-progress-item/g) || []).length
   // v67（题库 v9）后分类表 = 线下课题库 + 标帜餐厅常见词汇
-  assert('全部口径渲染 2 个分类（线下课题库+标帜餐厅常见词汇）', catItems === 2, `got ${catItems}`)
+  // v198：分类表 = 线下课题库 + 标帜餐厅常见词汇 + 房务常用词汇（动态取，不写死个数）
+  const wantCats = Store.getStats().categoryStats.length
+  assert(`全部口径渲染 ${wantCats} 个分类（含房务常用词汇）`, catItems === wantCats, `got ${catItems}`)
   // 全库分类1题数
   const cat1Full = Store.getStats().categoryStats.find(c => c.id === 1).totalQuestions
   assert('全部口径分类1题数正确', fullHtml.includes(`>${cat1Full}${' '}`) || fullHtml.includes(`>${cat1Full}<`), `期望 ${cat1Full}`)

@@ -512,7 +512,8 @@ const NOSTEM = { id: 9199, type: 'voicematch', question: '', options: ['alpha', 
     const arr = JSON.parse(run2(`JSON.stringify(BANK.questions.filter(q => q.type === 'voicematch').slice(0, 6))`))
     assert('种子库存在 voicematch 题（供真实数据抽查）', arr.length > 0, `got ${arr.length}`)
     const total = run2(`BANK.questions.filter(q => q.type === 'voicematch').length`)
-    assert('种子库 voicematch 总数 = 71（与 v155 排查口径一致）', total === 71, `got ${total}`)
+    // v198：房务词汇库新增 118 道 voicematch（礼宾 50 + 客房用品 68），故只守「不回退」不再写死 71
+    assert('种子库 voicematch 总数 >= 71（v155 排查基线，v198 起含房务词汇）', total >= 71, `got ${total}`)
     let allHidden = true, badq = ''
     for (const q of arr) {
       const html = run2(`vmOptionsHtml(${JSON.stringify(q)}, -1, 'live', 'selectOption')`)

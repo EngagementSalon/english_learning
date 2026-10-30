@@ -77,12 +77,12 @@ Store.init()
   const allDeptQs = allQs.filter(q => !q.dept || q.dept === 'all')
   const sigQs = allQs.filter(q => q.dept === 'dining/sig')
   assert('饮食部题目 > 0（含四分队 slug）', diningQs.length > 0, `got ${diningQs.length}`)
-  assert('房务部题目 = 0（暂时为空）', roomsQs.length === 0, `got ${roomsQs.length}`)
+  assert('房务部题目 > 0（v198 起礼宾/客房用品词汇入库）', roomsQs.length > 0, `got ${roomsQs.length}`)
   assert('通用题目 > 0', allDeptQs.length > 0, `got ${allDeptQs.length}`)
   assert('标帜餐厅(sig) 有专属题', sigQs.length > 0, `got ${sigQs.length}`)
   assert('无遗留 dept=\'dining\' 大部门题（已细到 slug）', allQs.filter(q => q.dept === 'dining').length === 0)
   assert('题目 dept 全部是已知 slug 或 all',
-    allQs.every(q => ['all', 'dining/sig', 'dining/yan', 'dining/bar', 'dining/ird', 'rooms'].indexOf(q.dept) >= 0),
+    allQs.every(q => ['all', 'dining/sig', 'dining/yan', 'dining/bar', 'dining/ird', 'rooms', 'rooms/fo', 'rooms/concierge', 'rooms/ww', 'rooms/styling', 'rooms/spa'].indexOf(q.dept) >= 0),
     JSON.stringify([...new Set(allQs.map(q => q.dept))]))
 
   // 3. 部门筛选：大部门 key 'dining' 应看到四分队 + 通用

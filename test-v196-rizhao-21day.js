@@ -117,13 +117,14 @@ ok('A11 legacy 结构不动：无记录时 chDays=7 天旧结构 / chTotal=210',
 
 console.log('\n=== [B] 日照题池展开 ===')
 const sbB = mkChSandbox([{ id: 'r8', chPlan: 'v3', depts: ['rizhao/canyin'] }], 'r8')
-ok('B1 chPoolExpandDepts：canyin → 四餐厅池；fangwu 原样；混合去重',
+// v198：fangwu 不再「原样返回」—— 展开为房务五子部门 + 自身（礼宾/客房用品词汇库）
+ok('B1 chPoolExpandDepts：canyin → 四餐厅池；fangwu → 房务五子部门+自身；混合去重',
   (() => {
     const a = sbB.chPoolExpandDepts(['rizhao/canyin'])
     const b = sbB.chPoolExpandDepts(['rizhao/fangwu'])
     const c = sbB.chPoolExpandDepts(['rizhao/canyin', 'dining/sig'])
     return JSON.stringify(a) === JSON.stringify(['dining/sig', 'dining/yan', 'dining/bar', 'dining/ird']) &&
-      JSON.stringify(b) === JSON.stringify(['rizhao/fangwu']) &&
+      JSON.stringify(b) === JSON.stringify(['rizhao/fangwu', 'rooms/fo', 'rooms/concierge', 'rooms/ww', 'rooms/styling', 'rooms/spa']) &&
       JSON.stringify(c) === JSON.stringify(['dining/sig', 'dining/yan', 'dining/bar', 'dining/ird'])
   })())
 const QPOOL = [
@@ -143,10 +144,10 @@ ok('B2 抽题池：canyin 营次 = 四餐厅 + 通用，不含 fangwu/rooms，�
   })(), '实=' + JSON.stringify(poolB.map(q => q.id)))
 const sbB3 = mkChSandbox([{ id: 'r9', chPlan: 'v3', depts: ['rizhao/fangwu'] }], 'r9')
 sbB3.Store = { getQuestions: () => QPOOL }
-ok('B3 抽题池：fangwu 营次 = 本部门 + 通用（用户自传题库）',
+ok('B3 抽题池：fangwu 营次 = 自身 + 房务子部门(rooms/fo) + 通用（v198 展开）',
   (() => {
     const ids = sbB3.chRoundBankQuestions().map(q => q.id).sort((a, b) => a - b)
-    return JSON.stringify(ids) === JSON.stringify([5, 7, 8])
+    return JSON.stringify(ids) === JSON.stringify([5, 6, 7, 8])
   })())
 ok('B4 视角题库（chBankQuestions）同口径：管理员切 rizhao/canyin 切片也能看到四餐厅题',
   (() => {

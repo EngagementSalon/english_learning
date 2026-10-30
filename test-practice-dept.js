@@ -148,14 +148,18 @@ const run = code => vm.runInContext(code, sandbox)
   console.log('  各切片题数:', JSON.stringify(scopes))
   // 注意：题库 100% 属于饮食部（1156 题）+ 通用（44 题），无房务部专属题，
   // 故「全部」与「饮食部」题数必然相同（均为 1200）。这是数据现状，非缺陷。
-  const diningOnly = allQs.filter(q => {
+  // v198：房务题库不再为空（礼宾部 50 词 + 客房用品 68 词 = 708 题，dept=rooms/concierge|rooms/styling），
+  //   故「全部」= 饮食部 + 房务部 + 通用，「饮食部」不再等于全库。
+  const roomsOnly = allQs.filter(q => {
     const d = q.dept || ''
     return d === 'rooms' || d.indexOf('rooms/') === 0
   }).length
-  assert('房务部专属题数为 0（数据现状，故「全部」=「饮食部」）', diningOnly === 0, `got ${diningOnly}`)
+  assert('房务部专属题 > 0（v198 入库）', roomsOnly > 0, `got ${roomsOnly}`)
   assert('「全部」= 全库', scopes[''] === allQs.length)
-  assert('「饮食部」= 全库（因无房务部专属题）', scopes['dining'] === allQs.length,
-    `${scopes['dining']} vs ${allQs.length}`)
+  assert('「饮食部」= 全库 - 房务部专属题', scopes['dining'] === allQs.length - roomsOnly,
+    `${scopes['dining']} vs ${allQs.length - roomsOnly}`)
+  assert('「房务部」= 房务专属 + 通用', scopes['rooms'] === roomsOnly + scopes['all'],
+    `${scopes['rooms']} vs ${roomsOnly + scopes['all']}`)
   assert('标帜餐厅 > 0', scopes['dining/sig'] > 0)
   assert('通用 > 0', scopes['all'] > 0)
 

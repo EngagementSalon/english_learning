@@ -57,7 +57,7 @@ Store.init()
   const isDining = q => { const d = q.dept || ''; return d === 'dining' || d.indexOf('dining/') === 0 }
   const diningQs = allQs.filter(isDining)
   const sigQs = allQs.filter(q => q.dept === 'dining/sig')
-  const roomsQs = allQs.filter(q => q.dept === 'rooms')
+  const roomsQs = allQs.filter(q => q.dept === 'rooms' || (q.dept || '').indexOf('rooms/') === 0)
   const allDeptQs = allQs.filter(q => q.dept === 'all')
 
   // 1. getStats() 无参 = 全量
@@ -113,7 +113,8 @@ Store.init()
   const { total: tSig } = Store.queryQuestions({ deptExact: 'dining/sig' })
   assert('deptExact=dining/sig 只含标帜餐厅题', tSig === sigQs.length, `got ${tSig}`)
   const { total: tRooms } = Store.queryQuestions({ deptExact: 'rooms' })
-  assert('deptExact=rooms 只含 rooms 题', tRooms === roomsQs.length, `got ${tRooms}`)
+  // v198：deptExact 为精确匹配 —— 房务词汇题在 rooms/concierge|rooms/styling 子部门，'rooms' 本级应为 0
+  assert('deptExact=rooms 只含大部门级 rooms 题（v198 起房务题在子部门 slug）', tRooms === allQs.filter(q => q.dept === 'rooms').length, `got ${tRooms}`)
   const { total: tAll } = Store.queryQuestions({ deptExact: 'all' })
   assert('deptExact=all 只含 all 题', tAll === allDeptQs.length, `got ${tAll}`)
   const { list: lSig } = Store.queryQuestions({ deptExact: 'dining/sig', category_id: 1 })

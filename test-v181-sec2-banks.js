@@ -325,8 +325,9 @@ console.log('\n[6] 三个新营次的部门与期号 → 难度档')
     hardOf('r1') === false && hardOf('r3') === true, '')
   assert('源码契约：chIsHardRound 已改为「按部门组期号」判定（不再只看 r1）',
     /_roundSeqOf|Number\(rec\.seq\) > 0/.test(codeOnly(extractFn(CH, 'chIsHardRound'))), '')
-  assert('源码契约：challengePool 的题源仍按 category_id === 12 硬过滤',
-    /category_id\)?\s*===\s*12/.test(codeOnly(extractFn(CH, 'chBankQuestions'))), '')
+  // v198：题源口径从「=== 12」放宽为「>= 12」（分类 13 房务词汇库入池）
+  assert('源码契约：challengePool 的题源按 category_id >= 12 过滤（v198 起含房务词汇库）',
+    /category_id\)?\s*>=\s*12/.test(codeOnly(extractFn(CH, 'chBankQuestions'))), '')
 }
 
 console.log(failed ? '\n❌ v181 测试存在失败项\n' : '\n✅ v181 测试全部通过\n')
