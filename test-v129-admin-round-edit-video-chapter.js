@@ -75,7 +75,8 @@ assert('1.7 编辑表单的部门候选放在独立容器（供 dashPickedEditDe
   openEdit.includes('dashEditRoundDeptBox'))
 
 const saveEdit = extractFn(APP, 'dashSaveRoundEdit')
-assert('1.8 保存调用 CloudSync.setChallengeRound(rid, patch)', saveEdit.includes('CloudSync.setChallengeRound(rid, { name, startAt, endAt, depts })'))
+// v196：patch 改为条件构造（chPlan 仅在选择了明确结构时才带，避免云端误改存量营次）
+assert('1.8 保存调用 CloudSync.setChallengeRound(rid, patch)', saveEdit.includes('const patch = { name, startAt, endAt, depts }') && saveEdit.includes('CloudSync.setChallengeRound(rid, patch)'))
 assert('1.9 保存前校验「结束晚于开始」（与新建同口径）', saveEdit.includes('endAt <= startAt') && saveEdit.includes("t('dashRoundCreateFail')"))
 assert('1.10 保存成功后清空编辑态并整块重绘看板',
   saveEdit.includes("_dashEditRoundId = ''") && saveEdit.includes('renderDashboard()'))

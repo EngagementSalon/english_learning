@@ -152,8 +152,9 @@ function makeSb(opts) {
   vm.runInContext(constSrc('CHALLENGE_DIFF_PLAN_HARD'), sb)
   vm.runInContext(constSrc('CHALLENGE_TEST_PLAN'), sb)
   vm.runInContext(constSrc('CHALLENGE_TEST_PLAN_HARD'), sb)
+  vm.runInContext(CH.slice(CH.indexOf('const CH_DEPT_POOL_ALIAS'), CH.indexOf('function chPoolExpandDepts')), sb)  // v196：题池展开常量
   // ---- 依赖链（顺序按源码中真实先后） ----
-  ;['challengeUid', 'chDeptKey', 'chBankQuestions',
+  ;['challengeUid', 'chDeptKey', 'chBankQuestions', 'chPoolExpandDepts',
     // v154：抽题池改走「当前营次」口径（challengePool 等已换 chRoundBankQuestions）
     'chRoundRecForCurrent', 'chRoundBankQuestions',
     'chBankCount', 'chBankIdSet',

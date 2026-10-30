@@ -47,7 +47,7 @@ console.log('=== 一、白名单常量：正好是饮食部四个二级分队 ==
 const mSlugs = chSrc.match(/const CH_DEPT_SLUGS = \[([^\]]*)\]/)
 ok(!!mSlugs, 'challenge.js 定义了 CH_DEPT_SLUGS')
 const slugs = mSlugs ? mSlugs[1].split(',').map(s => s.trim().replace(/^'|'$/g, '')).filter(Boolean) : []
-eq(slugs, ['dining/sig', 'dining/yan', 'dining/bar', 'dining/ird'], 'CH_DEPT_SLUGS = 标帜/艳中/酒吧团队/客房送餐')
+eq(slugs, ['dining/sig', 'dining/yan', 'dining/bar', 'dining/ird', 'rizhao/canyin', 'rizhao/fangwu'], 'CH_DEPT_SLUGS = 标帜/艳中/酒吧团队/客房送餐/日照-餐饮/日照-房务')
 ok(slugs.indexOf('dining') < 0, '一级部门 dining 不在白名单（饮食部本身不参赛）')
 ok(slugs.every(s => !/woobar|wetbar|liquid/i.test(s)), '三级部门（WOOBAR/WETBAR/LIQUID）不在白名单')
 ok(slugs.every(s => !/^rooms/.test(s)), '房务部不在白名单')

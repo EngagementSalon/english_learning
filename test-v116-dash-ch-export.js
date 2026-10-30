@@ -58,6 +58,8 @@ const ZH = {
 const t = k => (ZH[k] != null ? ZH[k] : k)
 const ctx = { t }
 vm.createContext(ctx)
+// v196：v139 块新增 dashChDayCount（引用 dashRoundView / dashRoundCurId / dashRoundList）→ 补桩
+vm.runInContext('var dashRoundView = ""; function dashRoundCurId() { return "" } function dashRoundList() { return [] }', ctx)
 // v139：dashChExportSheets 依赖 v139 整块（DASH_CH_MIN_Q / dashChScoreBlocks 等同块顶层 const）
 // 以及 course-app 的 xlsxColRef（列号换算）—— 只抽单个函数会 ReferenceError
 const iV139 = appSrc.indexOf('// ====== v139：三段分组口径')

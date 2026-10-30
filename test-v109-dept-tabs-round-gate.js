@@ -123,15 +123,16 @@ const i18nSrc = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8')
   console.log('\n🧪 v109 部门标签层级化 + 挑战入口动态营次门禁')
 
   // ============ 一、定义 ============
-  console.log('\n=== 一、切片定义（一级 4 项 + 全集 13 项）===')
+  console.log('\n=== 一、切片定义（一级 5 项 + 全集 16 项，v196 加日照）===')
   const tabs = run('PRACTICE_DEPT_TABS')
   const slugs = run('PRACTICE_DEPT_SLUGS')
-  assert('一级行 = [\'\', \'dining\', \'rooms\', \'all\']',
-    JSON.stringify(tabs) === JSON.stringify(['', 'dining', 'rooms', 'all']), JSON.stringify(tabs))
+  assert('一级行 = [\'\', \'dining\', \'rooms\', \'rizhao\', \'all\']',
+    JSON.stringify(tabs) === JSON.stringify(['', 'dining', 'rooms', 'rizhao', 'all']), JSON.stringify(tabs))
   assert('一级行不含分部门 slug', tabs.every(k => String(k).indexOf('/') < 0))
-  assert('全集 13 项', slugs.length === 13, `got ${slugs.length}`)
+  assert('全集 16 项', slugs.length === 16, `got ${slugs.length}`)
   ;['dining/sig', 'dining/yan', 'dining/bar', 'dining/ird',
-    'rooms/fo', 'rooms/concierge', 'rooms/ww', 'rooms/styling', 'rooms/spa'].forEach(k => {
+    'rooms/fo', 'rooms/concierge', 'rooms/ww', 'rooms/styling', 'rooms/spa',
+    'rizhao/canyin', 'rizhao/fangwu'].forEach(k => {
     assert(`全集含 ${k}`, slugs.indexOf(k) >= 0)
   })
   assert('chDeptKey 校验改用 PRACTICE_DEPT_SLUGS',

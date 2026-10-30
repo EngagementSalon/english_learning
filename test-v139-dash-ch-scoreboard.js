@@ -61,6 +61,8 @@ function makeLogicSandbox() {
   }
   sb.globalThis = sb
   vm.createContext(sb)
+  // v196：v139 块新增 dashChDayCount（引用 dashRoundView / dashRoundCurId / dashRoundList）→ 补桩
+  vm.runInContext('let dashRoundView = ""; function dashRoundCurId() { return "" } function dashRoundList() { return [] }', sb)
   vm.runInContext(read('i18n.js'), sb)
   vm.runInContext(extractV139Block(APP), sb)
   vm.runInContext(extractFn(APP, 'dashChExportSheets'), sb)
