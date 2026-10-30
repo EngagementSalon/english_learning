@@ -211,10 +211,13 @@ function feedRound(v2, id) {
   console.log('\n7️⃣  G-1. 看板源码契约')
   assert('app.js 从所选营次取 rdObj', /const rdObj = rdList\.find\(r => r\.id === want\) \|\| \{\}/.test(appCode))
   assert('app.js 用 chPlan === \'v2\' 判定新结构', /const planV2 = !!\(rdObj && rdObj\.chPlan === 'v2'\)/.test(appCode))
-  assert('app.js 新结构阶段数全为 1', /\{ 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1 \}/.test(appCode))
+  // v196：stageCnt 改为 v2/v3 共用 IIFE（按 chN 动态生成全 1 映射；21 天营次每天同样只 1 阶段）
+  assert('app.js v2/v3 结构阶段数全为 1（IIFE 按 chN 生成）',
+    appCode.includes('const stageCnt = (planV2 || planV3)') && appCode.includes('m[d] = 1'))
   assert('app.js 旧结构阶段数保持 {1:2,...,7:2}', /\{ 1: 2, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 2 \}/.test(appCode))
-  assert('planV2 定义在 stageCnt 之前（作用域正确）', appCode.indexOf("const planV2 = !!(rdObj") < appCode.indexOf('const stageCnt = planV2'), String(appCode.indexOf("const planV2 = !!(rdObj")) + '/' + String(appCode.indexOf('const stageCnt = planV2')))
-  assert('营次管理展示「新天结构」徽章', /const planTag = \(r\.chPlan === 'v2'\)/.test(appCode) && /dashRoundPlanV2Tag/.test(I18N))
+  assert('planV2 定义在 stageCnt 之前（作用域正确）', appCode.indexOf("const planV2 = !!(rdObj") < appCode.indexOf('const stageCnt = (planV2 || planV3)'), String(appCode.indexOf("const planV2 = !!(rdObj")) + '/' + String(appCode.indexOf('const stageCnt = (planV2 || planV3)')))
+  // v196：营次管理徽章 v3（21天/紫）优先于 v2（新天结构/绿）
+  assert('营次管理展示「新天结构/21天」徽章', /const planTag = \(r\.chPlan === 'v3'\)/.test(appCode) && /dashRoundPlanV2Tag/.test(I18N) && /dashRoundPlanV3Tag/.test(I18N))
 
   // ── G. cloud-store
   console.log('\n8️⃣  G-2. cloud-store 归一与打标')
@@ -225,7 +228,8 @@ function feedRound(v2, id) {
   ] }))`))
   assert('_roundsNorm 保留 chPlan=v2', normed[0].chPlan === 'v2', JSON.stringify(normed[0]))
   assert('_roundsNorm 不给缺字段的营次补默认（存量仍按旧结构）', !('chPlan' in normed[1]), JSON.stringify(normed[1]))
-  assert('_roundsNorm 丢弃未知值 v3（不认得就别乱认）', !('chPlan' in normed[2]), JSON.stringify(normed[2]))
+  // v196：v3（21 天挑战）成为合法结构 → 归一保留（白名单只认显式 'v2'/'v3'，仍不给缺字段营次补默认）
+  assert('_roundsNorm 保留合法结构 v3（21 天挑战）', normed[2].chPlan === 'v3', JSON.stringify(normed[2]))
   assert('新建营次写入 chPlan:v2', /chPlan: 'v2'/.test(csCode) && /chPlan: 'v2'[\s\S]{0,80}at: manual/.test(csCode), 'push 对象里缺 chPlan')
   assert('新建营次的 chPlan 在这次 push 里（不是别处）', /startAt, endAt,[\s\S]{0,400}chPlan: 'v2'/.test(csCode))
 

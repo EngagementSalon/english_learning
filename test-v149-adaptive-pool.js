@@ -142,10 +142,11 @@ function makePoolSandbox(bank, hardRound) {
     vm.runInContext(extractConst(CH, n), sb)
   })
   vm.runInContext('const CHALLENGE_TOTAL = 210\n', sb)
+  vm.runInContext(CH.slice(CH.indexOf('const CH_DEPT_POOL_ALIAS'), CH.indexOf('function chPoolExpandDepts')), sb)  // v196：题池展开常量
   // 函数（真实源码）
   ;['challengeRng', 'chIsHardRound', 'chDiffPlan', 'chTestPlan',
     'chDiffBucketOf', 'chBankMaxDiff', 'chDrawWithBackfill', 'chBankDiffStats',
-    'chPlanAllocate', 'chBankQuestions',
+    'chPlanAllocate', 'chBankQuestions', 'chPoolExpandDepts',
     // v154：challengePool / chBankCount / chBankDiffStats 改走营次口径 → 注入新依赖
     //   （本沙箱无 CloudSync 营次数据 → chRoundBankQuestions 回落视角口径，题源不变）
     'chRoundRecForCurrent', 'chRoundBankQuestions',

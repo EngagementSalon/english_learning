@@ -80,7 +80,7 @@ const CH_DIFF_PLAN_SRC = extractArr(CH_SRC, 'CHALLENGE_DIFF_PLAN')
 // 挑战相关函数（真实现，注入沙箱）
 const CH_FNS_FOR_POOL = [
   'chDeptKey', 'chBankQuestions', 'chBankMaxDiff', 'chDiffBucketOf',
-  'chBankDiffStats', 'chBankDiffGap',
+  'chBankDiffStats', 'chBankDiffGap', 'chPoolExpandDepts',
   // v154：challengePool / chBankDiffStats / chBankCount 改走营次口径 → 注入新依赖
   //   （本沙箱无 CloudSync 营次数据 → chRoundBankQuestions 回落视角口径，题源不变）
   'chRoundRecForCurrent', 'chRoundBankQuestions',
@@ -107,6 +107,7 @@ function mkChSandbox(dept, opts) {
   // 常量：从源码取真值（不另抄一份快照 —— 技能 §四·补二十三）
   vm.runInContext('const CHALLENGE_SEED = ' + CH_SEED + ';', sb)
   vm.runInContext('const CHALLENGE_DIFF_PLAN = ' + CH_DIFF_PLAN_SRC + ';', sb)
+  vm.runInContext(CH_SRC.slice(CH_SRC.indexOf('const CH_DEPT_POOL_ALIAS'), CH_SRC.indexOf('function chPoolExpandDepts')), sb)  // v196：题池展开常量
   CH_FNS_FOR_POOL.forEach(n => vm.runInContext(extractFn(CH_SRC, n), sb))
   if (o.withPool) {
     // 只影响「洗牌种子」的三个依赖：本套件断言的是「序列长度/唯一性/归属」，
