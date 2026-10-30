@@ -167,8 +167,10 @@ function chDeptKey() {
 // 兼容 v89 前的历史题：只有 'dining'（大部门）或空 dept 的题，对饮食部四分队全部可见。
 // v196：日照-餐饮（rizhao/canyin）的视角题库经 chPoolExpandDepts 展开为各餐厅题库合集 ——
 //   与抽题池（chRoundBankQuestions）同一口径，避免「题库题量显示 0 但抽题正常」的错位。
+// v198：口径从「分类 12」放宽为「分类 >= 12」—— 房务词汇题库是分类 13（rooms/*），
+//   若仍写死 === 12，日照-房务的抽题池恒为 0 题（营次开跑即空题）。
 function chBankQuestions() {
-  const all = Store.getQuestions().filter(q => Number(q.category_id) === 12)
+  const all = Store.getQuestions().filter(q => Number(q.category_id) >= 12)
   const k = chDeptKey()
   if (!k) return all
   const major = k.split('/')[0]
@@ -216,7 +218,7 @@ function chRoundBankQuestions() {
     // v196：题池展开 —— 日照-餐饮的挑战题从各餐厅题库里挑（用户口径：「餐饮题库从各个餐厅的题库里挑」）。
     //   展开只作用于**抽题池**，不改变部门归属：日照-餐饮学员看到的题仍标着原餐厅部门。
     const pool = chPoolExpandDepts(depts)
-    const all = Store.getQuestions().filter(q => Number(q.category_id) === 12)
+    const all = Store.getQuestions().filter(q => Number(q.category_id) >= 12)
     const majors = pool.map(d => String(d).split('/')[0])
     return all.filter(q => {
       const d = q.dept || ''
@@ -227,11 +229,15 @@ function chRoundBankQuestions() {
 }
 // v196：部门 → 抽题池展开（跨大部门借题）。
 //   · 'rizhao/canyin'（日照-餐饮）→ 标帜/艳中/酒吧/客房送餐四队题库合集；
+//   · 'rizhao/fangwu'（日照-房务）→ 房务部五个子队题库合集（v198）；
 //   · 其余部门 → 原样返回（行为不变）。
 //   用途：chRoundBankQuestions（抽题池）。管理端上传/归属口径不动 —— 日照-房务的题
 //   仍以 dept='rizhao/fangwu' 上传，只有本部门与通用题会进它的抽题池。
 const CH_DEPT_POOL_ALIAS = {
   'rizhao/canyin': ['dining/sig', 'dining/yan', 'dining/bar', 'dining/ird'],
+  // v198：日照-房务 → 房务部五个子队题库合集 + 本部门自身（学员自传题，如后续以
+  //   dept='rizhao/fangwu' 上传房务词库，仍要能进池，不被展开挤掉）。
+  'rizhao/fangwu': ['rizhao/fangwu', 'rooms/fo', 'rooms/concierge', 'rooms/ww', 'rooms/styling', 'rooms/spa'],
 }
 function chPoolExpandDepts(depts) {
   const out = []
@@ -1832,6 +1838,7 @@ function chBack() {
 
 function isChAnswered(i) {
   const a = chs && chs.answers[i]
+  if (Array.isArray(a)) return a.length > 0   // v198：多选空数组 = 未答
   return a !== -1 && a !== undefined && a !== null
 }
 
@@ -2616,10 +2623,12 @@ function chOptionsHtml(q, submitted, ans, pickFn) {
   return visibleOptionIndexes(q.options).map(i => {
     const opt = q.options[i]
     let cls = 'option-item'
+    // v198：多选时 ans 是数组 —— 命中判断统一收口（单选 a===i 行为不变）
+    const picked = Array.isArray(ans) ? ans.indexOf(i) >= 0 : ans === i
     if (submitted) {
       if (q.answer.includes(i)) cls += ' correct'
-      else if (ans === i) cls += ' wrong'
-    } else if (ans === i) {
+      else if (picked) cls += ' wrong'
+    } else if (picked) {
       cls += ' selected'
     }
     const badge = submitted && q.answer.includes(i) ? '✓' : LETTERS[i]
@@ -2638,7 +2647,19 @@ function chTextInput(v) {
 
 function chPick(i) {
   if (!chs || chs.phase !== 'quiz') return
-  chs.answers[chs.index] = i
+  // v198：多选题支持 —— 点击累积/取消（练习页 toggleOption 同口径）。
+  //   背景：挑战池过去只有 single/listen/voicematch/judge（单选型），v198 房务词汇库引入
+  //   multiple 后，若继续按单选写入，学员只能选一项、永远判错。
+  const q = chs.questions[chs.index]
+  if (q && safeQType(q) === 'multiple') {
+    const cur = chs.answers[chs.index]
+    let arr = Array.isArray(cur) ? cur.slice() : []
+    if (arr.indexOf(i) >= 0) arr = arr.filter(x => x !== i)
+    else arr.push(i)
+    chs.answers[chs.index] = arr.sort((a, b) => a - b)
+  } else {
+    chs.answers[chs.index] = i
+  }
   renderChallengeQuiz()
 }
 
@@ -2672,7 +2693,8 @@ function chRecordStage(correct, total, wrongQids) {
 function chSubmitAnswer() {
   const q = chs.questions[chs.index]
   const ans = chs.answers[chs.index]
-  if (ans === undefined || ans === -1) return
+  // v198：多选题未选任何项（空数组）不可提交
+  if (ans === undefined || ans === -1 || (Array.isArray(ans) && !ans.length)) return
   chs.submitted = true
   const correct = checkAnswer(q, ans)
   if (correct) chs.correctCount++
@@ -2822,7 +2844,8 @@ function chGoto(i) {
   renderChallengeQuiz()
 }
 function chSubmitTest() {
-  const unanswered = chs.answers.filter(a => a === -1 || a === undefined).length
+  // v198：多选空数组也算未答
+  const unanswered = chs.answers.filter(a => (Array.isArray(a) ? !a.length : (a === -1 || a === undefined))).length
   if (unanswered > 0 && !confirm(t('chConfirmSubmit', unanswered))) return
   finishChallengeTest()
 }

@@ -3340,7 +3340,8 @@ function impSyncDeptHint() {
   const dSel = document.getElementById('importDept')
   const cSel = document.getElementById('importCat')
   const dept = (dSel && dSel.value) || 'all'
-  const isChallengeBank = !!(cSel && Number(cSel.value) === 12)
+  // v198：挑战题库 = 分类 >= 12（分类 12 餐饮词库 + 分类 13 房务词库），提示文案同口径
+  const isChallengeBank = !!(cSel && Number(cSel.value) >= 12)
   el.textContent = isChallengeBank
     ? (dept === 'all' ? t('impChDeptHintAll') : t('impChDeptHint', adminTabLabel(dept)))
     : t('impDeptHint')
