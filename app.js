@@ -460,7 +460,7 @@ function openProfileSetup() {
 function closeProfileSetup() {
   document.getElementById('profileModal').style.display = 'none'
 }
-function saveProfile() {
+async function saveProfile() {
   const name = document.getElementById('profileName').value.trim()
   if (!name) return
   // v156：部门设为必选项 —— 原先读不到会静默存空串，导致后续练习页/挑战页收窄无依据
@@ -481,10 +481,35 @@ function saveProfile() {
   Store.setUser({ name, dept })
   // 同步账号表姓名（看板显示用）
   if (s) Store.updateUser(s.id, { name })
+  // v199：部门变更走统一收口 _applyDeptChange（写账号表 + 同步会话 + 云端 dept 事件），
+  //   与「管理端-学员管理-修改部门」同链路。旧行为只改 eq_user 个人资料缓存：
+  //   session.dept 不变 → 挑战营期/题库仍按旧部门解析（2026-10-30 用户实测：
+  //   资料里换成日照-房务后，挑战横幅仍显示日照-餐饮第一期；且重新登录后改动整体丢失）。
+  //   幂等：部门未变化时 _applyDeptChange 内部早退，无副作用。
+  if (s && typeof Store.setUserDept === 'function') {
+    try { await Store.setUserDept(s.id, dept) } catch (e) { /* 失败也能入队，下次定时推送 */ }
+  }
+  // 部门可能已变 → 立即重渲染依赖部门的可见页（练习页的挑战入口卡 / 挑战页的营期横幅），
+  //   不等下一次云端拉取的门禁轮询。
+  if (typeof refreshDeptAwarePages === 'function') refreshDeptAwarePages()
   if (renamed) applyCourseRename(renamed.old, renamed.nu)
   closeProfileSetup()
   updateUserInfoDisplay()
   if (renamed) alert(t('renameDone', renamed.old, renamed.nu))
+}
+// v199：部门变更后立即重渲染当前可见的部门敏感页。
+//   挑战入口卡在练习页内（challengeEntryHtml），营期横幅在挑战页；不重渲染的话
+//   要等下一次云端拉取的门禁轮询（最长一个推送周期）才换期，用户会误以为「没生效」。
+function refreshDeptAwarePages() {
+  try {
+    const pages = document.querySelectorAll('.page')
+    for (let i = 0; i < pages.length; i++) {
+      const el = pages[i]
+      if (!el || el.style.display === 'none') continue
+      if (el.id === 'page-practice') { renderPractice(); return }
+      if (el.id === 'page-challenge') { renderChallenge(); return }
+    }
+  } catch (e) { /* 切页时本就会重渲染，这里忽略 */ }
 }
 function updateUserInfoDisplay() {
   const s = Store.getSession()
@@ -1776,7 +1801,7 @@ function startExam() {
   }
 
   startExamTimer()
-  // 考试防作弊：禁止切屏，超 3 次自动交卷
+  // 考试防作弊：禁止切屏，超 3 次自动交卷（管理员/日照账号在 AntiCheat 内部自动豁免，v200）
   if (typeof AntiCheat !== 'undefined') {
     AntiCheat.start({ maxViolations: 3, onSubmit: function () { finishExam(false) } })
   }

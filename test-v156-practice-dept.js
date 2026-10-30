@@ -34,7 +34,7 @@ function braceEnd(src, open) {
   return src.length - 1
 }
 function braceSlice(src, from) { const open = src.indexOf('{', from); return src.slice(from, braceEnd(src, open) + 1) }
-function grab(src, name) { const i = src.indexOf('function ' + name + '('); return i < 0 ? null : braceSlice(src, i) }
+function grab(src, name) { const a = src.indexOf('async function ' + name + '('); const i = a >= 0 ? a : src.indexOf('function ' + name + '('); return i < 0 ? null : braceSlice(src, i) } // v199：saveProfile 改 async —— 从 'function ' 起抽会丢 async 前缀 → 函数体内的 await 在 vm 里语法错
 // 剥注释行（否定断言必须先剥注释，否则注释里的被禁字面量会造成假失败）
 const codeOnly = s => String(s).split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
 

@@ -210,10 +210,10 @@ const docRef = {
   console.log('\n🧪 C. 源码级接线')
   {
     const acSrc = fs.readFileSync(path.join(__dirname, 'anti-cheat.js'), 'utf-8')
-    assert('anti-cheat.js 含管理员豁免分支', /if \(isAdminUser\(\)\) \{ stop\(\); return \}/.test(acSrc))
+    assert('anti-cheat.js 含管理员豁免分支', /if \(isAdminUser\(\) \|\| isRizhaoUser\(\)\) \{ stop\(\); return \}/.test(acSrc)) // v200：日照账号豁免并入同位分支
     assert('anti-cheat.js 优先用 Store.isAdmin 判定', /function isAdminUser\(\)[\s\S]{0,500}typeof S\.isAdmin === 'function' && S\.isAdmin\(\)/.test(acSrc))
     assert('anti-cheat.js 兜底读 getSession().role', /function isAdminUser\(\)[\s\S]{0,700}S\.getSession\(\)/.test(acSrc))
-    assert('anti-cheat.js 导出 isAdminUser', /return \{ start, stop, isActive, getViolations, dismiss, isAdminUser \}/.test(acSrc))
+    assert('anti-cheat.js 导出 isAdminUser', /return \{ start, stop, isActive, getViolations, dismiss, isAdminUser, isRizhaoUser \}/.test(acSrc)) // v200：导出 isRizhaoUser
 
     // 豁免统一在模块内生效 → 各调用点无需各自判断（平台考试仍照常调用 start）
     const appSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf-8')

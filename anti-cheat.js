@@ -3,6 +3,8 @@
 // 每次违规计数 +1 并弹出警告；累计达到上限自动交卷（调用 onSubmit）
 // 启用范围由作答流程控制：平台考试、线下课作业/测评（v39 起作业也启用）；练习不启用
 // v65：管理员账号（role=admin）一律豁免 —— 管理员是试做/演示/排错，不挂监听、不计违规、不强制结束
+// v200：日照账号（日照-餐饮 / 日照-房务，rizhao）一律豁免 —— 驻店培训场景学员会频繁切出页面，
+//       防作弊整体关闭：在线考试、挑战测试、线下课作业/测评均不挂监听、不计违规、不强制结束
 const AntiCheat = (function () {
   let active = false
   let cfg = { maxViolations: 3, onViolation: null, onSubmit: null }
@@ -22,6 +24,26 @@ const AntiCheat = (function () {
         const s = S.getSession()
         return !!(s && s.role === 'admin')
       }
+    } catch (e) { /* ignore */ }
+    return false
+  }
+
+  // v200：当前会话是否为日照账号（日照-餐饮 / 日照-房务）。判定链：
+  //   ① 原始部门串直接含「日照」或 rizhao（覆盖 '日照·日照-餐饮' / 'rizhao/canyin' 等一切写法）
+  //   ② normDept 归一后 majorKey==='rizhao' 或分部门 slug 以 rizhao/ 开头
+  // Store 未加载 / 无部门 / 读取异常 → 返回 false（不豁免，保持原行为）
+  function isRizhaoUser() {
+    try {
+      const S = (typeof Store !== 'undefined' && Store) || (typeof window !== 'undefined' && window.Store) || null
+      if (!S || typeof S.getSessionDept !== 'function') return false
+      const d = String(S.getSessionDept() || '')
+      if (!d) return false
+      if (d.indexOf('日照') >= 0 || d.toLowerCase().indexOf('rizhao') >= 0) return true
+      if (typeof normDept === 'function') {
+        const hit = normDept(d)
+        if (hit && (hit.majorKey === 'rizhao' || String(hit.key || '').indexOf('rizhao') === 0)) return true
+      }
+      return false
     } catch (e) { /* ignore */ }
     return false
   }
@@ -91,7 +113,8 @@ const AntiCheat = (function () {
   function start(opts) {
     if (active) return
     // v65：管理员豁免 —— 不激活、不挂任何监听（isActive() 保持 false，作答流程照常）
-    if (isAdminUser()) { stop(); return }
+    // v200：日照账号同口径豁免
+    if (isAdminUser() || isRizhaoUser()) { stop(); return }
     opts = opts || {}
     active = true
     violations = 0
@@ -124,6 +147,6 @@ const AntiCheat = (function () {
   }
   function isActive() { return active }
   function getViolations() { return violations }
-  return { start, stop, isActive, getViolations, dismiss, isAdminUser }
+  return { start, stop, isActive, getViolations, dismiss, isAdminUser, isRizhaoUser }
 })()
 window.AntiCheat = AntiCheat
