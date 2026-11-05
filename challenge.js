@@ -2747,13 +2747,27 @@ function chFinishPractice() {
 // ---- 错题回顾轮（v72）：只抽本轮仍错的题，全对即完成该阶段 ----
 function chReviewPick(i) {
   if (!chs || chs.phase !== 'review') return
-  chs.reviewAnswers[chs.reviewIdx] = i
+  // v203：多选题支持 —— 与 chPick（v198）同口径：点击累积/取消。
+  //   背景：v198 只修了主流程 chPick，错题回顾轮漏网 —— 回顾轮按单值写入，
+  //   多选题点第二项顶掉第一项、checkAnswer(数字) 恒 false → 回顾轮「刷到全对
+  //   才完成」死循环，学员感知为「选不了第二个 + 无法提交」，刷新逃离（现场实报）。
+  const q = chs.reviewQs[chs.reviewIdx]
+  if (q && safeQType(q) === 'multiple') {
+    const cur = chs.reviewAnswers[chs.reviewIdx]
+    let arr = Array.isArray(cur) ? cur.slice() : []
+    if (arr.indexOf(i) >= 0) arr = arr.filter(x => x !== i)
+    else arr.push(i)
+    chs.reviewAnswers[chs.reviewIdx] = arr.sort((a, b) => a - b)
+  } else {
+    chs.reviewAnswers[chs.reviewIdx] = i
+  }
   renderChallengeReview()
 }
 function chReviewSubmit() {
   const q = chs.reviewQs[chs.reviewIdx]
   const ans = chs.reviewAnswers[chs.reviewIdx]
-  if (ans === undefined || ans === -1) return
+  // v203：多选空数组也算未答（与 chSubmitTest v198 同口径）
+  if (ans === undefined || ans === -1 || (Array.isArray(ans) && !ans.length)) return
   chs.reviewSubmitted = true
   const correct = checkAnswer(q, ans)
   if (!correct) chs.reviewWrongNow.push(q)
