@@ -1803,7 +1803,7 @@ function startExam() {
   }
 
   startExamTimer()
-  // 考试防作弊：禁止切屏，超 3 次自动交卷（管理员/日照账号在 AntiCheat 内部自动豁免，v200）
+  // 考试防作弊：禁止切屏，超 3 次自动交卷（管理员在 AntiCheat 内部自动豁免；v200 日照豁免已于 v204 撤下）
   if (typeof AntiCheat !== 'undefined') {
     AntiCheat.start({ maxViolations: 3, onSubmit: function () { finishExam(false) } })
   }
