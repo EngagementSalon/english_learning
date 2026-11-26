@@ -98,7 +98,7 @@ console.log('--- ⑧ 版本号 ---');
 //   版本号必须随每版递增，写死 130 会在 v131 上线瞬间变红，属实现细节而非契约）。
 const vAll = idx.match(/\?v=(\d+)/g) || [];
 const vNums = [...new Set(vAll.map(s => Number(s.slice(3))))];
-assert(vAll.length === 12, `8.1 index.html 缓存参数 ×12（实得 ${vAll.length}）`);
+assert(vAll.length === 13, `8.1 index.html 缓存参数 ×13（实得 ${vAll.length}）`);
 assert(vNums.length === 1, `8.2 缓存参数版本唯一（实得 ${vNums.join(',')}）`);
 assert(vNums.length === 1 && vNums[0] >= 130, `8.3 版本号 ≥130（实得 ${vNums[0]}）`);
 

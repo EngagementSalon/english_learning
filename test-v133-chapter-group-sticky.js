@@ -243,7 +243,7 @@ assert(!oldHead, '5.15 v129 的浅色小字横幅形态已移除（契约被 v13
 console.log('--- ⑥ 版本号与回归口径 ---');
 const vAll = idx.match(/\?v=(\d+)/g) || [];
 const vNums = [...new Set(vAll.map(s => Number(s.slice(3))))];
-assert(vAll.length === 12, `6.1 index.html 缓存参数 ×12（实得 ${vAll.length}）`);
+assert(vAll.length === 13, `6.1 index.html 缓存参数 ×13（实得 ${vAll.length}）`);
 assert(vNums.length === 1 && vNums[0] >= 133, `6.2 版本唯一且 ≥133（实得 ${vNums.join(',')}）`);
 
 console.log('--- ⑦ 反向：未重复定义 / 未破坏既有链路 ---');

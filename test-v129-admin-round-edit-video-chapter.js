@@ -17,7 +17,7 @@
 //    - 章节改名批量处理 courseChapterRenameDo
 // ④ i18n：21 个新键 zh/en 成对
 // ⑤ CSS：分块样式 + 分块后首节点补间距 + 章节分隔行样式
-// ⑥ 版本弹性：唯一 ?v=N ×12 且 ≥129
+// ⑥ 版本弹性：唯一 ?v=N ×13 且 ≥129
 
 const fs = require('fs')
 const path = require('path')
@@ -387,7 +387,7 @@ assert('5.10 v127 契约保留：拖拽手柄 touch-action:none', CSS.includes('
 console.log('\n[6] 版本弹性')
 const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
 const uniq = Array.from(new Set(vms))
-assert('6.1 版本号唯一 × 12 处', vms.length === 12 && uniq.length === 1, JSON.stringify(uniq) + ' x' + vms.length)
+assert('6.1 版本号唯一 × 13 处', vms.length === 13 && uniq.length === 1, JSON.stringify(uniq) + ' x' + vms.length)
 assert('6.2 版本号 >= 129', uniq.length === 1 && uniq[0] >= 129)
 
 console.log(failed ? '✗ ' + failed + ' failed' : '✅ 全部通过')

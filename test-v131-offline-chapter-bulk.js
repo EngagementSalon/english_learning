@@ -160,7 +160,7 @@ assert(css.indexOf('.cbc-toolbar') > css.indexOf('tr.chapter-sep-plain'), '10.6 
 //   版本号必须随每版递增，写死 131 会在 v132 上线瞬间变红 —— 属实现细节而非契约）。
 const vAll = idx.match(/\?v=(\d+)/g) || [];
 const vNums = [...new Set(vAll.map(s => Number(s.slice(3))))];
-assert(vAll.length === 12, `10.7 index.html 缓存参数 ×12（实得 ${vAll.length}）`);
+assert(vAll.length === 13, `10.7 index.html 缓存参数 ×13（实得 ${vAll.length}）`);
 assert(vNums.length === 1 && vNums[0] >= 131, `10.7a 版本唯一且 ≥131（实得 ${vNums.join(',')}）`);
 
 console.log('--- ⑪ 反向：未引入重复定义 ---');

@@ -112,7 +112,7 @@ assert(lowerBad.length === 0, `6.5 ★ 挂 Logo 版字体的文案均无小写�
 console.log('--- ⑦ 版本号 ---');
 const vAll = idx.match(/\?v=(\d+)/g) || [];
 const vNums = [...new Set(vAll.map(s => Number(s.slice(3))))];
-assert(vAll.length === 12, `7.1 缓存参数 ×12（实得 ${vAll.length}）`);
+assert(vAll.length === 13, `7.1 缓存参数 ×13（实得 ${vAll.length}）`);
 assert(vNums.length === 1 && vNums[0] >= 132, `7.2 版本唯一且 ≥132（实得 ${vNums.join(',')}）`);
 assert(!idx.includes('?v=131'), '7.3 无 ?v=131 残留');
 

@@ -7,7 +7,7 @@
 //    v123 钉住的字面量全部保留（.cp-grid { margin-top:12px; } / .cp-side display:none /
 //    @media (min-width: 900px) / .cp-node .cp-lbl { font-size:13px / .cp-node .cp-meta { / word-break:break-word）
 // ④ i18n：courseNodeTodo zh/en 成对；courseDoneTag / coursePending 未改动（兼容）
-// ⑤ 版本弹性：唯一 ?v=N ×12 且 ≥128
+// ⑤ 版本弹性：唯一 ?v=N ×13 且 ≥128
 
 const fs = require('fs')
 const path = require('path')
@@ -159,7 +159,7 @@ assert('i18n：courseNodeTodo 与 coursePending 同行就近（接线可读性�
 // ---------- ⑤ 版本弹性 ----------
 const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
 const uniq = Array.from(new Set(vms))
-assert('版本号统一：唯一值 × 12 处', vms.length === 12 && uniq.length === 1, JSON.stringify(uniq) + ' x' + vms.length)
+assert('版本号统一：唯一值 × 13 处', vms.length === 13 && uniq.length === 1, JSON.stringify(uniq) + ' x' + vms.length)
 assert('版本号 >= 128', uniq.length === 1 && uniq[0] >= 128)
 
 console.log(failed ? '✗ ' + failed + ' failed' : '✅ 全部通过')
