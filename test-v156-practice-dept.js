@@ -309,7 +309,7 @@ console.log('=== 组六 版本号 ===')
 const HTML = read('index.html')
 const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => +s.slice(3))
 ok(vms.length > 0, 'index.html 有 ?v= 资源串')
-eq(vms.length, 12, 'index.html ?v= 共 12 处')
+eq(vms.length, 13, 'index.html ?v= 共 13 处')
 const uniq = [...new Set(vms)]
 eq(uniq.length, 1, '?v= 取值唯一 got=' + JSON.stringify(uniq))
 ok(uniq[0] >= 156, '?v= 唯一值 ≥ 156 got=' + uniq[0])

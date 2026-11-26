@@ -21,7 +21,7 @@
 //   [4] 幂等：侧信道已非空 → 不覆盖、返回 false
 //   [5] 健壮性：无缓存 / 非法 JSON / 非 doc / 空营次 / null 入参 → false 且不抛、不污染
 //   [6] 真实链路：fetch 失败（reject）→ 仍抛错（既有行为不变），但侧信道已被兜底
-//   [7] 版本契约：index.html ?v= 恰好 12 处且唯一、不低于 159
+//   [7] 版本契约：index.html ?v= 恰好 13 处且唯一、不低于 159
 const fs = require('fs')
 const path = require('path')
 const vm = require('vm')
@@ -286,7 +286,7 @@ const seedProgress = sb => sb.localStorage.setItem('eq_challenge_v2_r2',
   {
     const vers = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
     const uniq = [...new Set(vers)]
-    assert('恰好 12 处', vers.length === 12, '实得 ' + vers.length)
+    assert('恰好 13 处', vers.length === 13, '实得 ' + vers.length)
     assert('取值唯一', uniq.length === 1, uniq.join(','))
     assert('不低于 159（弹性断言：bump 不会咬）', uniq[0] >= 159, String(uniq[0]))
     assert('所有 ?v= 均不低于当前值（无旧值残留）', vers.every(v => v >= uniq[0]), JSON.stringify(vers))

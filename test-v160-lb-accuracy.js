@@ -235,7 +235,7 @@ const rowsAcc = [
       chSrc.includes('tq += x.total || 0') && chSrc.includes('const acc = tq > 0 ? Math.min(1, c / tq) : 1') && chSrc.includes('Math.round(pts * acc) - tsec'))
     const vers = (HTML_SRC.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
     const uniq = [...new Set(vers)]
-    assert('index.html 资源版本号恰好 12 处且唯一', vers.length === 12 && uniq.length === 1, `出现 ${vers.length} 处，唯一值 ${uniq.join(',')}`)
+    assert('index.html 资源版本号恰好 13 处且唯一', vers.length === 13 && uniq.length === 1, `出现 ${vers.length} 处，唯一值 ${uniq.join(',')}`)
     assert('index.html 资源版本号 ≥ 160（弹性判据，不写死等值）', uniq.every(v => v >= 160), String(uniq[0]))
     assert('index.html 无更早的版本号残留', vers.every(v => v >= 160))
   }

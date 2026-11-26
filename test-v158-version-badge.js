@@ -7,7 +7,7 @@
 // ★★ 本套件守护的设计红线：
 //   1) 版本号**只有一个数据源** = index.html 的资源声明 `?v=N`（12 处）。
 //      徽章由 app.js renderAppVersion() 从 DOM 反读 —— 绝不另立 JS 常量（bump 会漏改），
-//      也绝不往 index.html 再塞 `?v=` 字面量（多个套件强约束「恰好 12 处且取值唯一」）。
+//      也绝不往 index.html 再塞 `?v=` 字面量（多个套件强约束「恰好 13 处且取值唯一」）。
 //   2) 定位 app.js 资源时必须用 /(^|\/)app\.js\?/ ——
 //      course-app.js 含 'app.js' 子串，宽松写法 /app\.js/ 会误命中（本项目反复踩的子串坑）。
 //   3) JS 未执行（脚本报错）时徽章不得留下空胶囊 → CSS :empty 兜底。
@@ -57,16 +57,16 @@ const APP_CODE = codeOnly(APP_SRC)
 const HTML_CODE = codeOnly(HTML_SRC)
 
 // ================================================================
-console.log('\n[1] 回归契约：index.html 的 ?v= 仍恰好 12 处且取值唯一')
+console.log('\n[1] 回归契约：index.html 的 ?v= 仍恰好 13 处且取值唯一')
 // ================================================================
 const vms = (HTML_SRC.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
 const uniqV = Array.from(new Set(vms))
-assert('版本参数处数 = 12（新增徽章不得再引入 ?v= 字面量）', vms.length === 12, '实得 ' + vms.length)
+assert('版本参数处数 = 13（新增徽章不得再引入 ?v= 字面量）', vms.length === 13, '实得 ' + vms.length)
 assert('版本号取值唯一', uniqV.length === 1, JSON.stringify(uniqV))
 assert('版本号 ≥ 158（本版已 bump）', uniqV.length === 1 && uniqV[0] >= 158, JSON.stringify(uniqV))
 const APP_VER = uniqV[0]
 // 宽松计数：连没有数字的裸 '?v=' 也不许新增到 index.html 里（注释里的说明文字也算风险）
-assert('index.html 里 \'?v=\' 裸串出现次数 = 12（含注释）', count(HTML_SRC, '?v=') === 12, '实得 ' + count(HTML_SRC, '?v='))
+assert('index.html 里 \'?v=\' 裸串出现次数 = 13（含注释）', count(HTML_SRC, '?v=') === 13, '实得 ' + count(HTML_SRC, '?v='))
 
 // ================================================================
 console.log('\n[2] 徽章元素：登录页 + 顶栏各一处，位置显眼，且自身不带 ?v=')
@@ -154,7 +154,7 @@ function evalVersionFns(doc) {
 const realEls = []
 HTML_SRC.replace(/<link[^>]*href="([^"]+)"[^>]*>/g, (m, href) => { realEls.push(mkEl('link', { href })); return m })
 HTML_SRC.replace(/<script[^>]*src="([^"]+)"[^>]*>/g, (m, src) => { realEls.push(mkEl('script', { src })); return m })
-assert('从 index.html 抽出资源数 = 13（v169 起 +1：link rel=image_src 分享缩略图兼容）', realEls.length === 13, '实得 ' + realEls.length)
+assert('从 index.html 抽出资源数 = 14（v169 +1、v205 +1：link rel=image_src 分享缩略图兼容）', realEls.length === 14, '实得 ' + realEls.length)
 const realSb = evalVersionFns(makeDoc(realEls, {}))
 const realVer = realSb.appVersionFromDom()
 assert('真实 index.html → 反读出 ' + APP_VER, realVer === APP_VER, '实得 ' + realVer)
