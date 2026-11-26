@@ -129,7 +129,7 @@ console.log('\n—— 组〇 源码契约护栏 ——')
   const HTML = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8')
   const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
   const uniq = Array.from(new Set(vms))
-  assert('index.html 12 处 ?v= 且取值唯一', vms.length === 12 && uniq.length === 1, { n: vms.length, set: uniq })
+  assert('index.html 12 处 ?v= 且取值唯一', vms.length === 13 && uniq.length === 1, { n: vms.length, set: uniq })
   assert('资源版本号 ≥ 154', uniq.length === 1 && uniq[0] >= 154, uniq)
   assert('无残留 ?v=153', !/\?v=153\b/.test(HTML))
 }

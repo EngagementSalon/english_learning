@@ -312,7 +312,7 @@ group('组六 · 版本号')
   const uniq = [...new Set(vers)]
   assert('版本号唯一', uniq.length === 1, uniq)
   assert('版本号 >= 148', Number(uniq[0]) >= 148, uniq[0])
-  assert('版本标记 12 处', vers.length === 12, vers.length)
+  assert('版本标记 13 处', vers.length === 13, vers.length)
 }
 
 console.log('\n' + '='.repeat(50))

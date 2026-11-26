@@ -262,7 +262,7 @@ const i18nSrc = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf-8')
   assert('v153：版本参数已 bump（index.html 唯一版本号 ≥153）', (() => {
     const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf-8')
     const vms = (html.match(/\?v=(\d+)/g) || []).map(s => +s.slice(3))
-    return vms.length === 12 && new Set(vms).size === 1 && [...new Set(vms)][0] >= 153
+    return vms.length === 13 && new Set(vms).size === 1 && [...new Set(vms)][0] >= 153
   })())
 
   console.log('\n' + (testFailed ? '❌ 存在失败断言' : '✅ v153 全部断言通过'))
