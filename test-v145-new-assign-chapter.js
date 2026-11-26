@@ -250,8 +250,8 @@ async function submit(opts) {
   const HTML = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf-8')
   const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
   const uniq = Array.from(new Set(vms))
-  assert('E1 版本号统一：唯一值 × 12 处',
-    vms.length === 12 && uniq.length === 1, 'n=' + vms.length + ' uniq=' + JSON.stringify(uniq))
+  assert('E1 版本号统一：唯一值 × 13 处',
+    vms.length === 13 && uniq.length === 1, 'n=' + vms.length + ' uniq=' + JSON.stringify(uniq))
   assert('E2 版本号 >= 145（本套件所属版本）', uniq.length === 1 && uniq[0] >= 145, JSON.stringify(uniq))
 
   console.log('\n' + (failed ? '❌ 部分测试失败' : '✅ 所有测试通过'))

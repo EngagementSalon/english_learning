@@ -156,7 +156,7 @@ console.log('\n[6] 版本号')
   const m = HTML.match(/\?v=(\d+)/g) || []
   const vs = [...new Set(m.map(x => Number(x.slice(3))))]
   assert('index.html 版本号统一且 ≥144（现 ' + vs.join(',') + '，共 ' + m.length + ' 处）',
-    vs.length === 1 && vs[0] >= 144 && m.length === 12)
+    vs.length === 1 && vs[0] >= 144 && m.length === 13)
 }
 
 console.log('\n' + (testFailed ? '❌ 有断言失败' : '✅ v144 全部通过') + '  PASS=' + pass)

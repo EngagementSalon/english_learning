@@ -9,7 +9,7 @@
 //   ⑥ 端到端 .xlsx：解 stored zip 校验 styles.xml / mergeCells / cols / 公式 / 灰底 / 数字格式
 //   ⑦ 网页看板渲染：三段分组 + 部门 rowspan + 1/-1 + 操作列保留 + 导出按钮
 //   ⑧ 积分榜口径回归（管理员不排名 / 同分比用时 / 再比答对）
-//   ⑨ 版本号唯一且 ≥139 ×12
+//   ⑨ 版本号唯一且 ≥139 ×13
 const fs = require('fs')
 const path = require('path')
 const vm = require('vm')
@@ -417,7 +417,7 @@ console.log('\n[9] 源码接线与版本号')
   const idx = read('index.html')
   const vs = (idx.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
   const uniq = Array.from(new Set(vs))
-  assert('版本号统一（唯一值 × 12 处）', vs.length === 12 && uniq.length === 1, JSON.stringify(uniq) + ' × ' + vs.length)
+  assert('版本号统一（唯一值 × 13 处）', vs.length === 13 && uniq.length === 1, JSON.stringify(uniq) + ' × ' + vs.length)
   assert('版本号 ≥ 139', uniq.length === 1 && uniq[0] >= 139, String(uniq[0]))
 }
 

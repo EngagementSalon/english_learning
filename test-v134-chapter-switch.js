@@ -299,7 +299,7 @@ console.log('\n[5] i18n 双语成对 + CSS 锁定态 + 版本号');
   // 版本
   const vAll = HTML.match(/\?v=(\d+)/g) || [];
   const vNums = [...new Set(vAll.map(s => Number(s.slice(3))))];
-  assert(vAll.length === 12, `5.9 index.html 缓存参数 ×12（实得 ${vAll.length}）`);
+  assert(vAll.length === 13, `5.9 index.html 缓存参数 ×13（实得 ${vAll.length}）`);
   assert(vNums.length === 1 && vNums[0] >= 134, `5.10 版本唯一且 ≥134（实得 ${vNums.join(',')}）`);
 }
 

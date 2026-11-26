@@ -4,7 +4,7 @@
 //   ② .hero 背景 = 品牌红渐变，与 v133 章节条同一品牌色语言（主色 #DD3D00 = 用户指定 RGB(221,61,0)）
 //   ③ .hero-logo 死样式已删（不留孤儿 CSS）
 //   ④ v133 章节条渐变未被波及（.cp-chapter-head 仍是同一品牌渐变）
-//   ⑤ 版本 bump：唯一 ?v=N ×12 且 ≥135
+//   ⑤ 版本 bump：唯一 ?v=N ×13 且 ≥135
 
 const fs = require('fs')
 const path = require('path')
@@ -101,7 +101,7 @@ function mkSandbox(logoUrl) {
 // ---------- ⑤ 版本 ----------
 const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
 const uniq = Array.from(new Set(vms))
-assert('5.1 版本号统一：唯一值 × 12 处', vms.length === 12 && uniq.length === 1, JSON.stringify(uniq) + ' x' + vms.length)
+assert('5.1 版本号统一：唯一值 × 13 处', vms.length === 13 && uniq.length === 1, JSON.stringify(uniq) + ' x' + vms.length)
 assert('5.2 版本号 >= 135', uniq.length === 1 && uniq[0] >= 135)
 
 console.log(failed ? '✗ ' + failed + ' failed' : '✅ 全部通过')
