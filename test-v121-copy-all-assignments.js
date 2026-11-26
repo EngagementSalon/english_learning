@@ -7,7 +7,7 @@
 //    - results={} / 新 id / createdAt；草稿保持草稿；已发布 sentAt；过期 deadline 清空
 //    - 目标班 members 不动、源班不变、幂等守卫、alert 汇总、rebuildBankFromCourse
 // ④ 反向：单条复制仍排除 offline（v121 契约：单条复制维持现状，用户确认 2026-09-29）
-// ⑤ 版本弹性：唯一 ?v=N ×12 且 ≥121
+// ⑤ 版本弹性：唯一 ?v=N ×13 且 ≥121
 
 const fs = require('fs')
 const path = require('path')
@@ -216,7 +216,7 @@ function mkState() {
   // ---------- ⑤ 版本弹性 ----------
   const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
   const uniq = Array.from(new Set(vms))
-  assert('版本号统一：唯一值 × 12 处', vms.length === 12 && uniq.length === 1, JSON.stringify(uniq) + ' x' + vms.length)
+  assert('版本号统一：唯一值 × 13 处', vms.length === 13 && uniq.length === 1, JSON.stringify(uniq) + ' x' + vms.length)
   assert('版本号 >= 121', uniq.length === 1 && uniq[0] >= 121)
 
   console.log(failed ? '✗ ' + failed + ' failed' : '✅ 全部通过')

@@ -8,7 +8,7 @@
 // ③ CSS：cp-grid 默认单列（手机端）+ ≥900px 两列 + cp-side 默认 display:none（手机端隐藏）
 //    + 无 v122 竖线残留（seg-on / :not(:last-child)::before）
 // ④ i18n：courseProgressQN zh/en 成对
-// ⑤ 版本弹性：唯一 ?v=N ×12 且 ≥123
+// ⑤ 版本弹性：唯一 ?v=N ×13 且 ≥123
 
 const fs = require('fs')
 const path = require('path')
@@ -162,7 +162,7 @@ assert('i18n：既有进度四键未被改动（兼容）', I18N.includes("cours
 // ---------- ⑤ 版本弹性 ----------
 const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
 const uniq = Array.from(new Set(vms))
-assert('版本号统一：唯一值 × 12 处', vms.length === 12 && uniq.length === 1, JSON.stringify(uniq) + ' x' + vms.length)
+assert('版本号统一：唯一值 × 13 处', vms.length === 13 && uniq.length === 1, JSON.stringify(uniq) + ' x' + vms.length)
 assert('版本号 >= 123', uniq.length === 1 && uniq[0] >= 123)
 
 console.log(failed ? '✗ ' + failed + ' failed' : '✅ 全部通过')

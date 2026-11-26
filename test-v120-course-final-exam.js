@@ -442,10 +442,10 @@ const EX_CONFIRM = '[t:courseExamStartConfirm]'
 
   // ---------------- 六、版本号 ----------------
   {
-    // 弹性断言：唯一版本号 × 12 处，且 ≥ 120（写死会在下次 bump 时假失败 —— v115/v116/v117 连撞三次）
+    // 弹性断言：唯一版本号 × 13 处，且 ≥ 120（写死会在下次 bump 时假失败 —— v115/v116/v117 连撞三次）
     const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
     const uniq = Array.from(new Set(vms))
-    assert('index.html 版本号统一：唯一值 × 12 处', vms.length === 12 && uniq.length === 1)
+    assert('index.html 版本号统一：唯一值 × 13 处', vms.length === 13 && uniq.length === 1)
     assert('index.html 版本号 ≥ 120', uniq.length === 1 && uniq[0] >= 120)
   }
 

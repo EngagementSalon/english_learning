@@ -5,7 +5,7 @@
 // ① 源码级：renderHome 不再含 hero-logo；logoImgHtml/renderLogo 定义仍在且接线登录页+顶栏
 // ② 行为（沙箱真跑 renderHome）：hero 容器有标题副标题、无 hero-logo、无 📚 兜底
 // ③ CSS：.hero-logo 样式已删；.auth-logo / .topbar-brand 的 brand-img 样式未破坏
-// ④ 版本弹性：唯一 ?v=N ×12 且 ≥124
+// ④ 版本弹性：唯一 ?v=N ×13 且 ≥124
 
 const fs = require('fs')
 const path = require('path')
@@ -115,7 +115,7 @@ assert('[v136] 登录页 Logo 容器给足高度，避免父级撑不开',
 // ---------- ④ 版本弹性 ----------
 const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
 const uniq = Array.from(new Set(vms))
-assert('版本号统一：唯一值 × 12 处', vms.length === 12 && uniq.length === 1, JSON.stringify(uniq) + ' x' + vms.length)
+assert('版本号统一：唯一值 × 13 处', vms.length === 13 && uniq.length === 1, JSON.stringify(uniq) + ' x' + vms.length)
 assert('版本号 >= 124', uniq.length === 1 && uniq[0] >= 124)
 
 console.log(failed ? '✗ ' + failed + ' failed' : '✅ 全部通过')

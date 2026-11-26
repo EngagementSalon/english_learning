@@ -6,7 +6,7 @@
 //    - 非 zip 字节 → 抛错（qgenBadXlsx）
 //    - 上传入口：.xlsx 走 arrayBuffer 解包分支（不落到 FileReader 文本读取）
 // ③ i18n：qgenBadXlsx zh/en 成对
-// ④ 版本弹性：唯一 ?v=N ×12 且 ≥125
+// ④ 版本弹性：唯一 ?v=N ×13 且 ≥125
 
 const fs = require('fs')
 const path = require('path')
@@ -246,7 +246,7 @@ assert('qgenBadXlsx 与既有 qgenBadDocx/qgenBadPptx 同处一族（键位未�
 // ---------- ④ 版本弹性 ----------
 const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
 const uniq = Array.from(new Set(vms))
-assert('版本号统一：唯一值 × 12 处', vms.length === 12 && uniq.length === 1, JSON.stringify(uniq) + ' x' + vms.length)
+assert('版本号统一：唯一值 × 13 处', vms.length === 13 && uniq.length === 1, JSON.stringify(uniq) + ' x' + vms.length)
 assert('版本号 >= 125', uniq.length === 1 && uniq[0] >= 125, JSON.stringify(uniq))
 
 Promise.all([pa, pb, pc, pd, pe]).then(() => {

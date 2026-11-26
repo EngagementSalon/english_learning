@@ -217,7 +217,7 @@ console.log('[9] 版本号弹性')
 
 const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
 const uniqV = Array.from(new Set(vms))
-assert('版本号处数 = 12', vms.length === 12)
+assert('版本号处数 = 13', vms.length === 13)
 assert('版本号取值唯一', uniqV.length === 1)
 assert('版本号 >= 127', uniqV.length === 1 && uniqV[0] >= 127)
 assert('style.css 也带 ?v=（纯 CSS 改动才能靠 bump 生效）', /style\.css\?v=\d+/.test(HTML))
