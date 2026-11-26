@@ -6,7 +6,7 @@
 //      手动补录标记、缺考 '—'、打卡 全/半/— 转换、明细行数=输入数、空输入只出表头
 //   ③ 源码接线断言：dashChExportScores 定义 + renderDashChallengeBlock 模板真调用（接线断言：
 //      「函数存在」≠「功能存在」）+ 引用 _chDashRows/impXlsxFromSheets/impDownloadBlob/dashChExportSheets
-//   ④ 版本号 ?v=116 ×12、?v=115 残留 0
+//   ④ 版本号 ?v=116 ×13、?v=115 残留 0
 let pass = 0, fail = 0
 const assert = (cond, msg) => { if (cond) { pass++; console.log('  ✓ ' + msg) } else { fail++; console.log('  ✗ ' + msg) } }
 const fs = require('fs')
@@ -156,10 +156,10 @@ console.log('④ 版本号')
 const idxSrc = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8')
 {
   // ⚠️ 别把 ?v=N 写死：v116 本来写死 ?v=116 → v117 一 bump 就红（v115 已踩过同一坑）。
-  // 契约本意是「全站统一版本号」，故断言唯一值 × 12 处且 ≥ 116。
+  // 契约本意是「全站统一版本号」，故断言唯一值 × 13 处且 ≥ 116。
   const vms = (idxSrc.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
   const uniq = Array.from(new Set(vms))
-  assert(vms.length === 12 && uniq.length === 1, '版本号统一：唯一值 × 12 处')
+  assert(vms.length === 13 && uniq.length === 1, '版本号统一：唯一值 × 13 处')
   assert(uniq.length === 1 && uniq[0] >= 116, '版本号 ≥ 116')
 }
 

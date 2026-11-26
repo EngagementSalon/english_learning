@@ -20,7 +20,7 @@
 //   ③ courseHeldSave 口径反转（勾选=出席；未勾选=缺席）
 //   ④ 姓名显示：courseMemberCell 输出中文名与用户名，且两个弹窗都用它渲染标签
 //   ⑤ 行为沙箱：真实跑一遍「3 人只来 1 人」→ absent 正确；再跑姓名映射
-//   ⑥ 版本号：唯一 ?v=N ×12 且 ≥119
+//   ⑥ 版本号：唯一 ?v=N ×13 且 ≥119
 'use strict'
 let pass = 0, fail = 0
 const assert = (cond, msg) => { if (cond) { pass++; console.log('  ✓ ' + msg) } else { fail++; console.log('  ✗ ' + msg) } }
@@ -249,7 +249,7 @@ const seedDoc = () => ({
   {
     const vms = (idxSrc.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
     const uniq = Array.from(new Set(vms))
-    assert(vms.length === 12 && uniq.length === 1, '版本号统一：唯一值 × 12 处')
+    assert(vms.length === 13 && uniq.length === 1, '版本号统一：唯一值 × 13 处')
     assert(uniq.length === 1 && uniq[0] >= 119, '版本号 ≥ 119')
   }
 

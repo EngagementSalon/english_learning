@@ -4,7 +4,7 @@
 //   ① i18n 两个新键 zh/en 成对；带参键是箭头函数（t() 对函数值 apply）
 //   ② dashSetRoundCur 使用 t('dashRoundMakeCurConfirm', label)，且不再出现「全体学员」硬编码文案
 //   ③ 面板说明接线：renderDashRoundsPanel 真调用 t('dashRoundCurHint')
-//   ④ 版本号：唯一 ?v=N ×12 且 ≥117
+//   ④ 版本号：唯一 ?v=N ×13 且 ≥117
 let pass = 0, fail = 0
 const assert = (cond, msg) => { if (cond) { pass++; console.log('  ✓ ' + msg) } else { fail++; console.log('  ✗ ' + msg) } }
 const fs = require('fs')
@@ -68,7 +68,7 @@ console.log('④ 版本号')
 {
   const vms = (idxSrc.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
   const uniq = Array.from(new Set(vms))
-  assert(vms.length === 12 && uniq.length === 1, '版本号统一：唯一值 × 12 处')
+  assert(vms.length === 13 && uniq.length === 1, '版本号统一：唯一值 × 13 处')
   assert(uniq.length === 1 && uniq[0] >= 117, '版本号 ≥ 117')
 }
 

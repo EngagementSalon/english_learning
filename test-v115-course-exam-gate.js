@@ -293,10 +293,10 @@ const CONFIRM_KEY = '[t:courseExamStartConfirm]'
   // ---------------- 五、index.html 版本号 ----------------
   {
     // v116 反转：原断言写死「?v=115 × 12」——每 bump 一次版本号旧套件就得手改一遍（v115→v116 实撞）。
-    // 契约本意是「全站统一版本号」，改为弹性断言：唯一版本号 × 12 处，且 ≥ 116。
+    // 契约本意是「全站统一版本号」，改为弹性断言：唯一版本号 × 13 处，且 ≥ 116。
     const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
     const uniq = Array.from(new Set(vms))
-    assert('index.html 版本号统一：唯一值 × 12 处', vms.length === 12 && uniq.length === 1)
+    assert('index.html 版本号统一：唯一值 × 13 处', vms.length === 13 && uniq.length === 1)
     assert('index.html 版本号 ≥ 116', uniq.length === 1 && uniq[0] >= 116)
   }
 

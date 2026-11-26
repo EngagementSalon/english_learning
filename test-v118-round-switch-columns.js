@@ -13,7 +13,7 @@
 //   ④ 独立卡片区彻底下线（正反双向断言：新家有 / 老家没）
 //   ⑤ 刷新链路：dashRefreshRoundsPanel 刷 #dashRoundsPanel；兼容别名链完整
 //   ⑥ i18n：dashRoundSwitchHint 成对；列头复用键仍成对
-//   ⑦ 版本号：唯一 ?v=N ×12 且 ≥118
+//   ⑦ 版本号：唯一 ?v=N ×13 且 ≥118
 'use strict'
 let pass = 0, fail = 0
 const assert = (cond, msg) => { if (cond) { pass++; console.log('  ✓ ' + msg) } else { fail++; console.log('  ✗ ' + msg) } }
@@ -208,7 +208,7 @@ console.log('⑦ 版本号')
 {
   const vms = (idxSrc.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
   const uniq = Array.from(new Set(vms))
-  assert(vms.length === 12 && uniq.length === 1, '版本号统一：唯一值 × 12 处')
+  assert(vms.length === 13 && uniq.length === 1, '版本号统一：唯一值 × 13 处')
   assert(uniq.length === 1 && uniq[0] >= 118, '版本号 ≥ 118')
 }
 
