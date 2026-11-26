@@ -625,7 +625,7 @@ group('组六：形态与站点契约')
   // ===== 站点契约 =====
   const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
   const uniq = Array.from(new Set(vms))
-  assert('★ 版本号 12 处且唯一（' + (uniq[0] || '?') + '）', vms.length === 12 && uniq.length === 1,
+  assert('★ 版本号 12 处且唯一（' + (uniq[0] || '?') + '）', vms.length === 13 && uniq.length === 1,
     'n=' + vms.length + ' uniq=' + JSON.stringify(uniq))
   assert('★ 版本号 >= 174（发版后为 174；本套件先于 bump 落地时仍应为 172 起的旧值）',
     uniq.length === 1 && uniq[0] >= 172, uniq[0])

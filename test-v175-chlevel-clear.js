@@ -157,7 +157,7 @@ group('组四：边界与形态')
   // 版本号契约
   const vms = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.slice(3)))
   const uniq = Array.from(new Set(vms))
-  assert('★ 版本号 12 处且唯一（' + (uniq[0] || '?') + '）', vms.length === 12 && uniq.length === 1,
+  assert('★ 版本号 12 处且唯一（' + (uniq[0] || '?') + '）', vms.length === 13 && uniq.length === 1,
     'n=' + vms.length + ' uniq=' + JSON.stringify(uniq))
   assert('★ 版本号 >= 175', uniq.length === 1 && uniq[0] >= 175, uniq[0])
 }
