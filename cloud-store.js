@@ -1529,6 +1529,18 @@ const CloudSync = {
           if (Number.isInteger(lv) && lv >= 1 && lv <= 4) r.chLevel = lv
         }
         break
+      case 'chread':
+        // v205：每日跟读打卡留痕（免费方案：学员自评星级 1–3，无音频上云）。
+        //   · 每次打卡一条记录（与 chy 同款「追加」语义：同 events 序列重放结果确定一致）。
+        //   · 仅留痕统计用（天数/星级/营次），不参与打卡圆环 / 积分 / 进度分母 ——
+        //     跟读是每日附加环节，本地 challengeState.read 才是状态权威。
+        //   · stars 脏值（非 1~3）原样入库无意义 → 统一钳到 0（管理端如展示可按 >0 过滤）。
+        r.chRead = r.chRead || []
+        r.chRead.push({
+          day: Number(d.day) || 0, stars: (Number(d.stars) >= 1 && Number(d.stars) <= 3) ? Number(d.stars) : 0,
+          at: ev.ts, rd: _roundSlugKey(d.rd),
+        })
+        break
       case 'chyfix':
         // v105：管理员修正已录入的挑战成绩（补录录错后改数）。按 (day, si, rd) 定位该营次该阶段
         // **最近一条** kind==='test' 的记录并覆写 correct/total/usedSec。

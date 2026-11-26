@@ -2229,6 +2229,8 @@ function renderChallenge() {
     return
   }
   if (chs && (chs.phase === 'quiz' || chs.phase === 'review' || chs.phase === 'result')) { renderChallengeQuiz(); return }
+  // v205：跟读面板（每日附加环节，独立于打卡进度；followread.js 提供渲染与状态）
+  if (typeof chReadActive === 'function' && chReadActive()) { renderChallengeRead(); return }
   // v77：记录本次渲染的门禁态（挑战开关 + 考试开关），拉取后变化则重渲染入口
   // v88：营次切换也会改变门禁与进度 → 一并纳入比较
   // v104：补 shape（本部门营次 id + 有无营次）与 dept —— 营次在页面打开之后才创建时，
@@ -2451,10 +2453,13 @@ function chDayBlockHtml(cfg) {
   const done = chDayDone(cfg.day)
   const unlocked = chDayUnlocked(cfg.day)
   const rows = cfg.stages.map((s, si) => chStageRowHtml(cfg.day, si, s)).join('')
+  // v205：跟读行 —— 每日附加环节（仅含 practice 的天出现；渲染在 followread.js chReadRowHtml）
+  const readRow = (typeof chReadRowHtml === 'function') ? chReadRowHtml(cfg) : ''
   return `
     <div style="padding:12px 0;border-bottom:1px solid #e5e7eb">
       <div style="font-weight:800;margin-bottom:4px;color:${done ? '#059669' : unlocked ? '#111827' : '#9ca3af'}">${t('chDay', cfg.day)}${done ? ' <span style="font-size:12px;color:#059669">✓</span>' : ''}</div>
       ${rows}
+      ${readRow}
     </div>`
 }
 

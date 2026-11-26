@@ -1568,6 +1568,20 @@ const Store = {
     CloudSync.enqueue({ u: s.username, n: s.name || '', ty: 'chlevel', d: { lv: n, rd: rd } })
   },
 
+  // v205：每日跟读打卡上报（chread 事件）→ 云端 base[u].chRead[] 留痕。
+  //   免费方案 = 学员自评星级（1–3），无音频上云（textdb 1MB 存不下）；本地 challengeState.read 权威。
+  //   ★ 与 reportChallengeLevel 同款守卫：stars 非 1~3 整数直接不上报（绝不写脏值进云端）。
+  reportChallengeRead(day, stars, round) {
+    const n = Number(stars)
+    if (!Number.isInteger(n) || n < 1 || n > 3) return
+    const s = this.getSession()
+    if (!s || !s.username) return
+    if (typeof CloudSync === 'undefined' || !CloudSync.enqueue) return
+    const rd = round != null && round !== '' ? String(round)
+      : (typeof chCurrentRound === 'function' ? String(chCurrentRound() || '') : '')
+    CloudSync.enqueue({ u: s.username, n: s.name || '', ty: 'chread', d: { day: day || 0, stars: n, rd: rd } })
+  },
+
   // v182：**代他人**上报能力等级 —— 管理员「🔁 重算历史等级」专用。
   //   ★★★ 为什么必须单独开一个方法（v181 真 bug，用户实测「点了重算全员仍显示未评定」）：
   //     reportChallengeLevel 的 `u` 恒取 getSession()（当前登录人），第二参是**营次**不是用户名。
