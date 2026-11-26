@@ -123,7 +123,7 @@ console.log('=== 组D v199–v201 契约不回归 ===')
 ok('D1 refreshChallengeNavLabel 仍在（v201，challenge.js）', /^function refreshChallengeNavLabel\(/m.test(fs.readFileSync('challenge.js', 'utf-8')))
 ok('D2 cloud-store 两处接线仍在（v201）', fs.readFileSync('cloud-store.js', 'utf-8').split("typeof refreshChallengeNavLabel === 'function'").length === 3)
 ok('D3 v199 setUserDept 收口仍在', APP.indexOf('await Store.setUserDept(s.id, dept)') >= 0)
-ok('D4 v200 日照防作弊豁免仍在', fs.readFileSync('anti-cheat.js', 'utf-8').indexOf('isAdminUser() || isRizhaoUser()') >= 0)
+ok('D4 v204 日照防作弊豁免已撤下（恢复全口径）', (function () { const s = fs.readFileSync('anti-cheat.js', 'utf-8'); return s.indexOf('isAdminUser() || isRizhaoUser()') < 0 && s.indexOf('if (isAdminUser()) { stop(); return }') >= 0 })())
 
 // ============================================================
 console.log('')

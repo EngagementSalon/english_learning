@@ -106,7 +106,7 @@ console.log('=== 组三 既有契约不回归 ===')
 ok('v196 注释仍在（营次结构动态命名设计未回退）', chSrc.indexOf('顶栏挑战导航按营次结构动态命名') >= 0)
 ok('i18n 两把 key 均在（中英）', (fs.readFileSync('i18n.js', 'utf8').match(/navChallengeCh21:/g) || []).length === 2)
 ok('v199 收口仍在（saveProfile setUserDept）', appSrc.indexOf('await Store.setUserDept(s.id, dept)') >= 0)
-ok('v200 豁免仍在（anti-cheat 日照同位分支）', fs.readFileSync('anti-cheat.js', 'utf8').indexOf('if (isAdminUser() || isRizhaoUser()) { stop(); return }') >= 0)
+ok('v204 豁免已撤下（anti-cheat 收口为仅管理员）', fs.readFileSync('anti-cheat.js', 'utf8').indexOf('if (isAdminUser()) { stop(); return }') >= 0)
 
 console.log('')
 console.log(pass + ' 通过, ' + fail + ' 失败' + (fail ? ' ❌' : ' ✅'))
