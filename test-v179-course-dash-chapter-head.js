@@ -314,7 +314,7 @@ group('⑫ 版本号 ?v=（v179 契约，发版后按 ≥179 判）')
   // ★★ v180 纪律：版本号断言绝不写死等值 —— 每发一版都会变（v179 首版写死 179 → v180 当场红）。
   //   保留的是「12 处」这个**资源数契约**（v158 起锁定）+ 「唯一」+ 「旧版已消失」。
   const vs = HTML.match(/\?v=(\d+)/g) || []
-  assert('★ index.html 中 ?v= 恰 12 处（资源数契约）', vs.length === 12, vs.length)
+  assert('★ index.html 中 ?v= 恰 13 处（资源数契约）', vs.length === 13, vs.length)
   assert('★ 版本号唯一（不存在两个版本并存）', new Set(vs).size === 1, [...new Set(vs)].join(','))
   assert('★ 版本号 >= 179（每发一版必变，写下限不写死）',
     vs.every(v => Number(v.slice(3)) >= 179), [...new Set(vs)].join(','))

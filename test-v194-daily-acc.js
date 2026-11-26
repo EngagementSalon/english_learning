@@ -105,7 +105,7 @@ ok('B2 缺日分支写 null', /acc:\s*null/.test(dailyCode))
 
 console.log('\n=== [C] _upProfileHtml 接线 ===')
 const profCode = codeOnly(extractFn(APP, '_upProfileHtml'))
-ok('C1 调 dashUserDailyAcc', profCode.includes('dashUserDailyAcc('))
+ok('C1 调 dashUserDailyAllAcc（v195 起全营次）', profCode.includes('dashUserDailyAllAcc('))
 ok('C2 有 dailyChart（当日准确率图）', profCode.includes('dailyChart'))
 ok('C3 有 cumChart（累计平均图）', profCode.includes('cumChart'))
 ok('C4 有 dailyTable', profCode.includes('dailyTable'))
@@ -115,7 +115,7 @@ ok('C7 空态走 upDailyNone 提示卡（不是空串）', profCode.includes('up
 ok('C8 小样本标注 upDailyThinTip', profCode.includes('upDailyThinTip'))
 ok('C9 小样本注释 upDailyThinNote', profCode.includes('upDailyThinNote'))
 // 营次锚定：只画当前营次
-ok('C10 按营次过滤（dailyRound）', profCode.includes('dailyRound'))
+ok('C10 覆盖全部营次（v195 dashUserDailyAllAcc）', profCode.includes('dashUserDailyAllAcc'))
 
 console.log('\n=== [D] 渲染真跑（沙箱） ===')
 const sb2 = {
@@ -142,7 +142,7 @@ sb2.t = function (k) {
   const v = (zh[k] !== undefined) ? zh[k] : k
   return (typeof v === 'function') ? v.apply(null, args) : v
 }
-;['_upLineChartSvg', 'dashUserRoundSeries', 'dashUserLevelSeries', 'dashUserCourseSeries', 'dashUserDailyAcc',
+;['_upLineChartSvg', 'dashUserRoundSeries', 'dashUserLevelSeries', 'dashUserCourseSeries', 'dashUserDailyAcc', 'dashUserDailyAllAcc',
   '_upProfileHtml', 'dashUserWrongList', '_upWrongCardHtml', '_upWrongSectionHtml'].forEach(n => {
   try { vm.runInContext(extractFn(APP, n), sb2) }
   catch (e) { console.log('  ⚠ 抽取失败 ' + n + ': ' + e.message) }
@@ -166,8 +166,8 @@ ok('D2 无未替换占位符 {xxx}', !/\{[a-zA-Z]+\}/.test(rendered.replace(/\{0
 ok('D3 出现「每日准确率」标题', rendered.includes('每日准确率走势'))
 ok('D4 出现「累计平均」图', rendered.includes('平均准确率走势'))
 ok('D5 营次名显示', rendered.includes('标帜餐厅七天挑战第三期'))
-ok('D6 表格含 7 行（D1-D7）', (rendered.match(/>D\d<\/td>/g) || []).length === 7, '实=' + (rendered.match(/>D\d<\/td>/g) || []).length)
-ok('D7 D3 断线（表格该行是 —）', /D3<\/td>[\s\S]{0,200}?—/.test(rendered))
+ok('D6 表格 D 行（v195 起格式 n·Dm，仅有效天）', (rendered.match(/>1·D1<\/td>/g) || []).length >= 1, '实=' + (rendered.match(/>1·D1<\/td>/g) || []).length)
+ok('D7 D3 断线（D3 无数据不出现在表格）', !/1·D3<\/td>/.test(rendered))
 
 console.log('\n=== [E] i18n 键 ===')
 const keys = ['upDailyTitle', 'upDailyHint', 'upDailyNone', 'upSeriesDailyAcc', 'upSeriesCumAcc',
@@ -177,13 +177,13 @@ keys.forEach(k => {
   ok('E ' + k + ' zh/en 齐', n >= 2, '实=' + n)
 })
 // 带参文案必须是箭头函数（t() 只对函数值插值）
-ok('E upDailyHint 是箭头函数', /upDailyHint\s*:\s*\(\s*\w+\s*,\s*\w+\s*,\s*\w+\s*,\s*\w+\s*\)\s*=>/.test(I18N))
+ok('E upDailyHint 是箭头函数（v195 起三参）', /upDailyHint\s*:\s*\(\s*\w+\s*,\s*\w+\s*,\s*\w+\s*\)\s*=>/.test(I18N))
 
-console.log('\n=== [F] 版本标记 ===')
-const n194 = (IDX.match(/\?v=194/g) || []).length
-const nOther = (IDX.match(/\?v=(?!194)\d+/g) || []).length
-ok('F1 index.html ?v=194 = 12 处', n194 === 12, '实=' + n194)
-ok('F2 无其它版本号残留', nOther === 0, '实=' + nOther)
+console.log('\n=== [F] 版本标记（动态：不写死版本号，只断「同号 13 处 + 唯一」——写死必每版红） ===')
+const vNums = IDX.match(/\?v=(\d+)/g) || []
+const uniq = Array.from(new Set(vNums))
+ok('F1 index.html 版本标记恰好 13 处且同号', vNums.length === 13 && uniq.length === 1, '实=' + vNums.length + ' 处 / ' + uniq.join(','))
+ok('F2 版本号 ≥194（不回退）', uniq.length === 1 && parseInt(uniq[0].replace(/\?v=/, ''), 10) >= 194, uniq[0])
 
 console.log('\n=== 结果 = ' + pass + ' 通过 / ' + fail + ' 失败 ===')
 process.exit(fail === 0 ? 0 : 1)

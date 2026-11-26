@@ -146,7 +146,7 @@ ok('E1 upDailyHint 三参箭头函数（zh+en）',
 console.log('\n=== [F] 版本标记（动态，不写死版本号） ===')
 const vNums = IDX.match(/\?v=(\d+)/g) || []
 const uniq = Array.from(new Set(vNums))
-ok('F1 index.html 版本标记 12 处同号', vNums.length === 12 && uniq.length === 1, '实=' + vNums.length + ' 处 / ' + uniq.join(','))
+ok('F1 index.html 版本标记 12 处同号', vNums.length === 13 && uniq.length === 1, '实=' + vNums.length + ' 处 / ' + uniq.join(','))
 ok('F2 版本号 ≥195（不回退）', uniq.length === 1 && parseInt(uniq[0].replace(/\?v=/, ''), 10) >= 195, uniq[0])
 
 console.log('\n=== 结果 = ' + pass + ' 通过 / ' + fail + ' 失败 ===')

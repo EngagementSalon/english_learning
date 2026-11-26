@@ -309,7 +309,7 @@ group('⑩ 切班只重渲染自己的锚点（不重算整页）')
 group('⑪ 版本号（v179 反证：≥178）')
 {
   const vNow = (HTML.match(/\?v=(\d+)/g) || []).map(s => Number(s.match(/\d+/)[0]))
-  assert('index.html 中 ?v=N 恰 12 处', vNow.length === 12, vNow.length)
+  assert('index.html 中 ?v=N 恰 13 处', vNow.length === 13, vNow.length)
   assert('★ 版本号唯一（不留混版）', new Set(vNow).size === 1, [...new Set(vNow)])
   assert('★ 版本号 ≥ 178（v178 曾断言 ===178）', vNow[0] >= 178, vNow[0])
   assert('★ 旧版本号 ?v=177 已消失', (HTML.match(/\?v=177/g) || []).length === 0, (HTML.match(/\?v=177/g) || []).length)

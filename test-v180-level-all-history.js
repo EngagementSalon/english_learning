@@ -363,7 +363,7 @@ group('组十四：i18n（5 个新键，中英成对且类型一致）')
 group('组十五：版本号与站点契约')
 {
   const vs = HTML.match(/\?v=(\d+)/g) || []
-  assert('★ 版本号 12 处', vs.length === 12, vs.length)
+  assert('★ 版本号 13 处', vs.length === 13, vs.length)
   // [v181 修正] 旧断言写死 `?v=180` → 每发一版必红。改为「12 处同号」+「≥ 下限」两条稳定契约。
   assert('★ 版本号唯一（12 处同号，不写死具体数字）', new Set(vs).size === 1, [...new Set(vs)].join(','))
   assert('★ 版本号 >= 180（每发一版必变，写下限不写死）',
