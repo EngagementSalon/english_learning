@@ -54,8 +54,8 @@ ok('无参键 chReadStart/chReadDone/chReadHint 是字符串（双语）', (func
   const sb = mkI18nSb()
   return ['zh', 'en'].every(L => ['chReadStart', 'chReadDone', 'chReadHint'].every(k => typeof vm.runInContext('I18N.' + L + '["' + k + '"]', sb) === 'string'))
 })())
-ok('index.html 挂载 followread.js 且徽章 13 处 ?v=205、旧版号 0 处',
-  idxSrc.indexOf('followread.js?v=205') >= 0 && (idxSrc.match(/\?v=205/g) || []).length === 13 && (idxSrc.match(/\?v=(?!205)\d+/g) || []).length === 0)
+ok('index.html 挂载 followread.js 且徽章 13 处同号、旧版号 0 处（版本无关，v205 家规教训）',
+  /followread\.js\?v=\d+/.test(idxSrc) && (idxSrc.match(/\?v=(\d+)/g) || []).length === 13 && new Set((idxSrc.match(/\?v=(\d+)/g) || []).map(s => s.slice(3))).size === 1 && (idxSrc.match(/followread\.js\?v=(\d+)/) || [])[1] === (idxSrc.match(/\?v=(\d+)/) || [])[1])
 
 console.log('=== 组二 抽句器与选句（真实 BANK）===')
 function mkPoolSandbox() {

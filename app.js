@@ -5336,17 +5336,19 @@ function renderDashChallengeBlock(rows) {
   //   ★ 术语澄清：那位学员「前测没有成绩」不是同步失败 —— 第二期他确实没做前测。
   const _rdObj = (rdList.find(r => r.id === want) || dashRoundList().find(r => r.id === want) || {})
   const wantDepts = (Array.isArray(_rdObj.depts) ? _rdObj.depts.filter(Boolean) : []).map(String)
-  const _deptOfUser = r => {
-    const hit = (typeof normDept === 'function') ? normDept(r && r.dept) : null
-    if (!hit) return { key: '', majorKey: '' }
-    // hit.key 就是分部门 slug（'dining/yan'）；majorKey 是大部门（'dining'）。
-    // 营次 depts 里两种写法都可能出现（v89 起两种都允许），所以两个都拿去比。
-    return { key: String(hit.key || ''), majorKey: String(hit.majorKey || '') }
-  }
+  // v206：旧 _deptOfUser（学员部门 vs 本营次 depts）已删 —— 上期判据改为按 slug 查营次归属，见 _roundInSameDept
   const _roundInSameDept = (r, slug) => {
     if (!wantDepts.length) return true            // 本营次「全部门适用」→ 不限制
-    const d = _deptOfUser(r)
-    return wantDepts.some(w => w === d.key || w === d.majorKey)
+    // ★v206 上期必须与本营次**同部门轨道**：按 slug 找到那期营次，depts 与本营次有交集才算。
+    //   v205 实撞（日照-餐饮张蕊）：她曾在并行开跑的房务营次 r9 考过 Day21（18/20=90），
+    //   旧判据只看「学员部门 ∈ 本营次 depts」，从不看 slug 那期属于哪个部门 →
+    //   房务期末 90 被当成「上期期末」显示在餐饮营次视图里（而餐饮第一期 r8 根本没有上期）。
+    //   修复后：r2→r6（艳中一期→二期）等真跨期照常显示；跨部门的并行营次一律排除。
+    if (typeof dashRoundList !== 'function') return true   // 切片沙箱缺依赖 → 保持旧行为不崩
+    const rec = dashRoundList().find(x => x && dashRoundSlug(x && x.id) === slug)
+    const ds = (rec && Array.isArray(rec.depts)) ? rec.depts.filter(Boolean).map(String) : []
+    if (!ds.length) return true                   // 那期「全部门适用」（存量营次空 depts）→ 不排除
+    return ds.some(w => wantDepts.indexOf(w) >= 0)
   }
   // 上期 = 同部门、非本营次、记录时间最晚的那一期（只供参照，绝不进统计）
   const _prevSlugOf = r => {
